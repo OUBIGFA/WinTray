@@ -33,6 +33,6 @@ jobs:
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |
-            dist/WinTary.exe
-            dist/WinTary.exe.manifest
+            dist/WinTray.exe
+            dist/WinTray.exe.manifest
             dist/checksums.txt
