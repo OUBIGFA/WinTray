@@ -1,0 +1,26 @@
+dist/
+publish/
+tmp/
+*.exe
+*.dll
+*.so
+*.dylib
+*.zip
+*.tar.gz
+
+# Local IDE/editor
+.idea/
+.vscode/
+*.swp
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Go build/test cache
+coverage.out
+*.test
+
+# Local logs and settings
+*.log
+settings.json
