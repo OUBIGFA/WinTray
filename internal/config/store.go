@@ -63,6 +63,9 @@ func migrate(settings Settings) Settings {
 		if settings.ManagedApps[i].WindowMatch.Strategy == "" {
 			settings.ManagedApps[i].WindowMatch.Strategy = MatchProcessNameThenTitle
 		}
+		if settings.ManagedApps[i].LaunchHiddenInBackground {
+			settings.ManagedApps[i].TrayBehavior.AutoMinimizeAndHideOnLaunch = false
+		}
 	}
 	return settings
 }

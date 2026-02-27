@@ -23,9 +23,11 @@ type Messages struct {
 	ManagedListTitle         string
 	ManagedEditorTitle       string
 	ManagedAppPath           string
+	ManagedAppArgs           string
 	SelectProgram            string
 	ManagedRunOnStartup      string
 	ManagedAutoHide          string
+	ManagedLaunchHidden      string
 	ManagedNoSelectionHint   string
 	AddProgram               string
 	RemoveSelected           string
@@ -69,9 +71,11 @@ var zhCN = Messages{
 	ManagedListTitle:         "受管程序列表（开机时按配置自动处理前台窗口）",
 	ManagedEditorTitle:       "程序设置",
 	ManagedAppPath:           "程序路径：",
+	ManagedAppArgs:           "启动参数（可选）：",
 	SelectProgram:            "选择程序",
 	ManagedRunOnStartup:      "开机启动该程序",
 	ManagedAutoHide:          "启动后关闭界面",
+	ManagedLaunchHidden:      "隐藏后台启动（适用于 cmd/bat）",
 	ManagedNoSelectionHint:   "请选择一个程序进行编辑，或点击“选择程序”新增。",
 	AddProgram:               "添加程序",
 	RemoveSelected:           "删除选中",
@@ -115,9 +119,11 @@ var enUS = Messages{
 	ManagedListTitle:         "Managed apps (apply window handling at startup)",
 	ManagedEditorTitle:       "Program Settings",
 	ManagedAppPath:           "Executable path:",
+	ManagedAppArgs:           "Launch arguments (optional):",
 	SelectProgram:            "Select Program",
 	ManagedRunOnStartup:      "Run this app at startup",
 	ManagedAutoHide:          "Close window after launch",
+	ManagedLaunchHidden:      "Launch hidden in background (for cmd/bat)",
 	ManagedNoSelectionHint:   "Select a program to edit, or click Select Program to add one.",
 	AddProgram:               "Add Program",
 	RemoveSelected:           "Remove Selected",
@@ -201,6 +207,11 @@ func TranslateResultMessage(language, message string) string {
 			return "started only"
 		}
 		return "仅启动（未执行托管动作）"
+	case "started hidden":
+		if Resolve(language) == LangEnUS {
+			return "started hidden in background"
+		}
+		return "已隐藏后台启动"
 	case "no window managed", "no existing window managed":
 		return msg.StatusRetryExhausted
 	case "managed", "managed existing":

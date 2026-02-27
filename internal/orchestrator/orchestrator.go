@@ -27,13 +27,17 @@ func (s *Service) StartAndManage(ctx context.Context, entry config.ManagedAppEnt
 		return matchesExecutable(w, expectedPath, expectedName) && matchStrategy(w, entry.WindowMatch.Strategy)
 	})
 
-	cmd, err := startProcess(entry.ExePath)
+	cmd, err := startProcess(entry.ExePath, entry.Args, entry.LaunchHiddenInBackground)
 	if err != nil {
 		s.logger.Error(fmt.Sprintf("start failed: %s err=%v", entry.Name, err))
 		return Result{AppName: entry.Name, Managed: false, Message: "process start failed"}
 	}
 	pid := uint32(cmd.Process.Pid)
-	s.logger.Info(fmt.Sprintf("started: %s pid=%d", entry.Name, pid))
+	s.logger.Info(fmt.Sprintf("started: %s pid=%d hidden=%t", entry.Name, pid, entry.LaunchHiddenInBackground))
+
+	if entry.LaunchHiddenInBackground {
+		return Result{AppName: entry.Name, Managed: true, Message: "started hidden"}
+	}
 
 	if !entry.TrayBehavior.AutoMinimizeAndHideOnLaunch {
 		return Result{AppName: entry.Name, Managed: true, Message: "started only"}
@@ -41,7 +45,7 @@ func (s *Service) StartAndManage(ctx context.Context, entry config.ManagedAppEnt
 
 	ok := s.manageFirstMatchingWindow(ctx, func(w ManagedWindowInfo) bool {
 		return (w.ProcessID == pid || matchesExecutable(w, expectedPath, expectedName)) && matchStrategy(w, entry.WindowMatch.Strategy)
-	}, expectedPath, expectedName, &pid, baseline, retrySeconds)
+	}, expectedPath, expectedName, &pid, baseline, retrySeconds, "close")
 	if !ok {
 		return Result{AppName: entry.Name, Managed: false, Message: "no window managed"}
 	}
@@ -56,14 +60,14 @@ func (s *Service) HideExisting(ctx context.Context, entry config.ManagedAppEntry
 	expectedPath := normalizePath(entry.ExePath)
 	ok := s.manageFirstMatchingWindow(ctx, func(w ManagedWindowInfo) bool {
 		return matchesExecutable(w, expectedPath, expectedName) && matchStrategy(w, entry.WindowMatch.Strategy)
-	}, expectedPath, expectedName, nil, nil, retrySeconds)
+	}, expectedPath, expectedName, nil, nil, retrySeconds, "hide")
 	if !ok {
 		return Result{AppName: entry.Name, Managed: false, Message: "no existing window managed"}
 	}
-	return Result{AppName: entry.Name, Managed: true, Action: "close", Message: "managed existing"}
+	return Result{AppName: entry.Name, Managed: true, Action: "hide", Message: "managed existing"}
 }
 
-func (s *Service) manageFirstMatchingWindow(ctx context.Context, predicate func(ManagedWindowInfo) bool, expectedPath, expectedName string, launchedPID *uint32, baseline map[uintptr]struct{}, retrySeconds int) bool {
+func (s *Service) manageFirstMatchingWindow(ctx context.Context, predicate func(ManagedWindowInfo) bool, expectedPath, expectedName string, launchedPID *uint32, baseline map[uintptr]struct{}, retrySeconds int, actionType string) bool {
 	attempts := max(1, max(0, retrySeconds)*2+1)
 	const delay = 500 * time.Millisecond
 
@@ -89,7 +93,7 @@ func (s *Service) manageFirstMatchingWindow(ctx context.Context, predicate func(
 		}
 
 		for _, c := range candidates {
-			if s.tryManageAndVerify(ctx, c.Window, c.Score) {
+			if s.tryManageAndVerify(ctx, c.Window, c.Score, actionType) {
 				return true
 			}
 		}
@@ -101,29 +105,64 @@ func (s *Service) manageFirstMatchingWindow(ctx context.Context, predicate func(
 	return false
 }
 
-func (s *Service) tryManageAndVerify(ctx context.Context, window ManagedWindowInfo, score int) bool {
+func (s *Service) tryManageAndVerify(ctx context.Context, window ManagedWindowInfo, score int, actionType string) bool {
 	if score < closeAllowedScoreThreshold {
 		s.logger.Warn(fmt.Sprintf("skip low confidence candidate score=%d threshold=%d %s", score, closeAllowedScoreThreshold, describeWindow(window)))
 		return false
 	}
 
-	ok, err := s.manager.CloseWindow(window.Handle)
+	// Determine primary and fallback actions based on actionType.
+	// "hide" flow: SW_HIDE first (works for tray apps), then WM_CLOSE fallback.
+	// "close" flow: WM_CLOSE first, then SW_HIDE fallback (for apps that ignore WM_CLOSE).
+	type actionFn func(uintptr) (bool, error)
+	var primary, fallback struct {
+		name string
+		fn   actionFn
+	}
+	if actionType == "hide" {
+		primary = struct {
+			name string
+			fn   actionFn
+		}{"hide", s.manager.HideWindow}
+		fallback = struct {
+			name string
+			fn   actionFn
+		}{"close", s.manager.CloseWindow}
+	} else {
+		primary = struct {
+			name string
+			fn   actionFn
+		}{"close", s.manager.CloseWindow}
+		fallback = struct {
+			name string
+			fn   actionFn
+		}{"hide", s.manager.HideWindow}
+	}
+
+	if s.applyAndVerify(ctx, window, score, primary.name, primary.fn) {
+		return true
+	}
+	return s.applyAndVerify(ctx, window, score, fallback.name, fallback.fn)
+}
+
+func (s *Service) applyAndVerify(ctx context.Context, window ManagedWindowInfo, score int, action string, fn func(uintptr) (bool, error)) bool {
+	ok, err := fn(window.Handle)
 	if !ok {
 		if err != nil {
-			s.logger.Warn(fmt.Sprintf("action request failed action=close score=%d %s err=%v", score, describeWindow(window), err))
+			s.logger.Warn(fmt.Sprintf("action request failed action=%s score=%d %s err=%v", action, score, describeWindow(window), err))
 		} else {
-			s.logger.Warn(fmt.Sprintf("action request failed action=close score=%d %s", score, describeWindow(window)))
+			s.logger.Warn(fmt.Sprintf("action request failed action=%s score=%d %s", action, score, describeWindow(window)))
 		}
 		return false
 	}
 
-	s.logger.Info(fmt.Sprintf("action requested action=close score=%d %s", score, describeWindow(window)))
-	if s.verifyCloseApplied(ctx, window.Handle, score) {
-		s.logger.Info(fmt.Sprintf("action applied action=close score=%d hwnd=0x%X", score, window.Handle))
+	s.logger.Info(fmt.Sprintf("action requested action=%s score=%d %s", action, score, describeWindow(window)))
+	if s.verifyActionApplied(ctx, window.Handle, score, action) {
+		s.logger.Info(fmt.Sprintf("action applied action=%s score=%d hwnd=0x%X", action, score, window.Handle))
 		return true
 	}
 
-	s.logger.Warn(fmt.Sprintf("action not applied action=close score=%d hwnd=0x%X", score, window.Handle))
+	s.logger.Warn(fmt.Sprintf("action not applied action=%s score=%d hwnd=0x%X", action, score, window.Handle))
 	return false
 }
 
@@ -137,7 +176,7 @@ func (s *Service) captureBaseline(predicate func(ManagedWindowInfo) bool) map[ui
 	return m
 }
 
-func (s *Service) verifyCloseApplied(ctx context.Context, hwnd uintptr, score int) bool {
+func (s *Service) verifyActionApplied(ctx context.Context, hwnd uintptr, score int, action string) bool {
 	const attempts = 6
 	const delay = 200 * time.Millisecond
 	for i := 0; i < attempts; i++ {
@@ -158,7 +197,7 @@ func (s *Service) verifyCloseApplied(ctx context.Context, hwnd uintptr, score in
 	}
 
 	if score >= closeAllowedScoreThreshold {
-		s.logger.Warn(fmt.Sprintf("verify timeout action=close score=%d hwnd=0x%X", score, hwnd))
+		s.logger.Warn(fmt.Sprintf("verify timeout action=%s score=%d hwnd=0x%X", action, score, hwnd))
 	}
 	return false
 }

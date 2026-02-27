@@ -18,12 +18,14 @@ type TrayBehavior struct {
 }
 
 type ManagedAppEntry struct {
-	ID          string          `json:"id"`
-	Name        string          `json:"name"`
-	ExePath     string          `json:"exePath"`
-	RunOnStartup bool           `json:"runOnStartup"`
-	WindowMatch WindowMatchRule `json:"windowMatch"`
-	TrayBehavior TrayBehavior   `json:"trayBehavior"`
+	ID                        string          `json:"id"`
+	Name                      string          `json:"name"`
+	ExePath                   string          `json:"exePath"`
+	Args                      string          `json:"args"`
+	RunOnStartup              bool            `json:"runOnStartup"`
+	LaunchHiddenInBackground  bool            `json:"launchHiddenInBackground"`
+	WindowMatch               WindowMatchRule `json:"windowMatch"`
+	TrayBehavior              TrayBehavior    `json:"trayBehavior"`
 }
 
 type Settings struct {

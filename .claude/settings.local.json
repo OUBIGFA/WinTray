@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__acp__Edit",
+      "Bash(go test:*)",
+      "Bash(go build:*)",
+      "Bash(pwsh -File \"E:/_Free code/WinTray/build/package.ps1\" -OutputDir dist)",
+      "Bash(powershell.exe -ExecutionPolicy Bypass -File \"E:/_Free code/WinTray/build/package.ps1\" -OutputDir dist)",
+      "mcp__acp__Write",
+      "Bash(powershell:*)",
+      "Bash(dir:*)"
+    ]
+  }
+}

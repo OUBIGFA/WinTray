@@ -31,13 +31,16 @@ type MainWindow struct {
 
 	managedList   *walk.ListBox
 	editorTitle   *walk.Label
-	noSelectLabel *walk.Label
-	pathLabel     *walk.Label
-	pathEdit      *walk.LineEdit
-	browseBtn     *walk.PushButton
-	appRunOnStart *walk.CheckBox
-	appAutoHide   *walk.CheckBox
-	retryEdit     *walk.LineEdit
+	noSelectLabel      *walk.Label
+	pathLabel          *walk.Label
+	pathEdit           *walk.LineEdit
+	argsLabel          *walk.Label
+	argsEdit           *walk.LineEdit
+	browseBtn          *walk.PushButton
+	appRunOnStart      *walk.CheckBox
+	appAutoHide        *walk.CheckBox
+	appLaunchHidden    *walk.CheckBox
+	retryEdit          *walk.LineEdit
 	runAtLogon    *walk.CheckBox
 	startHidden   *walk.CheckBox
 	exitOnDone    *walk.CheckBox
@@ -247,7 +250,7 @@ func (w *MainWindow) buildManagedList() error {
 	list.CurrentIndexChanged().Attach(func() {
 		w.syncManagedEditor()
 	})
-	list.MouseDown().Attach(func(x, y int, button walk.MouseButton) {
+	list.MouseUp().Attach(func(x, y int, button walk.MouseButton) {
 		if button != walk.LeftButton {
 			return
 		}
@@ -301,6 +304,8 @@ func (w *MainWindow) buildManagedEditor() error {
 	if err != nil {
 		return err
 	}
+	noSelectLabel.SetMinMaxSize(walk.Size{Width: 860, Height: 24}, walk.Size{Width: 860, Height: 24})
+	noSelectLabel.SetAlwaysConsumeSpace(true)
 	w.noSelectLabel = noSelectLabel
 
 	pathRow, err := walk.NewComposite(editor)
@@ -333,6 +338,40 @@ func (w *MainWindow) buildManagedEditor() error {
 	}
 	browseBtn.Clicked().Attach(w.onSelectProgramForSelected)
 	w.browseBtn = browseBtn
+
+	argsRow, err := walk.NewComposite(editor)
+	if err != nil {
+		return err
+	}
+	hArgs := walk.NewHBoxLayout()
+	hArgs.SetSpacing(8)
+	if err = argsRow.SetLayout(hArgs); err != nil {
+		return err
+	}
+
+	argsLabel, err := walk.NewLabel(argsRow)
+	if err != nil {
+		return err
+	}
+	w.argsLabel = argsLabel
+
+	argsEdit, err := walk.NewLineEdit(argsRow)
+	if err != nil {
+		return err
+	}
+	argsEdit.SetMinMaxSize(walk.Size{Width: 740, Height: 0}, walk.Size{Width: 740, Height: 0})
+	argsEdit.EditingFinished().Attach(func() {
+		if w.updatingEditor {
+			return
+		}
+		app, _, ok := w.selectedManagedApp()
+		if !ok {
+			return
+		}
+		app.Args = argsEdit.Text()
+		w.save()
+	})
+	w.argsEdit = argsEdit
 
 	optionsRow, err := walk.NewComposite(editor)
 	if err != nil {
@@ -374,11 +413,40 @@ func (w *MainWindow) buildManagedEditor() error {
 		if !ok {
 			return
 		}
+		if app.LaunchHiddenInBackground {
+			appAutoHide.SetChecked(false)
+		}
 		app.TrayBehavior.AutoMinimizeAndHideOnLaunch = appAutoHide.Checked()
 		w.refreshManagedList()
 		w.save()
 	})
 	w.appAutoHide = appAutoHide
+
+	appLaunchHidden, err := walk.NewCheckBox(optionsRow)
+	if err != nil {
+		return err
+	}
+	appLaunchHidden.CheckedChanged().Attach(func() {
+		if w.updatingEditor {
+			return
+		}
+		app, _, ok := w.selectedManagedApp()
+		if !ok {
+			return
+		}
+		checked := appLaunchHidden.Checked()
+		app.LaunchHiddenInBackground = checked
+		if checked {
+			app.TrayBehavior.AutoMinimizeAndHideOnLaunch = false
+			w.appAutoHide.SetChecked(false)
+			w.appAutoHide.SetEnabled(false)
+		} else {
+			w.appAutoHide.SetEnabled(true)
+		}
+		w.refreshManagedList()
+		w.save()
+	})
+	w.appLaunchHidden = appLaunchHidden
 
 	return nil
 }
@@ -440,9 +508,11 @@ func (w *MainWindow) applyLanguage(language string) {
 	w.managedTitle.SetText(msg.ManagedListTitle)
 	w.editorTitle.SetText(msg.ManagedEditorTitle)
 	w.pathLabel.SetText(msg.ManagedAppPath)
+	w.argsLabel.SetText(msg.ManagedAppArgs)
 	w.browseBtn.SetText(msg.SelectProgram)
 	w.appRunOnStart.SetText(msg.ManagedRunOnStartup)
 	w.appAutoHide.SetText(msg.ManagedAutoHide)
+	w.appLaunchHidden.SetText(msg.ManagedLaunchHidden)
 	w.noSelectLabel.SetText(msg.ManagedNoSelectionHint)
 	w.languageLabel.SetText(msg.LanguageLabel)
 	w.removeBtn.SetText(msg.RemoveSelected)
@@ -482,11 +552,13 @@ func (w *MainWindow) onAddProgram() {
 		ID:           id,
 		Name:         name,
 		ExePath:      dlg.FilePath,
+		Args:         "",
 		RunOnStartup: true,
 		WindowMatch: config.WindowMatchRule{
 			Strategy: config.MatchProcessNameThenTitle,
 		},
-		TrayBehavior: config.TrayBehavior{AutoMinimizeAndHideOnLaunch: true},
+		LaunchHiddenInBackground: false,
+		TrayBehavior:             config.TrayBehavior{AutoMinimizeAndHideOnLaunch: true},
 	})
 	w.refreshManagedList()
 	w.managedList.SetCurrentIndex(len(w.settings.ManagedApps) - 1)
@@ -521,37 +593,50 @@ func (w *MainWindow) refreshManagedList() {
 		w.syncManagedEditor()
 		return
 	}
-	if selected < 0 || selected >= len(items) {
-		selected = 0
+	if selected >= len(items) {
+		selected = len(items) - 1
 	}
 	w.managedList.SetCurrentIndex(selected)
 	w.syncManagedEditor()
 }
 
 func (w *MainWindow) syncManagedEditor() {
-	if w.pathEdit == nil || w.appRunOnStart == nil || w.appAutoHide == nil {
+	if w.pathEdit == nil || w.argsEdit == nil || w.appRunOnStart == nil || w.appAutoHide == nil || w.appLaunchHidden == nil {
 		return
 	}
 	app, _, ok := w.selectedManagedApp()
 	w.updatingEditor = true
 	defer func() { w.updatingEditor = false }()
 
+	msg := i18n.For(w.settings.Language)
 	w.pathEdit.SetEnabled(ok)
+	w.argsEdit.SetEnabled(ok)
 	w.browseBtn.SetEnabled(true)
 	w.appRunOnStart.SetEnabled(ok)
 	w.appAutoHide.SetEnabled(ok)
-	w.noSelectLabel.SetVisible(!ok)
+	w.appLaunchHidden.SetEnabled(ok)
+	if ok {
+		w.noSelectLabel.SetVisible(false)
+	} else {
+		w.noSelectLabel.SetText(msg.ManagedNoSelectionHint)
+		w.noSelectLabel.SetVisible(true)
+	}
 
 	if !ok {
 		w.pathEdit.SetText("")
+		w.argsEdit.SetText("")
 		w.appRunOnStart.SetChecked(false)
 		w.appAutoHide.SetChecked(false)
+		w.appLaunchHidden.SetChecked(false)
 		return
 	}
 
 	w.pathEdit.SetText(app.ExePath)
+	w.argsEdit.SetText(app.Args)
 	w.appRunOnStart.SetChecked(app.RunOnStartup)
 	w.appAutoHide.SetChecked(app.TrayBehavior.AutoMinimizeAndHideOnLaunch)
+	w.appLaunchHidden.SetChecked(app.LaunchHiddenInBackground)
+	w.appAutoHide.SetEnabled(!app.LaunchHiddenInBackground)
 }
 
 func (w *MainWindow) selectedManagedApp() (*config.ManagedAppEntry, int, bool) {
@@ -632,10 +717,7 @@ func (w *MainWindow) clearManagedSelection() {
 	if w.managedList == nil {
 		return
 	}
-	if w.managedList.CurrentIndex() == -1 {
-		return
-	}
-	w.managedList.SetCurrentIndex(-1)
+	w.managedList.SendMessage(win.LB_SETCURSEL, ^uintptr(0), 0)
 	w.syncManagedEditor()
 }
 
