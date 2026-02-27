@@ -16,9 +16,10 @@ import (
 )
 
 type Callbacks struct {
-	OnSave     func(config.Settings)
-	OnOpenLogs func()
-	OnExit     func()
+	OnSave           func(config.Settings)
+	OnOpenLogs       func()
+	OnCleanupRestore func()
+	OnExit           func()
 }
 
 type MainWindow struct {
@@ -29,28 +30,29 @@ type MainWindow struct {
 	applyingLocale bool
 	updatingEditor bool
 
-	managedList   *walk.ListBox
-	editorTitle   *walk.Label
-	noSelectLabel      *walk.Label
-	pathLabel          *walk.Label
-	pathEdit           *walk.LineEdit
-	argsLabel          *walk.Label
-	argsEdit           *walk.LineEdit
-	browseBtn          *walk.PushButton
-	appRunOnStart      *walk.CheckBox
-	appAutoHide        *walk.CheckBox
-	appLaunchHidden    *walk.CheckBox
-	retryEdit          *walk.LineEdit
-	runAtLogon    *walk.CheckBox
-	startHidden   *walk.CheckBox
-	exitOnDone    *walk.CheckBox
-	retryLabel    *walk.Label
-	managedTitle  *walk.Label
-	languageLabel *walk.Label
-	languageCombo *walk.ComboBox
-	removeBtn     *walk.PushButton
-	openLogsBtn   *walk.PushButton
-	exitBtn       *walk.PushButton
+	managedList     *walk.ListBox
+	editorTitle     *walk.Label
+	noSelectLabel   *walk.Label
+	pathLabel       *walk.Label
+	pathEdit        *walk.LineEdit
+	argsLabel       *walk.Label
+	argsEdit        *walk.LineEdit
+	browseBtn       *walk.PushButton
+	appRunOnStart   *walk.CheckBox
+	appAutoHide     *walk.CheckBox
+	appLaunchHidden *walk.CheckBox
+	retryEdit       *walk.LineEdit
+	runAtLogon      *walk.CheckBox
+	startHidden     *walk.CheckBox
+	exitOnDone      *walk.CheckBox
+	retryLabel      *walk.Label
+	managedTitle    *walk.Label
+	languageLabel   *walk.Label
+	languageCombo   *walk.ComboBox
+	removeBtn       *walk.PushButton
+	openLogsBtn     *walk.PushButton
+	cleanupBtn      *walk.PushButton
+	exitBtn         *walk.PushButton
 }
 
 func NewMainWindow(initial config.Settings, callbacks Callbacks) (*MainWindow, error) {
@@ -480,6 +482,17 @@ func (w *MainWindow) buildActions() error {
 	})
 	w.openLogsBtn = openLogsBtn
 
+	cleanupBtn, err := walk.NewPushButton(row)
+	if err != nil {
+		return err
+	}
+	cleanupBtn.Clicked().Attach(func() {
+		if w.callbacks.OnCleanupRestore != nil {
+			w.callbacks.OnCleanupRestore()
+		}
+	})
+	w.cleanupBtn = cleanupBtn
+
 	exitBtn, err := walk.NewPushButton(row)
 	if err != nil {
 		return err
@@ -517,6 +530,7 @@ func (w *MainWindow) applyLanguage(language string) {
 	w.languageLabel.SetText(msg.LanguageLabel)
 	w.removeBtn.SetText(msg.RemoveSelected)
 	w.openLogsBtn.SetText(msg.OpenLogs)
+	w.cleanupBtn.SetText(msg.CleanupRestore)
 	w.exitBtn.SetText(msg.ExitApp)
 	_ = w.languageCombo.SetModel([]string{msg.LanguageZhLabel, msg.LanguageEnLabel})
 	if w.settings.Language == string(i18n.LangEnUS) {

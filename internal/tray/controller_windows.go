@@ -14,8 +14,10 @@ type Controller struct {
 	notifyIcon    *walk.NotifyIcon
 	openAction    *walk.Action
 	logsAction    *walk.Action
+	cleanupAction *walk.Action
 	exitAction    *walk.Action
 	openLogPath   func() (string, error)
+	cleanup       func()
 	reportOpenErr func(string)
 	language      string
 }
@@ -26,6 +28,7 @@ func New(
 	exitApp func(),
 	openLogPath func() (string, error),
 	reportOpenErr func(string),
+	cleanupAndRestore func(),
 	language string,
 ) (*Controller, error) {
 	ni, err := walk.NewNotifyIcon(window)
@@ -36,6 +39,7 @@ func New(
 	c := &Controller{
 		notifyIcon:    ni,
 		openLogPath:   openLogPath,
+		cleanup:       cleanupAndRestore,
 		reportOpenErr: reportOpenErr,
 		language:      language,
 	}
@@ -65,6 +69,15 @@ func New(
 	})
 	c.logsAction = logsAction
 	ni.ContextMenu().Actions().Add(logsAction)
+
+	cleanupAction := walk.NewAction()
+	cleanupAction.Triggered().Attach(func() {
+		if c.cleanup != nil {
+			c.cleanup()
+		}
+	})
+	c.cleanupAction = cleanupAction
+	ni.ContextMenu().Actions().Add(cleanupAction)
 
 	ni.ContextMenu().Actions().Add(walk.NewSeparatorAction())
 
@@ -102,6 +115,9 @@ func (c *Controller) SetLanguage(language string) {
 	}
 	if c.logsAction != nil {
 		c.logsAction.SetText(msg.TrayOpenLogs)
+	}
+	if c.cleanupAction != nil {
+		c.cleanupAction.SetText(msg.TrayCleanupRestore)
 	}
 	if c.exitAction != nil {
 		c.exitAction.SetText(msg.TrayExit)

@@ -32,9 +32,11 @@ type Messages struct {
 	AddProgram               string
 	RemoveSelected           string
 	OpenLogs                 string
+	CleanupRestore           string
 	ExitApp                  string
 	TrayOpenSettings         string
 	TrayOpenLogs             string
+	TrayCleanupRestore       string
 	TrayExit                 string
 	TrayToolTip              string
 	SelectManagedExe         string
@@ -57,6 +59,12 @@ type Messages struct {
 	StatusRetryExhausted     string
 	StatusPermissionHint     string
 	StatusOpenLogsFailed     string
+	CleanupConfirmTitle      string
+	CleanupConfirmBody       string
+	CleanupDoneTitle         string
+	CleanupDoneBody          string
+	CleanupFailedTitle       string
+	CleanupFailedBody        string
 	LanguageZhLabel          string
 	LanguageEnLabel          string
 }
@@ -80,9 +88,11 @@ var zhCN = Messages{
 	AddProgram:               "添加程序",
 	RemoveSelected:           "删除选中",
 	OpenLogs:                 "打开日志",
+	CleanupRestore:           "清理并恢复默认",
 	ExitApp:                  "退出 WinTray",
 	TrayOpenSettings:         "打开设置",
 	TrayOpenLogs:             "打开日志",
+	TrayCleanupRestore:       "清理并恢复默认",
 	TrayExit:                 "退出 WinTray",
 	TrayToolTip:              "WinTray",
 	SelectManagedExe:         "选择要托管的 EXE",
@@ -105,6 +115,12 @@ var zhCN = Messages{
 	StatusRetryExhausted:     "重试超时，未找到可托管窗口",
 	StatusPermissionHint:     "可能是权限限制（UIPI）：请尝试以管理员身份运行 WinTray。",
 	StatusOpenLogsFailed:     "打开日志失败",
+	CleanupConfirmTitle:      "清理并恢复默认",
+	CleanupConfirmBody:       "将清除 WinTray 的本地配置与日志，并恢复默认设置。\r\n\r\n是否继续？",
+	CleanupDoneTitle:         "已计划清理",
+	CleanupDoneBody:          "已恢复默认设置，WinTray 将在退出后清理本地数据。",
+	CleanupFailedTitle:       "清理失败",
+	CleanupFailedBody:        "清理并恢复默认失败：%s",
 	LanguageZhLabel:          "中文",
 	LanguageEnLabel:          "English",
 }
@@ -128,9 +144,11 @@ var enUS = Messages{
 	AddProgram:               "Add Program",
 	RemoveSelected:           "Remove Selected",
 	OpenLogs:                 "Open Logs",
+	CleanupRestore:           "Cleanup && Restore Defaults",
 	ExitApp:                  "Exit WinTray",
 	TrayOpenSettings:         "Open Settings",
 	TrayOpenLogs:             "Open Logs",
+	TrayCleanupRestore:       "Cleanup && Restore Defaults",
 	TrayExit:                 "Exit WinTray",
 	TrayToolTip:              "WinTray",
 	SelectManagedExe:         "Select EXE to manage",
@@ -153,6 +171,12 @@ var enUS = Messages{
 	StatusRetryExhausted:     "Retry exhausted, no manageable window found",
 	StatusPermissionHint:     "Possible UIPI permission limitation: try running WinTray as administrator.",
 	StatusOpenLogsFailed:     "Failed to open logs",
+	CleanupConfirmTitle:      "Cleanup && Restore Defaults",
+	CleanupConfirmBody:       "This will clear WinTray local settings and logs, then restore defaults.\r\n\r\nContinue?",
+	CleanupDoneTitle:         "Cleanup Scheduled",
+	CleanupDoneBody:          "Default settings restored. WinTray data will be cleaned after exit.",
+	CleanupFailedTitle:       "Cleanup Failed",
+	CleanupFailedBody:        "Cleanup and restore failed: %s",
 	LanguageZhLabel:          "中文",
 	LanguageEnLabel:          "English",
 }

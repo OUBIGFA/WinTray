@@ -5,9 +5,10 @@ package ui
 import "wintray/internal/config"
 
 type Callbacks struct {
-	OnSave     func(config.Settings)
-	OnOpenLogs func()
-	OnExit     func()
+	OnSave           func(config.Settings)
+	OnOpenLogs       func()
+	OnCleanupRestore func()
+	OnExit           func()
 }
 
 type MainWindow struct{}

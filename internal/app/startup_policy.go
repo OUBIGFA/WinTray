@@ -20,6 +20,15 @@ func isAutorunLaunch(args []string) bool {
 	return false
 }
 
+func isCleanupRestoreLaunch(args []string) bool {
+	for _, arg := range args {
+		if strings.EqualFold(arg, "--cleanup-restore") {
+			return true
+		}
+	}
+	return false
+}
+
 func shouldShowMainWindow(args []string) bool {
 	return !isBackgroundLaunch(args)
 }

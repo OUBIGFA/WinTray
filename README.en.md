@@ -27,6 +27,7 @@ WinTray is a Windows startup organizer that lives in the system tray. When trigg
 - **Run at logon**: Writes to the current user `Run` registry key to start with Windows
 - **Auto-hide window**: When configured, the `--autorun` flow automatically minimizes and hides target windows
 - **Window retry control**: Configurable 0–120 s retry wait to handle slow-starting programs
+- **Cleanup and restore defaults**: One-click action from the main window or tray menu to reset local state and clear logs/settings
 - **Bilingual UI**: Built-in Simplified Chinese / English, switchable at any time
 - **Single-instance lock**: Prevents duplicate launches and configuration conflicts
 
@@ -68,6 +69,7 @@ Go to the [Releases](../../releases) page, download `WinTray-Portable.zip`, extr
 |---|---|
 | `--background` | Start without showing the main window (for logon startup) |
 | `--autorun` | Execute managed startup tasks automatically |
+| `--cleanup-restore` | Run cleanup/restore only: remove `%LOCALAPPDATA%\WinTray\` app data and exit |
 
 ---
 

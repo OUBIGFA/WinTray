@@ -7,7 +7,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
+	"syscall"
+	"time"
 
 	"github.com/lxn/walk"
 	"wintray/internal/config"
@@ -28,6 +31,11 @@ const (
 )
 
 func Run(args []string) {
+	if isCleanupRestoreLaunch(args) {
+		_ = runCleanupRestoreHeadless()
+		return
+	}
+
 	instance, alreadyRunning, err := ipc.Acquire(singleInstanceName)
 	if err != nil {
 		emitFatalBeforeUI("failed to acquire single-instance lock", err)
@@ -79,6 +87,7 @@ func Run(args []string) {
 	)
 
 	var trayController *tray.Controller
+	var mainWindow *ui.MainWindow
 	activation, activationErr := ipc.NewActivationListener(activationEvent)
 	if activationErr != nil {
 		logger.Warn(fmt.Sprintf("activation listener unavailable: %v", activationErr))
@@ -87,7 +96,33 @@ func Run(args []string) {
 		defer activation.Close()
 	}
 
-	var mainWindow *ui.MainWindow
+	cleanupAndRestore := func() {
+		lang := safeLanguage(mainWindow)
+		m := i18n.For(lang)
+		if walk.MsgBox(mainWindow.Native(), m.CleanupConfirmTitle, m.CleanupConfirmBody, walk.MsgBoxYesNo|walk.MsgBoxIconWarning) != walk.DlgCmdYes {
+			return
+		}
+
+		defaults := config.DefaultSettings()
+		mu.Lock()
+		latest = defaults
+		mu.Unlock()
+
+		if saveErr := store.Save(defaults); saveErr != nil {
+			mainWindow.ShowError(m.CleanupFailedTitle, fmt.Sprintf(m.CleanupFailedBody, saveErr))
+			return
+		}
+
+		ensureRunAtLogon(registrar, defaults, logger)
+		if scheduleErr := scheduleAppDataCleanupOnExit(); scheduleErr != nil {
+			mainWindow.ShowError(m.CleanupFailedTitle, fmt.Sprintf(m.CleanupFailedBody, scheduleErr))
+			return
+		}
+
+		mainWindow.ShowInfo(m.CleanupDoneTitle, m.CleanupDoneBody)
+		mainWindow.RequestExplicitClose()
+	}
+
 	mainWindow, err = ui.NewMainWindow(settings, ui.Callbacks{
 		OnSave: func(s config.Settings) {
 			mu.Lock()
@@ -106,6 +141,7 @@ func Run(args []string) {
 				mainWindow.ShowError(m.WindowTitle, fmt.Sprintf("%s: %v", m.StatusOpenLogsFailed, openErr))
 			}
 		},
+		OnCleanupRestore: cleanupAndRestore,
 		OnExit: func() {
 			mainWindow.RequestExplicitClose()
 		},
@@ -132,6 +168,7 @@ func Run(args []string) {
 			m := i18n.For(safeLanguage(mainWindow))
 			mainWindow.ShowError(m.WindowTitle, fmt.Sprintf("%s: %s", m.StatusOpenLogsFailed, detail))
 		},
+		cleanupAndRestore,
 		settings.Language,
 	)
 	if err != nil {
@@ -234,6 +271,44 @@ func ensureRunAtLogon(registrar *startup.Registrar, settings config.Settings, lo
 	if err = registrar.SetEnabled(appName, command, settings.RunAtLogon); err != nil {
 		logger.Warn(fmt.Sprintf("set run-at-logon failed: %v", err))
 	}
+}
+
+func scheduleAppDataCleanupOnExit() error {
+	exePath, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(exePath) == "" {
+		return fmt.Errorf("empty executable path")
+	}
+
+	cmd := exec.Command(exePath, "--cleanup-restore")
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	return cmd.Start()
+}
+
+func runCleanupRestoreHeadless() error {
+	appDir, err := config.AppDirWithError()
+	if err != nil {
+		return err
+	}
+
+	for attempt := 0; attempt < 30; attempt++ {
+		removeErr := os.RemoveAll(appDir)
+		if removeErr == nil {
+			return nil
+		}
+		if os.IsNotExist(removeErr) {
+			return nil
+		}
+		message := strings.ToLower(removeErr.Error())
+		if strings.Contains(message, "cannot find") || strings.Contains(message, "not found") {
+			return nil
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+
+	return os.RemoveAll(appDir)
 }
 
 func emitFatalBeforeUI(message string, err error) {
