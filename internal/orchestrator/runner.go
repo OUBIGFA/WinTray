@@ -67,10 +67,38 @@ func buildLaunchCommand(exePath, args string, hidden bool) *exec.Cmd {
 	if trimmedArgs == "" {
 		return exec.Command(exePath)
 	}
-	return exec.Command(exePath, strings.Fields(trimmedArgs)...)
+	return exec.Command(exePath, parseArgs(trimmedArgs)...)
 }
 
 func isCmdScript(exePath string) bool {
 	ext := strings.ToLower(filepath.Ext(exePath))
 	return ext == ".bat" || ext == ".cmd"
+}
+
+// parseArgs splits an argument string respecting double-quoted segments.
+// e.g. `--config "C:\My Path\cfg.json" --verbose` → ["--config", "C:\My Path\cfg.json", "--verbose"]
+func parseArgs(s string) []string {
+	var args []string
+	var current strings.Builder
+	inQuote := false
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		switch {
+		case ch == '"':
+			inQuote = !inQuote
+		case ch == ' ' || ch == '\t':
+			if inQuote {
+				current.WriteByte(ch)
+			} else if current.Len() > 0 {
+				args = append(args, current.String())
+				current.Reset()
+			}
+		default:
+			current.WriteByte(ch)
+		}
+	}
+	if current.Len() > 0 {
+		args = append(args, current.String())
+	}
+	return args
 }

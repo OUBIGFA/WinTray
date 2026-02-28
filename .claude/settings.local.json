@@ -8,7 +8,8 @@
       "Bash(powershell.exe -ExecutionPolicy Bypass -File \"E:/_Free code/WinTray/build/package.ps1\" -OutputDir dist)",
       "mcp__acp__Write",
       "Bash(powershell:*)",
-      "Bash(dir:*)"
+      "Bash(dir:*)",
+      "Bash(powershell.exe:*)"
     ]
   }
 }

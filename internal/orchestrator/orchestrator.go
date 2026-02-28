@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"wintray/internal/config"
+	"wintray/internal/stringutil"
 )
 
 func (s *Service) StartAndManage(ctx context.Context, entry config.ManagedAppEntry, retrySeconds int) Result {
@@ -21,7 +22,7 @@ func (s *Service) StartAndManage(ctx context.Context, entry config.ManagedAppEnt
 		return Result{AppName: entry.Name, Managed: false, Message: "invalid exe path"}
 	}
 
-	expectedName := trimExt(filepath.Base(entry.ExePath))
+	expectedName := stringutil.TrimExt(filepath.Base(entry.ExePath))
 	expectedPath := normalizePath(entry.ExePath)
 	baseline := s.captureBaseline(func(w ManagedWindowInfo) bool {
 		return matchesExecutable(w, expectedPath, expectedName) && matchStrategy(w, entry.WindowMatch.Strategy)
@@ -53,7 +54,7 @@ func (s *Service) StartAndManage(ctx context.Context, entry config.ManagedAppEnt
 }
 
 func (s *Service) HideExisting(ctx context.Context, entry config.ManagedAppEntry, retrySeconds int) Result {
-	expectedName := trimExt(filepath.Base(entry.ExePath))
+	expectedName := stringutil.TrimExt(filepath.Base(entry.ExePath))
 	if expectedName == "" {
 		return Result{AppName: entry.Name, Managed: false, Message: "invalid process name"}
 	}
@@ -234,15 +235,6 @@ func (s *Service) verifyActionApplied(ctx context.Context, hwnd uintptr, score i
 	return false
 }
 
-func findWindowByHandle(windows []ManagedWindowInfo, hwnd uintptr) (ManagedWindowInfo, bool) {
-	for _, w := range windows {
-		if w.Handle == hwnd {
-			return w, true
-		}
-	}
-	return ManagedWindowInfo{}, false
-}
-
 func summarizeCandidates(candidates []MatchCandidate, top int) string {
 	if len(candidates) == 0 {
 		return "none"
@@ -275,14 +267,6 @@ func describeWindow(window ManagedWindowInfo) string {
 		process = "<empty>"
 	}
 	return fmt.Sprintf("hwnd=0x%X pid=%d process=%s title=%q class=%q min=%t fg=%t owner=0x%X tool=%t", window.Handle, window.ProcessID, process, title, className, window.IsMinimized, window.IsForeground, window.OwnerHandle, window.IsToolWindow)
-}
-
-func trimExt(name string) string {
-	ext := filepath.Ext(name)
-	if ext == "" {
-		return name
-	}
-	return name[:len(name)-len(ext)]
 }
 
 func waitWithContext(ctx context.Context, delay time.Duration) bool {

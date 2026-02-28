@@ -59,10 +59,15 @@ func matchStrategy(window ManagedWindowInfo, strategy config.MatchStrategy) bool
 	hasClass := window.ClassName != ""
 
 	switch strategy {
-	case config.MatchAny,
-		"":
+	case config.MatchAny, "":
 		return true
 	case config.MatchProcessNameThenTitle:
+		// This is the default strategy. Process name matching is handled by the
+		// caller's predicate; this filter only provides a secondary signal.
+		// Accept all windows here — the scoring system already penalizes titleless
+		// windows (no +50 bonus) and the threshold (500) ensures only high-confidence
+		// matches proceed to action. Filtering here would reject valid PID-matched
+		// windows during their brief titleless startup phase.
 		return true
 	case config.MatchTitleContains:
 		return hasTitle

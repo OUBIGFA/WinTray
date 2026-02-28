@@ -135,7 +135,9 @@ func Run(args []string) {
 			mu.Lock()
 			latest = s
 			mu.Unlock()
-			_ = store.Save(s)
+			if saveErr := store.Save(s); saveErr != nil {
+				logger.Warn(fmt.Sprintf("save settings failed: %v", saveErr))
+			}
 			ensureRunAtLogon(registrar, s, logger)
 			if trayController != nil {
 				trayController.SetLanguage(s.Language)
@@ -207,7 +209,9 @@ func Run(args []string) {
 	mu.Lock()
 	finalSettings := latest
 	mu.Unlock()
-	_ = store.Save(finalSettings)
+	if saveErr := store.Save(finalSettings); saveErr != nil {
+		logger.Warn(fmt.Sprintf("save settings on exit failed: %v", saveErr))
+	}
 	os.Exit(exitCode)
 }
 

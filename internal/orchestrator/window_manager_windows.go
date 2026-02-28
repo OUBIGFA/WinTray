@@ -86,5 +86,3 @@ func isWindowVisible(hwnd uintptr) bool {
 	v, _, _ := procIsWindowVisible.Call(hwnd)
 	return v != 0
 }
-
-var _ = syscall.Errno(0)

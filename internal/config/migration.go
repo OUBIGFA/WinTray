@@ -8,7 +8,11 @@ import (
 )
 
 func TryMigrateFromWinTray(targetPath string) error {
-	legacy := filepath.Join(os.Getenv("LOCALAPPDATA"), "WinTray", "settings.json")
+	legacyDir, err := legacyAppDir()
+	if err != nil {
+		return nil
+	}
+	legacy := filepath.Join(legacyDir, "settings.json")
 	if _, err := os.Stat(legacy); err != nil {
 		return nil
 	}
@@ -36,4 +40,14 @@ func TryMigrateFromWinTray(targetPath string) error {
 		return err
 	}
 	return os.WriteFile(targetPath, newData, 0o644)
+}
+
+// legacyAppDir uses the same resolution logic as appDataBaseDir to find
+// the legacy "WinTray" directory.
+func legacyAppDir() (string, error) {
+	base, err := appDataBaseDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(base, "WinTray"), nil
 }

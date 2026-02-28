@@ -13,6 +13,7 @@ import (
 	"github.com/lxn/win"
 	"wintray/internal/config"
 	"wintray/internal/i18n"
+	"wintray/internal/stringutil"
 )
 
 type Callbacks struct {
@@ -562,7 +563,7 @@ func (w *MainWindow) onAddProgram() {
 	if err != nil || !ok {
 		return
 	}
-	name := trimExt(filepath.Base(dlg.FilePath))
+	name := stringutil.TrimExt(filepath.Base(dlg.FilePath))
 	if name == "" {
 		name = msg.NewAppName
 	}
@@ -586,7 +587,28 @@ func (w *MainWindow) onAddProgram() {
 }
 
 func (w *MainWindow) onSelectProgramForSelected() {
-	w.onAddProgram()
+	app, _, ok := w.selectedManagedApp()
+	if !ok {
+		// No item selected — fall back to adding a new entry
+		w.onAddProgram()
+		return
+	}
+	msg := i18n.For(w.settings.Language)
+	dlg := new(walk.FileDialog)
+	dlg.Title = msg.SelectManagedExe
+	dlg.Filter = fmt.Sprintf("%s|%s", msg.ExeFilter, msg.AllFilesFilter)
+	result, err := dlg.ShowOpen(w.mw)
+	if err != nil || !result {
+		return
+	}
+	app.ExePath = dlg.FilePath
+	name := stringutil.TrimExt(filepath.Base(dlg.FilePath))
+	if name != "" {
+		app.Name = name
+	}
+	w.refreshManagedList()
+	w.syncManagedEditor()
+	w.save()
 }
 
 func (w *MainWindow) onRemoveSelected() {
@@ -728,14 +750,6 @@ func (w *MainWindow) Native() *walk.MainWindow {
 
 func (w *MainWindow) Settings() config.Settings {
 	return w.settings
-}
-
-func trimExt(name string) string {
-	ext := filepath.Ext(name)
-	if ext == "" {
-		return name
-	}
-	return name[:len(name)-len(ext)]
 }
 
 func (w *MainWindow) clearManagedSelection() {
