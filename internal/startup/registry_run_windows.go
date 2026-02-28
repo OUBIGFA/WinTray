@@ -2,7 +2,11 @@
 
 package startup
 
-import "golang.org/x/sys/windows/registry"
+import (
+	"errors"
+
+	"golang.org/x/sys/windows/registry"
+)
 
 const runKeyPath = `SOFTWARE\Microsoft\Windows\CurrentVersion\Run`
 
@@ -20,6 +24,8 @@ func (r *Registrar) SetEnabled(appName, command string, enabled bool) error {
 	if enabled {
 		return key.SetStringValue(appName, command)
 	}
-	_ = key.DeleteValue(appName)
+	if err = key.DeleteValue(appName); err != nil && !errors.Is(err, registry.ErrNotExist) {
+		return err
+	}
 	return nil
 }

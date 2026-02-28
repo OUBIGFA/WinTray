@@ -3,6 +3,7 @@
 package ipc
 
 import (
+	"sync"
 	"sync/atomic"
 
 	"golang.org/x/sys/windows"
@@ -13,6 +14,7 @@ type ActivationListener struct {
 	stop    chan struct{}
 	done    chan struct{}
 	started uint32
+	closeMu sync.Once
 }
 
 func NewActivationListener(name string) (*ActivationListener, error) {
@@ -45,14 +47,16 @@ func (l *ActivationListener) Close() {
 	if l == nil {
 		return
 	}
-	if atomic.LoadUint32(&l.started) == 1 {
-		close(l.stop)
-		<-l.done
-	}
-	if l.event != 0 {
-		_ = windows.CloseHandle(l.event)
-		l.event = 0
-	}
+	l.closeMu.Do(func() {
+		if atomic.LoadUint32(&l.started) == 1 {
+			close(l.stop)
+			<-l.done
+		}
+		if l.event != 0 {
+			_ = windows.CloseHandle(l.event)
+			l.event = 0
+		}
+	})
 }
 
 func (l *ActivationListener) listen(onActivated func()) {

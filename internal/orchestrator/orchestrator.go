@@ -59,7 +59,7 @@ func (s *Service) HideExisting(ctx context.Context, entry config.ManagedAppEntry
 	}
 	expectedPath := normalizePath(entry.ExePath)
 	ok := s.manageFirstMatchingWindow(ctx, func(w ManagedWindowInfo) bool {
-		return matchesExecutable(w, expectedPath, expectedName) && matchStrategy(w, entry.WindowMatch.Strategy)
+		return matchesExecutableWithIdentityFallback(w, expectedPath, expectedName) && matchStrategy(w, entry.WindowMatch.Strategy)
 	}, expectedPath, expectedName, nil, nil, retrySeconds, "hide")
 	if !ok {
 		return Result{AppName: entry.Name, Managed: false, Message: "no existing window managed"}
@@ -79,13 +79,23 @@ func (s *Service) manageFirstMatchingWindow(ctx context.Context, predicate func(
 		}
 
 		windows := s.enumerator.EnumerateTopLevelWindows()
-		candidates := make([]MatchCandidate, 0)
+		bestByRoot := map[uintptr]MatchCandidate{}
 		for _, w := range windows {
 			if !predicate(w) {
 				continue
 			}
+			if isUnmanageableWindow(w) {
+				continue
+			}
 			score := computeCandidateScore(w, expectedPath, expectedName, launchedPID, baseline)
-			candidates = append(candidates, MatchCandidate{Window: w, Score: score})
+			root := resolveActionTargetHandle(w)
+			if prev, ok := bestByRoot[root]; !ok || score > prev.Score {
+				bestByRoot[root] = MatchCandidate{Window: w, Score: score}
+			}
+		}
+		candidates := make([]MatchCandidate, 0, len(bestByRoot))
+		for _, c := range bestByRoot {
+			candidates = append(candidates, c)
 		}
 		sort.Slice(candidates, func(i, j int) bool { return candidates[i].Score > candidates[j].Score })
 		if len(candidates) > 0 {
@@ -99,7 +109,9 @@ func (s *Service) manageFirstMatchingWindow(ctx context.Context, predicate func(
 		}
 
 		if i < attempts-1 {
-			time.Sleep(delay)
+			if !waitWithContext(ctx, delay) {
+				return false
+			}
 		}
 	}
 	return false
@@ -111,59 +123,58 @@ func (s *Service) tryManageAndVerify(ctx context.Context, window ManagedWindowIn
 		return false
 	}
 
-	// Determine primary and fallback actions based on actionType.
-	// "hide" flow: SW_HIDE first (works for tray apps), then WM_CLOSE fallback.
-	// "close" flow: WM_CLOSE first, then SW_HIDE fallback (for apps that ignore WM_CLOSE).
-	type actionFn func(uintptr) (bool, error)
-	var primary, fallback struct {
-		name string
-		fn   actionFn
-	}
+	// "hide": WM_CLOSE first — many tray-oriented apps intercept close and hide
+	//         themselves to tray while preserving their own tray-click restore logic.
+	//         Fallback to SW_HIDE for apps that don't support close-to-tray.
+	// "close": WM_CLOSE first — asks the app to close itself (some apps hide to tray
+	//          on WM_CLOSE). Fallback to SW_HIDE for apps that ignore WM_CLOSE.
+	//
+	// Verification for "hide" accepts IsWindowVisible==0 as success; it does NOT
+	// require the window to vanish from EnumWindows (the window handle stays valid
+	// for hidden tray apps). Verification for "close" requires the handle to
+	// disappear from EnumWindows.
+	//
+	// A single primary action is attempted per candidate per round; no in-round
+	// fallback to avoid spamming a single window with redundant messages.
 	if actionType == "hide" {
-		primary = struct {
-			name string
-			fn   actionFn
-		}{"hide", s.manager.HideWindow}
-		fallback = struct {
-			name string
-			fn   actionFn
-		}{"close", s.manager.CloseWindow}
-	} else {
-		primary = struct {
-			name string
-			fn   actionFn
-		}{"close", s.manager.CloseWindow}
-		fallback = struct {
-			name string
-			fn   actionFn
-		}{"hide", s.manager.HideWindow}
+		// Prefer app-native close-to-tray behavior first. Many apps (Tauri/Electron)
+		// intercept close and move to tray, preserving tray-click restore semantics.
+		if s.applyAndVerify(ctx, window, score, "hide", s.manager.CloseWindow) {
+			return true
+		}
+		return s.applyAndVerify(ctx, window, score, "hide", s.manager.HideWindow)
 	}
-
-	if s.applyAndVerify(ctx, window, score, primary.name, primary.fn) {
-		return true
-	}
-	return s.applyAndVerify(ctx, window, score, fallback.name, fallback.fn)
+	return s.applyAndVerify(ctx, window, score, "close", s.manager.CloseWindow)
 }
 
 func (s *Service) applyAndVerify(ctx context.Context, window ManagedWindowInfo, score int, action string, fn func(uintptr) (bool, error)) bool {
-	ok, err := fn(window.Handle)
+	targetHwnd := resolveActionTargetHandle(window)
+	if targetHwnd != window.Handle {
+		s.logger.Info(fmt.Sprintf("retarget action action=%s score=%d from=0x%X to=0x%X", action, score, window.Handle, targetHwnd))
+	}
+
+	ok, err := fn(targetHwnd)
 	if !ok {
 		if err != nil {
-			s.logger.Warn(fmt.Sprintf("action request failed action=%s score=%d %s err=%v", action, score, describeWindow(window), err))
+			s.logger.Warn(fmt.Sprintf("action request failed action=%s score=%d hwnd=0x%X %s err=%v", action, score, targetHwnd, describeWindow(window), err))
 		} else {
-			s.logger.Warn(fmt.Sprintf("action request failed action=%s score=%d %s", action, score, describeWindow(window)))
+			s.logger.Warn(fmt.Sprintf("action request failed action=%s score=%d hwnd=0x%X %s", action, score, targetHwnd, describeWindow(window)))
 		}
 		return false
 	}
 
-	s.logger.Info(fmt.Sprintf("action requested action=%s score=%d %s", action, score, describeWindow(window)))
-	if s.verifyActionApplied(ctx, window.Handle, score, action) {
-		s.logger.Info(fmt.Sprintf("action applied action=%s score=%d hwnd=0x%X", action, score, window.Handle))
+	s.logger.Info(fmt.Sprintf("action requested action=%s score=%d hwnd=0x%X %s", action, score, targetHwnd, describeWindow(window)))
+	if s.verifyActionApplied(ctx, targetHwnd, score, action) {
+		s.logger.Info(fmt.Sprintf("action applied action=%s score=%d hwnd=0x%X", action, score, targetHwnd))
 		return true
 	}
 
-	s.logger.Warn(fmt.Sprintf("action not applied action=%s score=%d hwnd=0x%X", action, score, window.Handle))
+	s.logger.Warn(fmt.Sprintf("action not applied action=%s score=%d hwnd=0x%X", action, score, targetHwnd))
 	return false
+}
+
+func resolveActionTargetHandle(window ManagedWindowInfo) uintptr {
+	return resolveOwnerChain(window)
 }
 
 func (s *Service) captureBaseline(predicate func(ManagedWindowInfo) bool) map[uintptr]struct{} {
@@ -177,8 +188,15 @@ func (s *Service) captureBaseline(predicate func(ManagedWindowInfo) bool) map[ui
 }
 
 func (s *Service) verifyActionApplied(ctx context.Context, hwnd uintptr, score int, action string) bool {
-	const attempts = 6
-	const delay = 200 * time.Millisecond
+	// Keep verification responsive for hide (avoids long per-candidate stalls)
+	// while still allowing async framework event loops enough time.
+	attempts := 10
+	delay := 400 * time.Millisecond
+	if action == "hide" {
+		attempts = 4
+		delay = 300 * time.Millisecond
+	}
+
 	for i := 0; i < attempts; i++ {
 		select {
 		case <-ctx.Done():
@@ -186,13 +204,27 @@ func (s *Service) verifyActionApplied(ctx context.Context, hwnd uintptr, score i
 		default:
 		}
 
-		windows := s.enumerator.EnumerateTopLevelWindows()
-		if _, found := findWindowByHandle(windows, hwnd); !found {
-			return true
+		// For "hide": the window handle stays valid (tray apps keep the HWND alive
+		// but invisible). Accept IsWindowVisible==0 as success — do NOT require the
+		// handle to disappear from EnumWindows.
+		// For "close": the window should be fully destroyed; require it to vanish
+		// from EnumWindows (IsWindowVisible check alone is insufficient since the
+		// process might briefly hide before destroying).
+		if action == "hide" {
+			if !isWindowVisible(hwnd) {
+				return true
+			}
+		} else {
+			// For close we must verify destruction, not just invisibility.
+			if !isWindow(hwnd) {
+				return true
+			}
 		}
 
 		if i < attempts-1 {
-			time.Sleep(delay)
+			if !waitWithContext(ctx, delay) {
+				return false
+			}
 		}
 	}
 
@@ -253,3 +285,17 @@ func trimExt(name string) string {
 	return name[:len(name)-len(ext)]
 }
 
+func waitWithContext(ctx context.Context, delay time.Duration) bool {
+	if delay <= 0 {
+		return true
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}

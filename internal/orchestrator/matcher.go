@@ -30,6 +30,29 @@ func matchesExecutable(window ManagedWindowInfo, expectedExePath, expectedProces
 	return expectedProcessName != "" && strings.EqualFold(window.ProcessName, expectedProcessName)
 }
 
+func matchesExecutableWithIdentityFallback(window ManagedWindowInfo, expectedExePath, expectedProcessName string) bool {
+	if matchesExecutable(window, expectedExePath, expectedProcessName) {
+		return true
+	}
+
+	needle := strings.ToLower(strings.TrimSpace(expectedProcessName))
+	if needle == "" {
+		return false
+	}
+
+	if strings.Contains(strings.ToLower(window.ProcessName), needle) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(window.Title), needle) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(window.ClassName), needle) {
+		return true
+	}
+
+	return false
+}
+
 func computeCandidateScore(window ManagedWindowInfo, expectedExePath, expectedProcessName string, launchedPID *uint32, baseline map[uintptr]struct{}) int {
 	score := 0
 	if launchedPID != nil && window.ProcessID == *launchedPID {
@@ -59,4 +82,23 @@ func computeCandidateScore(window ManagedWindowInfo, expectedExePath, expectedPr
 		score -= 60
 	}
 	return score
+}
+
+func isUnmanageableWindow(window ManagedWindowInfo) bool {
+	className := strings.ToLower(strings.TrimSpace(window.ClassName))
+	processName := strings.ToLower(strings.TrimSpace(window.ProcessName))
+
+	if className == "pseudoconsolewindow" {
+		return true
+	}
+
+	if className == "tao thread event target" {
+		return true
+	}
+
+	if (processName == "cmd" || processName == "conhost" || processName == "powershell" || processName == "pwsh") && className == "pseudoconsolewindow" {
+		return true
+	}
+
+	return false
 }

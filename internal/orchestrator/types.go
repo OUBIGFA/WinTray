@@ -54,8 +54,21 @@ type MatchCandidate struct {
 	Score  int
 }
 
-func matchStrategy(window ManagedWindowInfo, _ config.MatchStrategy) bool {
+func matchStrategy(window ManagedWindowInfo, strategy config.MatchStrategy) bool {
 	hasTitle := window.Title != ""
 	hasClass := window.ClassName != ""
-	return hasTitle || hasClass
+
+	switch strategy {
+	case config.MatchAny,
+		"":
+		return true
+	case config.MatchProcessNameThenTitle:
+		return true
+	case config.MatchTitleContains:
+		return hasTitle
+	case config.MatchClassName:
+		return hasClass
+	default:
+		return hasTitle || hasClass
+	}
 }

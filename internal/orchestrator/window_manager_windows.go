@@ -32,35 +32,28 @@ func (m *Win32WindowManager) MinimizeWindow(hwnd uintptr) (bool, error) {
 	if !isWindow(hwnd) {
 		return false, errors.New("target window is not valid")
 	}
-	ok, _, callErr := procPostMessageW.Call(hwnd, wmSysCommand, scMinimize, 0)
+	ok, _, _ := procPostMessageW.Call(hwnd, wmSysCommand, scMinimize, 0)
 	if ok != 0 {
 		return true, nil
 	}
-	v, _, showErr := procShowWindowAsync.Call(hwnd, swMinimize)
-	if v != 0 {
-		return true, nil
-	}
-	if showErr != nil && showErr != syscall.Errno(0) {
-		return false, fmt.Errorf("showwindowasync minimize failed: %w", showErr)
-	}
+	_, _, callErr := procShowWindowAsync.Call(hwnd, swMinimize)
 	if callErr != nil && callErr != syscall.Errno(0) {
-		return false, fmt.Errorf("post sc_minimize failed: %w", callErr)
+		return false, fmt.Errorf("showwindowasync minimize failed: %w", callErr)
 	}
-	return false, errors.New("minimize request was not accepted")
+	// ShowWindowAsync returns the *previous* visibility state, not success/failure.
+	// A zero return value can still mean the minimize request was accepted.
+	return true, nil
 }
 
 func (m *Win32WindowManager) HideWindow(hwnd uintptr) (bool, error) {
 	if !isWindow(hwnd) {
 		return false, errors.New("target window is not valid")
 	}
-	v, _, callErr := procShowWindowAsync.Call(hwnd, swHide)
-	if v != 0 {
-		return true, nil
-	}
+	_, _, callErr := procShowWindowAsync.Call(hwnd, swHide)
 	if callErr != nil && callErr != syscall.Errno(0) {
 		return false, fmt.Errorf("showwindowasync hide failed: %w", callErr)
 	}
-	return false, errors.New("hide request was not accepted")
+	return true, nil
 }
 
 func (m *Win32WindowManager) CloseWindow(hwnd uintptr) (bool, error) {
@@ -86,6 +79,11 @@ func (m *Win32WindowManager) CloseWindow(hwnd uintptr) (bool, error) {
 
 func isWindow(hwnd uintptr) bool {
 	v, _, _ := procIsWindow.Call(hwnd)
+	return v != 0
+}
+
+func isWindowVisible(hwnd uintptr) bool {
+	v, _, _ := procIsWindowVisible.Call(hwnd)
 	return v != 0
 }
 

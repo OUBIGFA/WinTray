@@ -188,6 +188,11 @@ func (w *MainWindow) buildTopOptions() error {
 	retryEdit.EditingFinished().Attach(func() {
 		v, convErr := strconv.Atoi(retryEdit.Text())
 		if convErr != nil {
+			if i18n.Resolve(w.settings.Language) == i18n.LangEnUS {
+				walk.MsgBox(w.mw, w.mw.Title(), "Retry seconds must be a number between 0 and 120.", walk.MsgBoxIconWarning)
+			} else {
+				walk.MsgBox(w.mw, w.mw.Title(), "重试秒数必须是 0 到 120 的数字。", walk.MsgBoxIconWarning)
+			}
 			v = w.settings.CloseWindowRetrySeconds
 		}
 		if v < 0 {
@@ -681,6 +686,12 @@ func (w *MainWindow) save() {
 
 func (w *MainWindow) ShowMainWindow() {
 	w.mw.Synchronize(func() {
+		hwnd := w.mw.Handle()
+		if hwnd != 0 {
+			win.ShowWindow(hwnd, win.SW_RESTORE)
+			win.ShowWindow(hwnd, win.SW_SHOW)
+			win.SetForegroundWindow(hwnd)
+		}
 		w.mw.Show()
 		w.mw.SetVisible(true)
 		w.mw.SetFocus()

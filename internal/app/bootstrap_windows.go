@@ -59,7 +59,7 @@ func Run(args []string) {
 		emitFatalBeforeUI("failed to resolve settings path", settingsPathErr)
 		return
 	}
-	_ = config.TryMigrateFromWinTray(settingsPath)
+	migrationErr := config.TryMigrateFromWinTray(settingsPath)
 	store := config.NewStore(settingsPath)
 	settings := store.Load()
 
@@ -75,6 +75,9 @@ func Run(args []string) {
 		return
 	}
 	defer logger.Close()
+	if migrationErr != nil {
+		logger.Warn(fmt.Sprintf("settings migration failed: %v", migrationErr))
+	}
 
 	enumerator := orchestrator.NewWin32WindowEnumerator()
 	manager := orchestrator.NewWin32WindowManager()
@@ -97,6 +100,10 @@ func Run(args []string) {
 	}
 
 	cleanupAndRestore := func() {
+		if mainWindow == nil || mainWindow.Native() == nil {
+			logger.Warn("cleanup requested but main window is unavailable")
+			return
+		}
 		lang := safeLanguage(mainWindow)
 		m := i18n.For(lang)
 		if walk.MsgBox(mainWindow.Native(), m.CleanupConfirmTitle, m.CleanupConfirmBody, walk.MsgBoxYesNo|walk.MsgBoxIconWarning) != walk.DlgCmdYes {
@@ -184,11 +191,18 @@ func Run(args []string) {
 		mainWindow.HideMainWindow()
 	}
 
+	managedCtx, managedCancel := context.WithCancel(context.Background())
+	defer managedCancel()
+
 	if isAutorunLaunch(args) {
-		go runManagedApps(context.Background(), orch, mainWindow, settings, settings.ExitAfterManagedAppsCompleted, logger)
+		mu.Lock()
+		snapshot := latest
+		mu.Unlock()
+		go runManagedApps(managedCtx, orch, mainWindow, snapshot, snapshot.ExitAfterManagedAppsCompleted, logger)
 	}
 
 	exitCode := mainWindow.Run()
+	managedCancel()
 
 	mu.Lock()
 	finalSettings := latest

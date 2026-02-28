@@ -2,8 +2,10 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 type Store struct {
@@ -24,9 +26,19 @@ func (s *Store) Load() Settings {
 	}
 	var settings Settings
 	if err = json.Unmarshal(data, &settings); err != nil {
+		_ = backupInvalidSettingsFile(s.path, data)
 		return DefaultSettings()
 	}
 	return migrate(settings)
+}
+
+func backupInvalidSettingsFile(path string, data []byte) error {
+	if len(data) == 0 {
+		return nil
+	}
+	stamp := time.Now().Format("20060102-150405")
+	backupPath := fmt.Sprintf("%s.invalid-%s.bak", path, stamp)
+	return os.WriteFile(backupPath, data, 0o644)
 }
 
 func (s *Store) Save(settings Settings) error {
