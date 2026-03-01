@@ -111,6 +111,9 @@ func computeCandidateScore(window ManagedWindowInfo, expectedExePath, expectedPr
 	if containsNormalizedIdentity(window.ClassName, expectedProcessName) {
 		score += 40
 	}
+	if launchedPID != nil && isLikelyShellHost(window.ProcessName) && containsNormalizedIdentity(window.Title, expectedProcessName) {
+		score += 180
+	}
 	if baseline != nil {
 		if _, ok := baseline[window.Handle]; !ok {
 			score += 200
@@ -129,6 +132,11 @@ func computeCandidateScore(window ManagedWindowInfo, expectedExePath, expectedPr
 		score -= 60
 	}
 	return score
+}
+
+func isLikelyShellHost(processName string) bool {
+	p := strings.ToLower(strings.TrimSpace(processName))
+	return p == "windowsterminal" || p == "cmd" || p == "conhost" || p == "powershell" || p == "pwsh" || p == "wt"
 }
 
 func isUnmanageableWindow(window ManagedWindowInfo) bool {

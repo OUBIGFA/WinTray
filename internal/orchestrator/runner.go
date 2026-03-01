@@ -30,7 +30,12 @@ func startProcess(exePath, args string, hidden bool) (*exec.Cmd, error) {
 			commandLine += " " + trimmedArgs
 		}
 		shellCmd := exec.Command("cmd.exe")
-		shellCmd.SysProcAttr = &syscall.SysProcAttr{CmdLine: commandLine}
+		attr := &syscall.SysProcAttr{CmdLine: commandLine}
+		if hidden {
+			attr.CreationFlags = createNoWindow
+			attr.HideWindow = true
+		}
+		shellCmd.SysProcAttr = attr
 		if _, err := os.Stat(dir); err == nil {
 			shellCmd.Dir = dir
 		}

@@ -38,9 +38,13 @@ type Settings struct {
 	ManagedApps                   []ManagedAppEntry `json:"managedApps"`
 }
 
+func ShouldLaunchViaWinTray(entry ManagedAppEntry) bool {
+	return entry.LaunchHiddenInBackground || entry.TrayBehavior.AutoMinimizeAndHideOnLaunch || entry.RunOnStartup
+}
+
 func DefaultSettings() Settings {
 	return Settings{
-		SchemaVersion:                 1,
+		SchemaVersion:                 2,
 		Language:                      "zh-CN",
 		RunAtLogon:                    true,
 		StartMinimizedToTray:          false,

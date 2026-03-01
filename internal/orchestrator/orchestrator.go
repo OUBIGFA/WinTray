@@ -100,6 +100,7 @@ func (s *Service) HideExisting(ctx context.Context, entry config.ManagedAppEntry
 func (s *Service) manageFirstMatchingWindow(ctx context.Context, predicate func(ManagedWindowInfo) bool, expectedPath, expectedName string, launchedPID *uint32, baseline map[uintptr]struct{}, retrySeconds int, actionType string) bool {
 	attempts := max(1, max(0, retrySeconds)*2+1)
 	const delay = 500 * time.Millisecond
+	managedAny := false
 
 	for i := 0; i < attempts; i++ {
 		select {
@@ -132,8 +133,26 @@ func (s *Service) manageFirstMatchingWindow(ctx context.Context, predicate func(
 			s.logger.Info(fmt.Sprintf("match round %d/%d candidates=%d top=%s", i+1, attempts, len(candidates), summarizeCandidates(candidates, 3)))
 		}
 
+		managedThisRound := false
 		for _, c := range candidates {
 			if s.tryManageAndVerify(ctx, c.Window, c.Score, actionType) {
+				if actionType != "hide" {
+					return true
+				}
+				managedAny = true
+				managedThisRound = true
+				break
+			}
+		}
+
+		if actionType == "hide" {
+			if managedThisRound {
+				if !waitWithContext(ctx, 150*time.Millisecond) {
+					return managedAny
+				}
+				continue
+			}
+			if managedAny && len(candidates) == 0 {
 				return true
 			}
 		}
@@ -143,6 +162,9 @@ func (s *Service) manageFirstMatchingWindow(ctx context.Context, predicate func(
 				return false
 			}
 		}
+	}
+	if actionType == "hide" {
+		return managedAny
 	}
 	return false
 }
@@ -174,7 +196,11 @@ func (s *Service) tryManageAndVerify(ctx context.Context, window ManagedWindowIn
 		}
 		return s.applyAndVerify(ctx, window, score, "hide", s.manager.HideWindow)
 	}
-	return s.applyAndVerify(ctx, window, score, "close", s.manager.CloseWindow)
+	if s.applyAndVerify(ctx, window, score, "close", s.manager.CloseWindow) {
+		return true
+	}
+	s.logger.Info(fmt.Sprintf("close fallback to hide score=%d %s", score, describeWindow(window)))
+	return s.applyAndVerify(ctx, window, score, "hide", s.manager.HideWindow)
 }
 
 func (s *Service) applyAndVerify(ctx context.Context, window ManagedWindowInfo, score int, action string, fn func(uintptr) (bool, error)) bool {

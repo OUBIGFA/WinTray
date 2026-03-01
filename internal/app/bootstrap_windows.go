@@ -211,38 +211,22 @@ func Run(args []string) {
 
 func runManagedApps(ctx context.Context, orch *orchestrator.Service, mainWindow *ui.MainWindow, settings config.Settings, autoExit bool, logger *logging.Logger) {
 	msg := i18n.For(settings.Language)
-	startupEntries := make([]config.ManagedAppEntry, 0, len(settings.ManagedApps))
-	startupEntries = append(startupEntries, settings.ManagedApps...)
-
-	type managedTask struct {
-		entry  config.ManagedAppEntry
-		action string
-	}
-	tasks := make([]managedTask, 0, len(startupEntries))
-	for _, entry := range startupEntries {
-		tasks = append(tasks, managedTask{entry: entry, action: "start"})
+	managedEntries := make([]config.ManagedAppEntry, 0, len(settings.ManagedApps))
+	for _, entry := range settings.ManagedApps {
+		if config.ShouldLaunchViaWinTray(entry) {
+			managedEntries = append(managedEntries, entry)
+		}
 	}
 
-	summaries := make([]string, len(tasks))
+	summaries := make([]string, len(managedEntries))
 	var wg sync.WaitGroup
-	for i, task := range tasks {
+	for i, entry := range managedEntries {
 		i := i
-		task := task
+		entry := entry
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			var result orchestrator.Result
-			if task.action == "start" {
-				result = orch.StartAndManage(ctx, task.entry, settings.CloseWindowRetrySeconds)
-				if !result.Managed {
-					logger.Warn(fmt.Sprintf("managed startup app failed: %s %s", result.AppName, result.Message))
-				}
-			} else {
-				result = orch.HideExisting(ctx, task.entry, settings.CloseWindowRetrySeconds)
-				if !result.Managed {
-					logger.Warn(fmt.Sprintf("managed existing app failed: %s %s", result.AppName, result.Message))
-				}
-			}
+			result := processManagedEntry(ctx, orch, settings, entry, logger)
 
 			detail := i18n.TranslateResultMessage(settings.Language, result.Message)
 			if !result.Managed && i18n.IsLikelyPermissionIssue(result.Message) {
@@ -253,17 +237,32 @@ func runManagedApps(ctx context.Context, orch *orchestrator.Service, mainWindow 
 	}
 	wg.Wait()
 
-	if len(tasks) == 0 {
+	if len(managedEntries) == 0 {
 		summaries = append(summaries, msg.RunSummaryNone)
 	}
 	for _, line := range summaries {
 		logger.Info(fmt.Sprintf("managed summary: %s", line))
 	}
 
-	hadTasks := len(startupEntries) > 0
+	hadTasks := len(managedEntries) > 0
 	lifecycle.ExitIfCompleted(ctx, autoExit, hadTasks, func() {
 		mainWindow.RequestExplicitClose()
 	})
+}
+
+func processManagedEntry(ctx context.Context, orch *orchestrator.Service, settings config.Settings, entry config.ManagedAppEntry, logger *logging.Logger) orchestrator.Result {
+	if entry.TrayBehavior.AutoMinimizeAndHideOnLaunch {
+		existing := orch.HideExisting(ctx, entry, settings.CloseWindowRetrySeconds)
+		if existing.Managed {
+			return existing
+		}
+	}
+
+	result := orch.StartAndManage(ctx, entry, settings.CloseWindowRetrySeconds)
+	if !result.Managed {
+		logger.Warn(fmt.Sprintf("managed startup app failed: %s %s", result.AppName, result.Message))
+	}
+	return result
 }
 
 func ensureRunAtLogon(registrar *startup.Registrar, settings config.Settings, logger *logging.Logger) {

@@ -56,6 +56,13 @@ func migrate(settings Settings) Settings {
 	if settings.SchemaVersion <= 0 {
 		settings.SchemaVersion = 1
 	}
+	// v2 enforces RunOnStartup during autorun; preserve legacy startup behavior.
+	if settings.SchemaVersion < 2 {
+		for i := range settings.ManagedApps {
+			settings.ManagedApps[i].RunOnStartup = true
+		}
+		settings.SchemaVersion = 2
+	}
 	if settings.CloseWindowRetrySeconds < 0 {
 		settings.CloseWindowRetrySeconds = 0
 	}
