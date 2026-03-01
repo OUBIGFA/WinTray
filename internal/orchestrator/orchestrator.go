@@ -24,8 +24,21 @@ func (s *Service) StartAndManage(ctx context.Context, entry config.ManagedAppEnt
 
 	expectedName := stringutil.TrimExt(filepath.Base(entry.ExePath))
 	expectedPath := normalizePath(entry.ExePath)
+	if s.hasExistingManagedWindow(expectedPath, expectedName, entry.WindowMatch.Strategy) {
+		s.logger.Info(fmt.Sprintf("skip start: already running %s", entry.Name))
+		if !entry.LaunchHiddenInBackground && entry.TrayBehavior.AutoMinimizeAndHideOnLaunch {
+			ok := s.manageFirstMatchingWindow(ctx, func(w ManagedWindowInfo) bool {
+				return matchesExecutableWithIdentityFallback(w, expectedPath, expectedName) && matchStrategy(w, entry.WindowMatch.Strategy)
+			}, expectedPath, expectedName, nil, nil, retrySeconds, "hide")
+			if ok {
+				return Result{AppName: entry.Name, Managed: true, Action: "hide", Message: "already running managed existing"}
+			}
+		}
+		return Result{AppName: entry.Name, Managed: true, Message: "already running skipped"}
+	}
+
 	baseline := s.captureBaseline(func(w ManagedWindowInfo) bool {
-		return matchesExecutable(w, expectedPath, expectedName) && matchStrategy(w, entry.WindowMatch.Strategy)
+		return matchesExecutableWithIdentityFallback(w, expectedPath, expectedName) && matchStrategy(w, entry.WindowMatch.Strategy)
 	})
 
 	cmd, err := startProcess(entry.ExePath, entry.Args, entry.LaunchHiddenInBackground)
@@ -45,12 +58,28 @@ func (s *Service) StartAndManage(ctx context.Context, entry config.ManagedAppEnt
 	}
 
 	ok := s.manageFirstMatchingWindow(ctx, func(w ManagedWindowInfo) bool {
-		return (w.ProcessID == pid || matchesExecutable(w, expectedPath, expectedName)) && matchStrategy(w, entry.WindowMatch.Strategy)
+		return (w.ProcessID == pid || matchesExecutableWithIdentityFallback(w, expectedPath, expectedName)) && matchStrategy(w, entry.WindowMatch.Strategy)
 	}, expectedPath, expectedName, &pid, baseline, retrySeconds, "close")
 	if !ok {
 		return Result{AppName: entry.Name, Managed: false, Message: "no window managed"}
 	}
 	return Result{AppName: entry.Name, Managed: true, Action: "close", Message: "managed"}
+}
+
+func (s *Service) hasExistingManagedWindow(expectedPath, expectedName string, strategy config.MatchStrategy) bool {
+	for _, w := range s.enumerator.EnumerateTopLevelWindows() {
+		if isUnmanageableWindow(w) {
+			continue
+		}
+		if !matchesExecutableWithIdentityFallback(w, expectedPath, expectedName) {
+			continue
+		}
+		if !matchStrategy(w, strategy) {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func (s *Service) HideExisting(ctx context.Context, entry config.ManagedAppEntry, retrySeconds int) Result {

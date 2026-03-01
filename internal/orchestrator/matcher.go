@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"path/filepath"
 	"strings"
+	"unicode"
 )
 
 // closeAllowedScoreThreshold is the minimum confidence score required before
@@ -35,6 +36,37 @@ func normalizePath(path string) string {
 	return strings.TrimRight(full, `\\/`)
 }
 
+func normalizeIdentity(value string) string {
+	if value == "" {
+		return ""
+	}
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.Grow(len(value))
+	for _, r := range value {
+		if r == '-' || r == '_' || unicode.IsSpace(r) {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+func containsNormalizedIdentity(haystack, needle string) bool {
+	n := normalizeIdentity(needle)
+	if n == "" {
+		return false
+	}
+	h := normalizeIdentity(haystack)
+	if h == "" {
+		return false
+	}
+	return strings.Contains(h, n)
+}
+
 func matchesExecutable(window ManagedWindowInfo, expectedExePath, expectedProcessName string) bool {
 	norm := normalizePath(window.ProcessPath)
 	if norm != "" && expectedExePath != "" && strings.EqualFold(norm, expectedExePath) {
@@ -47,19 +79,13 @@ func matchesExecutableWithIdentityFallback(window ManagedWindowInfo, expectedExe
 	if matchesExecutable(window, expectedExePath, expectedProcessName) {
 		return true
 	}
-
-	needle := strings.ToLower(strings.TrimSpace(expectedProcessName))
-	if needle == "" {
-		return false
-	}
-
-	if strings.Contains(strings.ToLower(window.ProcessName), needle) {
+	if containsNormalizedIdentity(window.ProcessName, expectedProcessName) {
 		return true
 	}
-	if strings.Contains(strings.ToLower(window.Title), needle) {
+	if containsNormalizedIdentity(window.Title, expectedProcessName) {
 		return true
 	}
-	if strings.Contains(strings.ToLower(window.ClassName), needle) {
+	if containsNormalizedIdentity(window.ClassName, expectedProcessName) {
 		return true
 	}
 
@@ -74,8 +100,16 @@ func computeCandidateScore(window ManagedWindowInfo, expectedExePath, expectedPr
 	if p := normalizePath(window.ProcessPath); p != "" && expectedExePath != "" && strings.EqualFold(p, expectedExePath) {
 		score += 500
 	}
-	if expectedProcessName != "" && strings.EqualFold(window.ProcessName, expectedProcessName) {
+	if expectedProcessName != "" && normalizeIdentity(window.ProcessName) == normalizeIdentity(expectedProcessName) {
 		score += 250
+	}
+	if normalizeIdentity(window.Title) == normalizeIdentity(expectedProcessName) && expectedProcessName != "" {
+		score += 180
+	} else if containsNormalizedIdentity(window.Title, expectedProcessName) {
+		score += 90
+	}
+	if containsNormalizedIdentity(window.ClassName, expectedProcessName) {
+		score += 40
 	}
 	if baseline != nil {
 		if _, ok := baseline[window.Handle]; !ok {

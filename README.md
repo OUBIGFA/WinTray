@@ -68,7 +68,7 @@ WinTray 仅提供**便携版**，无需安装。
 | 参数 | 说明 |
 |---|---|
 | `--background` | 后台启动，不弹主窗口（适用于开机自启场景） |
-| `--autorun` | 按"开机执行"配置自动执行受管任务 |
+| `--autorun` | 自动执行受管程序任务（默认由 WinTray 拉起程序） |
 | `--cleanup-restore` | 仅执行清理恢复流程：清空 `%LOCALAPPDATA%\WinTray\` 数据目录并退出 |
 
 ---

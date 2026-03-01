@@ -68,7 +68,7 @@ Go to the [Releases](../../releases) page, download `WinTray-Portable.zip`, extr
 | Flag | Description |
 |---|---|
 | `--background` | Start without showing the main window (for logon startup) |
-| `--autorun` | Execute managed startup tasks automatically |
+| `--autorun` | Execute managed app tasks automatically (WinTray launches apps by default) |
 | `--cleanup-restore` | Run cleanup/restore only: remove `%LOCALAPPDATA%\WinTray\` app data and exit |
 
 ---

@@ -25,7 +25,6 @@ type Messages struct {
 	ManagedAppPath           string
 	ManagedAppArgs           string
 	SelectProgram            string
-	ManagedRunOnStartup      string
 	ManagedAutoHide          string
 	ManagedLaunchHidden      string
 	ManagedNoSelectionHint   string
@@ -81,7 +80,6 @@ var zhCN = Messages{
 	ManagedAppPath:           "程序路径：",
 	ManagedAppArgs:           "启动参数（可选）：",
 	SelectProgram:            "选择程序",
-	ManagedRunOnStartup:      "开机启动该程序",
 	ManagedAutoHide:          "启动后关闭界面",
 	ManagedLaunchHidden:      "隐藏后台启动（适用于 cmd/bat）",
 	ManagedNoSelectionHint:   "请选择一个程序进行编辑，或点击“选择程序”新增。",
@@ -99,7 +97,7 @@ var zhCN = Messages{
 	ExeFilter:                "可执行文件 (*.exe)|*.exe",
 	AllFilesFilter:           "所有文件 (*.*)|*.*",
 	NewAppName:               "新程序",
-	ManagedListItemTemplate:  "%s | %s | 开机执行=%t | 自动隐藏=%t",
+	ManagedListItemTemplate:  "%s | %s | 启动后关闭界面=%t",
 	RunSummaryTitle:          "受管任务结果",
 	RunSummaryNone:           "没有可执行的受管任务。",
 	RunSummaryLine:           "%s：%s",
@@ -137,7 +135,6 @@ var enUS = Messages{
 	ManagedAppPath:           "Executable path:",
 	ManagedAppArgs:           "Launch arguments (optional):",
 	SelectProgram:            "Select Program",
-	ManagedRunOnStartup:      "Run this app at startup",
 	ManagedAutoHide:          "Close window after launch",
 	ManagedLaunchHidden:      "Launch hidden in background (for cmd/bat)",
 	ManagedNoSelectionHint:   "Select a program to edit, or click Select Program to add one.",
@@ -155,7 +152,7 @@ var enUS = Messages{
 	ExeFilter:                "Executable (*.exe)|*.exe",
 	AllFilesFilter:           "All Files (*.*)|*.*",
 	NewAppName:               "New App",
-	ManagedListItemTemplate:  "%s | %s | RunAtStartup=%t | AutoHide=%t",
+	ManagedListItemTemplate:  "%s | %s | CloseAfterLaunch=%t",
 	RunSummaryTitle:          "Managed Task Results",
 	RunSummaryNone:           "No managed tasks to run.",
 	RunSummaryLine:           "%s: %s",
@@ -201,7 +198,7 @@ func LanguageOptions() []string {
 
 func FormatManagedListItem(language string, app config.ManagedAppEntry) string {
 	msg := For(language)
-	return fmt.Sprintf(msg.ManagedListItemTemplate, app.Name, app.ExePath, app.RunOnStartup, app.TrayBehavior.AutoMinimizeAndHideOnLaunch)
+	return fmt.Sprintf(msg.ManagedListItemTemplate, app.Name, app.ExePath, app.TrayBehavior.AutoMinimizeAndHideOnLaunch)
 }
 
 func IsLikelyPermissionIssue(message string) bool {
@@ -236,6 +233,16 @@ func TranslateResultMessage(language, message string) string {
 			return "started hidden in background"
 		}
 		return "已隐藏后台启动"
+	case "already running skipped":
+		if Resolve(language) == LangEnUS {
+			return "already running, skipped relaunch"
+		}
+		return "程序已在运行，已跳过重复拉起"
+	case "already running managed existing":
+		if Resolve(language) == LangEnUS {
+			return "already running, managed existing window"
+		}
+		return "程序已在运行，已处理现有窗口"
 	case "no window managed", "no existing window managed":
 		return msg.StatusRetryExhausted
 	case "managed", "managed existing":

@@ -3,32 +3,21 @@
 package tray
 
 import (
-	"fmt"
-	"os/exec"
-
 	"github.com/lxn/walk"
 	"wintray/internal/i18n"
 )
 
 type Controller struct {
-	notifyIcon    *walk.NotifyIcon
-	openAction    *walk.Action
-	logsAction    *walk.Action
-	cleanupAction *walk.Action
-	exitAction    *walk.Action
-	openLogPath   func() (string, error)
-	cleanup       func()
-	reportOpenErr func(string)
-	language      string
+	notifyIcon *walk.NotifyIcon
+	openAction *walk.Action
+	exitAction *walk.Action
+	language   string
 }
 
 func New(
 	window *walk.MainWindow,
 	showMainWindow func(),
 	exitApp func(),
-	openLogPath func() (string, error),
-	reportOpenErr func(string),
-	cleanupAndRestore func(),
 	language string,
 ) (*Controller, error) {
 	ni, err := walk.NewNotifyIcon(window)
@@ -37,11 +26,8 @@ func New(
 	}
 
 	c := &Controller{
-		notifyIcon:    ni,
-		openLogPath:   openLogPath,
-		cleanup:       cleanupAndRestore,
-		reportOpenErr: reportOpenErr,
-		language:      language,
+		notifyIcon: ni,
+		language:   language,
 	}
 
 	openAction := walk.NewAction()
@@ -50,36 +36,6 @@ func New(
 	})
 	c.openAction = openAction
 	ni.ContextMenu().Actions().Add(openAction)
-
-	logsAction := walk.NewAction()
-	logsAction.Triggered().Attach(func() {
-		if c.openLogPath == nil {
-			return
-		}
-		path, openErr := c.openLogPath()
-		if openErr != nil {
-			if c.reportOpenErr != nil {
-				c.reportOpenErr(openErr.Error())
-			}
-			return
-		}
-		if err := exec.Command("explorer", "/select,", path).Start(); err != nil && c.reportOpenErr != nil {
-			c.reportOpenErr(err.Error())
-		}
-	})
-	c.logsAction = logsAction
-	ni.ContextMenu().Actions().Add(logsAction)
-
-	cleanupAction := walk.NewAction()
-	cleanupAction.Triggered().Attach(func() {
-		if c.cleanup != nil {
-			c.cleanup()
-		}
-	})
-	c.cleanupAction = cleanupAction
-	ni.ContextMenu().Actions().Add(cleanupAction)
-
-	ni.ContextMenu().Actions().Add(walk.NewSeparatorAction())
 
 	exitAction := walk.NewAction()
 	exitAction.Triggered().Attach(func() {
@@ -113,23 +69,9 @@ func (c *Controller) SetLanguage(language string) {
 	if c.openAction != nil {
 		c.openAction.SetText(msg.TrayOpenSettings)
 	}
-	if c.logsAction != nil {
-		c.logsAction.SetText(msg.TrayOpenLogs)
-	}
-	if c.cleanupAction != nil {
-		c.cleanupAction.SetText(msg.TrayCleanupRestore)
-	}
 	if c.exitAction != nil {
 		c.exitAction.SetText(msg.TrayExit)
 	}
-}
-
-func (c *Controller) ReportOpenLogsError(err error) {
-	if c == nil || err == nil || c.reportOpenErr == nil {
-		return
-	}
-	msg := i18n.For(c.language)
-	c.reportOpenErr(fmt.Sprintf("%s: %v", msg.StatusOpenLogsFailed, err))
 }
 
 func (c *Controller) Dispose() {

@@ -172,12 +172,6 @@ func Run(args []string) {
 		mainWindow.Native(),
 		mainWindow.ShowMainWindow,
 		func() { mainWindow.RequestExplicitClose() },
-		config.LogPathWithError,
-		func(detail string) {
-			m := i18n.For(safeLanguage(mainWindow))
-			mainWindow.ShowError(m.WindowTitle, fmt.Sprintf("%s: %s", m.StatusOpenLogsFailed, detail))
-		},
-		cleanupAndRestore,
 		settings.Language,
 	)
 	if err != nil {
@@ -217,60 +211,56 @@ func Run(args []string) {
 
 func runManagedApps(ctx context.Context, orch *orchestrator.Service, mainWindow *ui.MainWindow, settings config.Settings, autoExit bool, logger *logging.Logger) {
 	msg := i18n.For(settings.Language)
-	startupEntries := make([]config.ManagedAppEntry, 0)
-	hideOnlyEntries := make([]config.ManagedAppEntry, 0)
-	for _, entry := range settings.ManagedApps {
-		if entry.RunOnStartup {
-			startupEntries = append(startupEntries, entry)
-			continue
-		}
-		if entry.TrayBehavior.AutoMinimizeAndHideOnLaunch {
-			hideOnlyEntries = append(hideOnlyEntries, entry)
-		}
+	startupEntries := make([]config.ManagedAppEntry, 0, len(settings.ManagedApps))
+	startupEntries = append(startupEntries, settings.ManagedApps...)
+
+	type managedTask struct {
+		entry  config.ManagedAppEntry
+		action string
 	}
-
-	summaries := make([]string, 0, len(startupEntries)+len(hideOnlyEntries))
-
+	tasks := make([]managedTask, 0, len(startupEntries))
 	for _, entry := range startupEntries {
-		result := orch.StartAndManage(ctx, entry, settings.CloseWindowRetrySeconds)
-		if !result.Managed {
-			logger.Warn(fmt.Sprintf("managed startup app failed: %s %s", result.AppName, result.Message))
-			hint := ""
-			if i18n.IsLikelyPermissionIssue(result.Message) {
-				hint = " " + msg.StatusPermissionHint
-			}
-			detail := i18n.TranslateResultMessage(settings.Language, result.Message) + hint
-			summaries = append(summaries, fmt.Sprintf(msg.RunSummaryLine, result.AppName, detail))
-			continue
-		}
-		detail := i18n.TranslateResultMessage(settings.Language, result.Message)
-		summaries = append(summaries, fmt.Sprintf(msg.RunSummaryLine, result.AppName, detail))
+		tasks = append(tasks, managedTask{entry: entry, action: "start"})
 	}
 
-	for _, entry := range hideOnlyEntries {
-		result := orch.HideExisting(ctx, entry, settings.CloseWindowRetrySeconds)
-		if !result.Managed {
-			logger.Warn(fmt.Sprintf("managed existing app failed: %s %s", result.AppName, result.Message))
-			hint := ""
-			if i18n.IsLikelyPermissionIssue(result.Message) {
-				hint = " " + msg.StatusPermissionHint
+	summaries := make([]string, len(tasks))
+	var wg sync.WaitGroup
+	for i, task := range tasks {
+		i := i
+		task := task
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var result orchestrator.Result
+			if task.action == "start" {
+				result = orch.StartAndManage(ctx, task.entry, settings.CloseWindowRetrySeconds)
+				if !result.Managed {
+					logger.Warn(fmt.Sprintf("managed startup app failed: %s %s", result.AppName, result.Message))
+				}
+			} else {
+				result = orch.HideExisting(ctx, task.entry, settings.CloseWindowRetrySeconds)
+				if !result.Managed {
+					logger.Warn(fmt.Sprintf("managed existing app failed: %s %s", result.AppName, result.Message))
+				}
 			}
-			detail := i18n.TranslateResultMessage(settings.Language, result.Message) + hint
-			summaries = append(summaries, fmt.Sprintf(msg.RunSummaryLine, result.AppName, detail))
-			continue
-		}
-		detail := i18n.TranslateResultMessage(settings.Language, result.Message)
-		summaries = append(summaries, fmt.Sprintf(msg.RunSummaryLine, result.AppName, detail))
-	}
 
-	if len(summaries) == 0 {
+			detail := i18n.TranslateResultMessage(settings.Language, result.Message)
+			if !result.Managed && i18n.IsLikelyPermissionIssue(result.Message) {
+				detail += " " + msg.StatusPermissionHint
+			}
+			summaries[i] = fmt.Sprintf(msg.RunSummaryLine, result.AppName, detail)
+		}()
+	}
+	wg.Wait()
+
+	if len(tasks) == 0 {
 		summaries = append(summaries, msg.RunSummaryNone)
 	}
 	for _, line := range summaries {
 		logger.Info(fmt.Sprintf("managed summary: %s", line))
 	}
 
-	hadTasks := len(startupEntries) > 0 || len(hideOnlyEntries) > 0
+	hadTasks := len(startupEntries) > 0
 	lifecycle.ExitIfCompleted(ctx, autoExit, hadTasks, func() {
 		mainWindow.RequestExplicitClose()
 	})

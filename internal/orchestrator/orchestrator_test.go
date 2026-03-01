@@ -69,6 +69,27 @@ func TestMatchesExecutableWithIdentityFallback(t *testing.T) {
 	}
 }
 
+func TestNormalizeIdentity(t *testing.T) {
+	if got := normalizeIdentity(" AI-Tool_Box "); got != "aitoolbox" {
+		t.Fatalf("normalizeIdentity mismatch: got %q", got)
+	}
+	if got := normalizeIdentity("open claw"); got != "openclaw" {
+		t.Fatalf("normalizeIdentity mismatch: got %q", got)
+	}
+}
+
+func TestMatchesExecutableWithIdentityFallback_Normalized(t *testing.T) {
+	window := ManagedWindowInfo{
+		ProcessName: "com.ai-toolbox-siw",
+		Title:       "AI Toolbox",
+		ClassName:   "Chrome_WidgetWin_1",
+	}
+
+	if !matchesExecutableWithIdentityFallback(window, "", "ai-toolbox") {
+		t.Fatal("expected normalized identity match for ai-toolbox vs AI Toolbox")
+	}
+}
+
 func TestComputeCandidateScore(t *testing.T) {
 	pid := uint32(1234)
 	baseline := map[uintptr]struct{}{100: {}}
@@ -85,33 +106,34 @@ func TestComputeCandidateScore(t *testing.T) {
 	expectedPath := normalizePath(`C:\Program Files\app.exe`)
 	score := computeCandidateScore(window, expectedPath, "app", &pid, baseline)
 
-	// PID(1000) + path(500) + name(250) + new(200) + title(50) + class(10) = 2010
-	if score != 2010 {
-		t.Errorf("expected score 2010, got %d", score)
+	// PID(1000) + path(500) + name(250) + new(200) + title(50) + class(10)
+	// + normalized title contains (90) + normalized class contains (40) = 2140
+	if score != 2140 {
+		t.Errorf("expected score 2140, got %d", score)
 	}
 
 	// Window in baseline → no +200 bonus
 	windowInBaseline := window
 	windowInBaseline.Handle = 100
 	score2 := computeCandidateScore(windowInBaseline, expectedPath, "app", &pid, baseline)
-	if score2 != 1810 {
-		t.Errorf("expected score 1810 for baseline window, got %d", score2)
+	if score2 != 1940 {
+		t.Errorf("expected score 1940 for baseline window, got %d", score2)
 	}
 
 	// Tool window penalty
 	toolWindow := window
 	toolWindow.IsToolWindow = true
 	score3 := computeCandidateScore(toolWindow, expectedPath, "app", &pid, baseline)
-	if score3 != 2010-80 {
-		t.Errorf("expected score %d for tool window, got %d", 2010-80, score3)
+	if score3 != 2140-80 {
+		t.Errorf("expected score %d for tool window, got %d", 2140-80, score3)
 	}
 
 	// Owned window penalty
 	ownedWindow := window
 	ownedWindow.OwnerHandle = 999
 	score4 := computeCandidateScore(ownedWindow, expectedPath, "app", &pid, baseline)
-	if score4 != 2010-60 {
-		t.Errorf("expected score %d for owned window, got %d", 2010-60, score4)
+	if score4 != 2140-60 {
+		t.Errorf("expected score %d for owned window, got %d", 2140-60, score4)
 	}
 }
 
@@ -132,9 +154,9 @@ func TestComputeCandidateScore_BelowThreshold(t *testing.T) {
 
 func TestIsUnmanageableWindow(t *testing.T) {
 	tests := []struct {
-		name      string
-		window    ManagedWindowInfo
-		unmanage  bool
+		name     string
+		window   ManagedWindowInfo
+		unmanage bool
 	}{
 		{
 			name:     "pseudoconsole",

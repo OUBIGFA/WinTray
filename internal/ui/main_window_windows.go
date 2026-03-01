@@ -39,7 +39,6 @@ type MainWindow struct {
 	argsLabel       *walk.Label
 	argsEdit        *walk.LineEdit
 	browseBtn       *walk.PushButton
-	appRunOnStart   *walk.CheckBox
 	appAutoHide     *walk.CheckBox
 	appLaunchHidden *walk.CheckBox
 	retryEdit       *walk.LineEdit
@@ -391,24 +390,6 @@ func (w *MainWindow) buildManagedEditor() error {
 		return err
 	}
 
-	appRunOnStart, err := walk.NewCheckBox(optionsRow)
-	if err != nil {
-		return err
-	}
-	appRunOnStart.CheckedChanged().Attach(func() {
-		if w.updatingEditor {
-			return
-		}
-		app, _, ok := w.selectedManagedApp()
-		if !ok {
-			return
-		}
-		app.RunOnStartup = appRunOnStart.Checked()
-		w.refreshManagedList()
-		w.save()
-	})
-	w.appRunOnStart = appRunOnStart
-
 	appAutoHide, err := walk.NewCheckBox(optionsRow)
 	if err != nil {
 		return err
@@ -529,7 +510,6 @@ func (w *MainWindow) applyLanguage(language string) {
 	w.pathLabel.SetText(msg.ManagedAppPath)
 	w.argsLabel.SetText(msg.ManagedAppArgs)
 	w.browseBtn.SetText(msg.SelectProgram)
-	w.appRunOnStart.SetText(msg.ManagedRunOnStartup)
 	w.appAutoHide.SetText(msg.ManagedAutoHide)
 	w.appLaunchHidden.SetText(msg.ManagedLaunchHidden)
 	w.noSelectLabel.SetText(msg.ManagedNoSelectionHint)
@@ -642,7 +622,7 @@ func (w *MainWindow) refreshManagedList() {
 }
 
 func (w *MainWindow) syncManagedEditor() {
-	if w.pathEdit == nil || w.argsEdit == nil || w.appRunOnStart == nil || w.appAutoHide == nil || w.appLaunchHidden == nil {
+	if w.pathEdit == nil || w.argsEdit == nil || w.appAutoHide == nil || w.appLaunchHidden == nil {
 		return
 	}
 	app, _, ok := w.selectedManagedApp()
@@ -653,7 +633,6 @@ func (w *MainWindow) syncManagedEditor() {
 	w.pathEdit.SetEnabled(ok)
 	w.argsEdit.SetEnabled(ok)
 	w.browseBtn.SetEnabled(true)
-	w.appRunOnStart.SetEnabled(ok)
 	w.appAutoHide.SetEnabled(ok)
 	w.appLaunchHidden.SetEnabled(ok)
 	if ok {
@@ -666,7 +645,6 @@ func (w *MainWindow) syncManagedEditor() {
 	if !ok {
 		w.pathEdit.SetText("")
 		w.argsEdit.SetText("")
-		w.appRunOnStart.SetChecked(false)
 		w.appAutoHide.SetChecked(false)
 		w.appLaunchHidden.SetChecked(false)
 		return
@@ -674,7 +652,6 @@ func (w *MainWindow) syncManagedEditor() {
 
 	w.pathEdit.SetText(app.ExePath)
 	w.argsEdit.SetText(app.Args)
-	w.appRunOnStart.SetChecked(app.RunOnStartup)
 	w.appAutoHide.SetChecked(app.TrayBehavior.AutoMinimizeAndHideOnLaunch)
 	w.appLaunchHidden.SetChecked(app.LaunchHiddenInBackground)
 	w.appAutoHide.SetEnabled(!app.LaunchHiddenInBackground)

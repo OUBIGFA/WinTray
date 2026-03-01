@@ -4,7 +4,7 @@ package tray
 
 type Controller struct{}
 
-func New(_ any, _ func(), _ func(), _ func() (string, error), _ func(string), _ func(), _ string) (*Controller, error) {
+func New(_ any, _ func(), _ func(), _ string) (*Controller, error) {
 	return &Controller{}, nil
 }
 
