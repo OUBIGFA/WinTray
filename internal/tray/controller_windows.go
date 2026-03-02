@@ -4,6 +4,7 @@ package tray
 
 import (
 	"github.com/lxn/walk"
+	"wintray/internal/branding"
 	"wintray/internal/i18n"
 )
 
@@ -28,6 +29,13 @@ func New(
 	c := &Controller{
 		notifyIcon: ni,
 		language:   language,
+	}
+
+	if appIcon, iconErr := branding.AppIcon(); iconErr == nil && appIcon != nil {
+		if err = ni.SetIcon(appIcon); err != nil {
+			ni.Dispose()
+			return nil, err
+		}
 	}
 
 	openAction := walk.NewAction()

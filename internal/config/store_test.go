@@ -14,8 +14,8 @@ func TestMigrate_LegacySchemaEnablesRunOnStartup(t *testing.T) {
 
 	got := migrate(input)
 
-	if got.SchemaVersion != 2 {
-		t.Fatalf("migrate schema version = %d, want 2", got.SchemaVersion)
+	if got.SchemaVersion != 3 {
+		t.Fatalf("migrate schema version = %d, want 3", got.SchemaVersion)
 	}
 	for i, app := range got.ManagedApps {
 		if !app.RunOnStartup {
@@ -36,14 +36,48 @@ func TestMigrate_SchemaV2PreservesRunOnStartupFalse(t *testing.T) {
 
 	got := migrate(input)
 
-	if got.SchemaVersion != 2 {
-		t.Fatalf("migrate schema version = %d, want 2", got.SchemaVersion)
+	if got.SchemaVersion != 3 {
+		t.Fatalf("migrate schema version = %d, want 3", got.SchemaVersion)
 	}
 	if got.ManagedApps[0].RunOnStartup {
 		t.Fatalf("managed app 0 RunOnStartup = true, want false")
 	}
 	if !got.ManagedApps[1].RunOnStartup {
 		t.Fatalf("managed app 1 RunOnStartup = false, want true")
+	}
+}
+
+func TestMigrate_SchemaV2DefaultsExeToAutoHide(t *testing.T) {
+	input := Settings{
+		SchemaVersion: 2,
+		Language:      "zh-CN",
+		ManagedApps: []ManagedAppEntry{
+			{
+				Name:                     "eCloud",
+				ExePath:                  `D:\Software\ecloud\eCloud.exe`,
+				RunOnStartup:             true,
+				LaunchHiddenInBackground: false,
+				TrayBehavior:             TrayBehavior{AutoMinimizeAndHideOnLaunch: false},
+			},
+			{
+				Name:                     "openclaw",
+				ExePath:                  `C:\Users\bigfa\AppData\Roaming\npm\openclaw.cmd`,
+				RunOnStartup:             true,
+				LaunchHiddenInBackground: true,
+				TrayBehavior:             TrayBehavior{AutoMinimizeAndHideOnLaunch: false},
+			},
+		},
+	}
+
+	got := migrate(input)
+	if got.SchemaVersion != 3 {
+		t.Fatalf("migrate schema version = %d, want 3", got.SchemaVersion)
+	}
+	if !got.ManagedApps[0].TrayBehavior.AutoMinimizeAndHideOnLaunch {
+		t.Fatalf("exe managed app auto minimize = false, want true")
+	}
+	if got.ManagedApps[1].TrayBehavior.AutoMinimizeAndHideOnLaunch {
+		t.Fatalf("hidden cmd managed app auto minimize = true, want false")
 	}
 }
 

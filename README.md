@@ -2,6 +2,8 @@
 
 # WinTray
 
+<img src="internal/branding/assets/logo.png" alt="WinTray Logo" width="120" />
+
 **Windows 开机自动整理桌面的托盘工具**
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)

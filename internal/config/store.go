@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -62,6 +63,27 @@ func migrate(settings Settings) Settings {
 			settings.ManagedApps[i].RunOnStartup = true
 		}
 		settings.SchemaVersion = 2
+	}
+	// v3 restores legacy default behavior for EXE entries: when an entry is meant
+	// to launch on startup and not as hidden background task, default to closing
+	// its foreground window unless the user explicitly configured otherwise in
+	// newer schema versions.
+	if settings.SchemaVersion < 3 {
+		for i := range settings.ManagedApps {
+			if settings.ManagedApps[i].LaunchHiddenInBackground {
+				continue
+			}
+			if !settings.ManagedApps[i].RunOnStartup {
+				continue
+			}
+			if settings.ManagedApps[i].TrayBehavior.AutoMinimizeAndHideOnLaunch {
+				continue
+			}
+			if strings.EqualFold(filepath.Ext(settings.ManagedApps[i].ExePath), ".exe") {
+				settings.ManagedApps[i].TrayBehavior.AutoMinimizeAndHideOnLaunch = true
+			}
+		}
+		settings.SchemaVersion = 3
 	}
 	if settings.CloseWindowRetrySeconds < 0 {
 		settings.CloseWindowRetrySeconds = 0

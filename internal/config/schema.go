@@ -44,11 +44,11 @@ func ShouldLaunchViaWinTray(entry ManagedAppEntry) bool {
 
 func DefaultSettings() Settings {
 	return Settings{
-		SchemaVersion:                 2,
+		SchemaVersion:                 3,
 		Language:                      "zh-CN",
 		RunAtLogon:                    true,
-		StartMinimizedToTray:          false,
-		ExitAfterManagedAppsCompleted: false,
+		StartMinimizedToTray:          true,
+		ExitAfterManagedAppsCompleted: true,
 		CloseWindowRetrySeconds:       10,
 		ManagedApps:                   make([]ManagedAppEntry, 0),
 	}

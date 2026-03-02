@@ -2,6 +2,8 @@
 
 # WinTray
 
+<img src="internal/branding/assets/logo.png" alt="WinTray Logo" width="120" />
+
 **A Windows tray utility that auto-organizes your desktop at startup**
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)

@@ -84,6 +84,12 @@ func Run(args []string) {
 	orch := orchestrator.NewService(enumerator, manager, logger)
 	registrar := startup.NewRegistrar()
 
+	if isAutorunLaunch(args) {
+		logger.Info("autorun mode: run managed apps without initializing UI")
+		runManagedApps(context.Background(), orch, nil, settings, false, logger)
+		return
+	}
+
 	var (
 		mu     sync.Mutex
 		latest = settings
@@ -187,18 +193,7 @@ func Run(args []string) {
 		mainWindow.HideMainWindow()
 	}
 
-	managedCtx, managedCancel := context.WithCancel(context.Background())
-	defer managedCancel()
-
-	if isAutorunLaunch(args) {
-		mu.Lock()
-		snapshot := latest
-		mu.Unlock()
-		go runManagedApps(managedCtx, orch, mainWindow, snapshot, snapshot.ExitAfterManagedAppsCompleted, logger)
-	}
-
 	exitCode := mainWindow.Run()
-	managedCancel()
 
 	mu.Lock()
 	finalSettings := latest

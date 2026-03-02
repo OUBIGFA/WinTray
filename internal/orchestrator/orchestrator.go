@@ -24,7 +24,7 @@ func (s *Service) StartAndManage(ctx context.Context, entry config.ManagedAppEnt
 
 	expectedName := stringutil.TrimExt(filepath.Base(entry.ExePath))
 	expectedPath := normalizePath(entry.ExePath)
-	if s.hasExistingManagedWindow(expectedPath, expectedName, entry.WindowMatch.Strategy) {
+	if s.hasExistingManagedProcess(expectedPath, expectedName) || s.hasExistingManagedWindow(expectedPath, expectedName, entry.WindowMatch.Strategy) {
 		s.logger.Info(fmt.Sprintf("skip start: already running %s", entry.Name))
 		if !entry.LaunchHiddenInBackground && entry.TrayBehavior.AutoMinimizeAndHideOnLaunch {
 			ok := s.manageFirstMatchingWindow(ctx, func(w ManagedWindowInfo) bool {
@@ -64,6 +64,10 @@ func (s *Service) StartAndManage(ctx context.Context, entry config.ManagedAppEnt
 		return Result{AppName: entry.Name, Managed: false, Message: "no window managed"}
 	}
 	return Result{AppName: entry.Name, Managed: true, Action: "close", Message: "managed"}
+}
+
+func (s *Service) hasExistingManagedProcess(expectedPath, expectedName string) bool {
+	return hasRunningProcessByIdentity(expectedPath, expectedName)
 }
 
 func (s *Service) hasExistingManagedWindow(expectedPath, expectedName string, strategy config.MatchStrategy) bool {
@@ -118,6 +122,9 @@ func (s *Service) manageFirstMatchingWindow(ctx context.Context, predicate func(
 			if isUnmanageableWindow(w) {
 				continue
 			}
+			if actionType == "close" && w.IsToolWindow {
+				continue
+			}
 			score := computeCandidateScore(w, expectedPath, expectedName, launchedPID, baseline)
 			root := resolveActionTargetHandle(w)
 			if prev, ok := bestByRoot[root]; !ok || score > prev.Score {
@@ -141,7 +148,7 @@ func (s *Service) manageFirstMatchingWindow(ctx context.Context, predicate func(
 				}
 				managedAny = true
 				managedThisRound = true
-				break
+				continue
 			}
 		}
 

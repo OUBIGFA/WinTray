@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 	"unsafe"
 
 	"github.com/lxn/walk"
 	"github.com/lxn/win"
+	"wintray/internal/branding"
 	"wintray/internal/config"
 	"wintray/internal/i18n"
 	"wintray/internal/stringutil"
@@ -31,28 +33,30 @@ type MainWindow struct {
 	applyingLocale bool
 	updatingEditor bool
 
-	managedList     *walk.ListBox
-	editorTitle     *walk.Label
-	noSelectLabel   *walk.Label
-	pathLabel       *walk.Label
-	pathEdit        *walk.LineEdit
-	argsLabel       *walk.Label
-	argsEdit        *walk.LineEdit
-	browseBtn       *walk.PushButton
-	appAutoHide     *walk.CheckBox
-	appLaunchHidden *walk.CheckBox
-	retryEdit       *walk.LineEdit
-	runAtLogon      *walk.CheckBox
-	startHidden     *walk.CheckBox
-	exitOnDone      *walk.CheckBox
-	retryLabel      *walk.Label
-	managedTitle    *walk.Label
-	languageLabel   *walk.Label
-	languageCombo   *walk.ComboBox
-	removeBtn       *walk.PushButton
-	openLogsBtn     *walk.PushButton
-	cleanupBtn      *walk.PushButton
-	exitBtn         *walk.PushButton
+	managedList      *walk.TableView
+	managedListModel *managedListTableModel
+	editorTitle      *walk.Label
+	noSelectLabel    *walk.Label
+	pathLabel        *walk.Label
+	pathEdit         *walk.LineEdit
+	argsLabel        *walk.Label
+	argsEdit         *walk.LineEdit
+	browseBtn        *walk.PushButton
+	addProgramBtn    *walk.PushButton
+	appAutoHide      *walk.CheckBox
+	appLaunchHidden  *walk.CheckBox
+	retryEdit        *walk.LineEdit
+	runAtLogon       *walk.CheckBox
+	startHidden      *walk.CheckBox
+	exitOnDone       *walk.CheckBox
+	retryLabel       *walk.Label
+	managedTitle     *walk.Label
+	languageLabel    *walk.Label
+	languageCombo    *walk.ComboBox
+	removeBtn        *walk.PushButton
+	openLogsBtn      *walk.PushButton
+	cleanupBtn       *walk.PushButton
+	exitBtn          *walk.PushButton
 }
 
 func NewMainWindow(initial config.Settings, callbacks Callbacks) (*MainWindow, error) {
@@ -60,12 +64,17 @@ func NewMainWindow(initial config.Settings, callbacks Callbacks) (*MainWindow, e
 	if err != nil {
 		return nil, err
 	}
+	if appIcon, iconErr := branding.AppIcon(); iconErr == nil && appIcon != nil {
+		if err = mw.SetIcon(appIcon); err != nil {
+			return nil, err
+		}
+	}
 	w := &MainWindow{mw: mw, settings: initial, callbacks: callbacks}
 
-	mw.SetSize(walk.Size{Width: 920, Height: 600})
+	mw.SetSize(walk.Size{Width: 940, Height: 620})
 	layout := walk.NewVBoxLayout()
-	layout.SetMargins(walk.Margins{HNear: 12, VNear: 12, HFar: 12, VFar: 12})
-	layout.SetSpacing(8)
+	layout.SetMargins(walk.Margins{HNear: 14, VNear: 14, HFar: 14, VFar: 14})
+	layout.SetSpacing(10)
 	if err = mw.SetLayout(layout); err != nil {
 		return nil, err
 	}
@@ -117,7 +126,7 @@ func (w *MainWindow) buildTopOptions() error {
 		return err
 	}
 	optionsLayout := walk.NewHBoxLayout()
-	optionsLayout.SetSpacing(16)
+	optionsLayout.SetSpacing(12)
 	if err = optionsRow.SetLayout(optionsLayout); err != nil {
 		return err
 	}
@@ -168,7 +177,7 @@ func (w *MainWindow) buildTopOptions() error {
 		return err
 	}
 	settingsLayout := walk.NewHBoxLayout()
-	settingsLayout.SetSpacing(8)
+	settingsLayout.SetSpacing(10)
 	if err = settingsRow.SetLayout(settingsLayout); err != nil {
 		return err
 	}
@@ -183,7 +192,7 @@ func (w *MainWindow) buildTopOptions() error {
 	if err != nil {
 		return err
 	}
-	retryEdit.SetMinMaxSize(walk.Size{Width: 64, Height: 0}, walk.Size{Width: 64, Height: 0})
+	retryEdit.SetMinMaxSize(walk.Size{Width: 72, Height: 0}, walk.Size{Width: 72, Height: 0})
 	retryEdit.SetText(strconv.Itoa(w.settings.CloseWindowRetrySeconds))
 	retryEdit.EditingFinished().Attach(func() {
 		v, convErr := strconv.Atoi(retryEdit.Text())
@@ -221,7 +230,7 @@ func (w *MainWindow) buildTopOptions() error {
 	if err != nil {
 		return err
 	}
-	languageCombo.SetMinMaxSize(walk.Size{Width: 140, Height: 0}, walk.Size{Width: 140, Height: 0})
+	languageCombo.SetMinMaxSize(walk.Size{Width: 150, Height: 0}, walk.Size{Width: 150, Height: 0})
 	_ = languageCombo.SetModel([]string{i18n.For("zh-CN").LanguageZhLabel, i18n.For("zh-CN").LanguageEnLabel})
 	languageCombo.CurrentIndexChanged().Attach(func() {
 		if w.applyingLocale {
@@ -249,11 +258,44 @@ func (w *MainWindow) buildManagedList() error {
 	}
 	w.managedTitle = title
 
-	list, err := walk.NewListBox(w.mw)
+	list, err := walk.NewTableView(w.mw)
 	if err != nil {
 		return err
 	}
-	list.SetMinMaxSize(walk.Size{Width: 860, Height: 340}, walk.Size{})
+	list.SetMinMaxSize(walk.Size{Width: 860, Height: 320}, walk.Size{})
+	list.SetColumnsOrderable(false)
+	list.SetHeaderHidden(true)
+	list.SetGridlines(false)
+	list.SetLastColumnStretched(true)
+	list.SetSelectionHiddenWithoutFocus(true)
+
+	nameCol := walk.NewTableViewColumn()
+	nameCol.SetTitle("name")
+	nameCol.SetWidth(170)
+	_ = nameCol.SetAlignment(walk.AlignNear)
+	if err = list.Columns().Add(nameCol); err != nil {
+		return err
+	}
+	pathCol := walk.NewTableViewColumn()
+	pathCol.SetTitle("path")
+	pathCol.SetWidth(510)
+	_ = pathCol.SetAlignment(walk.AlignNear)
+	if err = list.Columns().Add(pathCol); err != nil {
+		return err
+	}
+	paramCol := walk.NewTableViewColumn()
+	paramCol.SetTitle("param")
+	paramCol.SetWidth(160)
+	_ = paramCol.SetAlignment(walk.AlignNear)
+	if err = list.Columns().Add(paramCol); err != nil {
+		return err
+	}
+
+	model := newManagedListTableModel()
+	if err = list.SetModel(model); err != nil {
+		return err
+	}
+	w.managedListModel = model
 	list.CurrentIndexChanged().Attach(func() {
 		w.syncManagedEditor()
 	})
@@ -261,7 +303,7 @@ func (w *MainWindow) buildManagedList() error {
 		if button != walk.LeftButton {
 			return
 		}
-		if w.listClickHitsItem(x, y) {
+		if w.tableViewHitOnItem(x, y) {
 			return
 		}
 		w.clearManagedSelection()
@@ -277,7 +319,7 @@ func (w *MainWindow) buildManagedEditor() error {
 		return err
 	}
 	v := walk.NewVBoxLayout()
-	v.SetSpacing(6)
+	v.SetSpacing(8)
 	if err = editor.SetLayout(v); err != nil {
 		return err
 	}
@@ -311,8 +353,9 @@ func (w *MainWindow) buildManagedEditor() error {
 	if err != nil {
 		return err
 	}
-	noSelectLabel.SetMinMaxSize(walk.Size{Width: 860, Height: 24}, walk.Size{Width: 860, Height: 24})
-	noSelectLabel.SetAlwaysConsumeSpace(true)
+	noSelectLabel.SetMinMaxSize(walk.Size{Width: 860, Height: 22}, walk.Size{Width: 860, Height: 22})
+	noSelectLabel.SetAlwaysConsumeSpace(false)
+	noSelectLabel.SetVisible(false)
 	w.noSelectLabel = noSelectLabel
 
 	pathRow, err := walk.NewComposite(editor)
@@ -330,13 +373,14 @@ func (w *MainWindow) buildManagedEditor() error {
 		return err
 	}
 	w.pathLabel = pathLabel
+	pathLabel.SetMinMaxSize(walk.Size{Width: 96, Height: 0}, walk.Size{Width: 96, Height: 0})
 
 	pathEdit, err := walk.NewLineEdit(pathRow)
 	if err != nil {
 		return err
 	}
 	pathEdit.SetReadOnly(true)
-	pathEdit.SetMinMaxSize(walk.Size{Width: 620, Height: 0}, walk.Size{Width: 620, Height: 0})
+	pathEdit.SetMinMaxSize(walk.Size{Width: 520, Height: 0}, walk.Size{Width: 520, Height: 0})
 	w.pathEdit = pathEdit
 
 	browseBtn, err := walk.NewPushButton(pathRow)
@@ -345,6 +389,13 @@ func (w *MainWindow) buildManagedEditor() error {
 	}
 	browseBtn.Clicked().Attach(w.onSelectProgramForSelected)
 	w.browseBtn = browseBtn
+
+	addProgramBtn, err := walk.NewPushButton(pathRow)
+	if err != nil {
+		return err
+	}
+	addProgramBtn.Clicked().Attach(w.onAddProgram)
+	w.addProgramBtn = addProgramBtn
 
 	argsRow, err := walk.NewComposite(editor)
 	if err != nil {
@@ -361,12 +412,13 @@ func (w *MainWindow) buildManagedEditor() error {
 		return err
 	}
 	w.argsLabel = argsLabel
+	argsLabel.SetMinMaxSize(walk.Size{Width: 96, Height: 0}, walk.Size{Width: 96, Height: 0})
 
 	argsEdit, err := walk.NewLineEdit(argsRow)
 	if err != nil {
 		return err
 	}
-	argsEdit.SetMinMaxSize(walk.Size{Width: 740, Height: 0}, walk.Size{Width: 740, Height: 0})
+	argsEdit.SetMinMaxSize(walk.Size{Width: 760, Height: 0}, walk.Size{Width: 760, Height: 0})
 	argsEdit.EditingFinished().Attach(func() {
 		if w.updatingEditor {
 			return
@@ -385,7 +437,7 @@ func (w *MainWindow) buildManagedEditor() error {
 		return err
 	}
 	hOpt := walk.NewHBoxLayout()
-	hOpt.SetSpacing(16)
+	hOpt.SetSpacing(12)
 	if err = optionsRow.SetLayout(hOpt); err != nil {
 		return err
 	}
@@ -446,7 +498,7 @@ func (w *MainWindow) buildActions() error {
 		return err
 	}
 	h := walk.NewHBoxLayout()
-	h.SetSpacing(8)
+	h.SetSpacing(10)
 	if err = row.SetLayout(h); err != nil {
 		return err
 	}
@@ -456,6 +508,7 @@ func (w *MainWindow) buildActions() error {
 		return err
 	}
 	removeBtn.Clicked().Attach(w.onRemoveSelected)
+	removeBtn.SetMinMaxSize(walk.Size{Width: 110, Height: 0}, walk.Size{Width: 110, Height: 0})
 	w.removeBtn = removeBtn
 
 	openLogsBtn, err := walk.NewPushButton(row)
@@ -467,6 +520,7 @@ func (w *MainWindow) buildActions() error {
 			w.callbacks.OnOpenLogs()
 		}
 	})
+	openLogsBtn.SetMinMaxSize(walk.Size{Width: 110, Height: 0}, walk.Size{Width: 110, Height: 0})
 	w.openLogsBtn = openLogsBtn
 
 	cleanupBtn, err := walk.NewPushButton(row)
@@ -478,6 +532,7 @@ func (w *MainWindow) buildActions() error {
 			w.callbacks.OnCleanupRestore()
 		}
 	})
+	cleanupBtn.SetMinMaxSize(walk.Size{Width: 150, Height: 0}, walk.Size{Width: 150, Height: 0})
 	w.cleanupBtn = cleanupBtn
 
 	exitBtn, err := walk.NewPushButton(row)
@@ -489,6 +544,7 @@ func (w *MainWindow) buildActions() error {
 			w.callbacks.OnExit()
 		}
 	})
+	exitBtn.SetMinMaxSize(walk.Size{Width: 110, Height: 0}, walk.Size{Width: 110, Height: 0})
 	w.exitBtn = exitBtn
 
 	return nil
@@ -509,10 +565,10 @@ func (w *MainWindow) applyLanguage(language string) {
 	w.editorTitle.SetText(msg.ManagedEditorTitle)
 	w.pathLabel.SetText(msg.ManagedAppPath)
 	w.argsLabel.SetText(msg.ManagedAppArgs)
-	w.browseBtn.SetText(msg.SelectProgram)
+	w.browseBtn.SetText(msg.AddProgram)
+	w.addProgramBtn.SetText(msg.AddProgram)
 	w.appAutoHide.SetText(msg.ManagedAutoHide)
 	w.appLaunchHidden.SetText(msg.ManagedLaunchHidden)
-	w.noSelectLabel.SetText(msg.ManagedNoSelectionHint)
 	w.languageLabel.SetText(msg.LanguageLabel)
 	w.removeBtn.SetText(msg.RemoveSelected)
 	w.openLogsBtn.SetText(msg.OpenLogs)
@@ -548,6 +604,7 @@ func (w *MainWindow) onAddProgram() {
 		name = msg.NewAppName
 	}
 	id := strconv.FormatInt(time.Now().UnixNano(), 10)
+	launchHiddenByDefault := shouldDefaultLaunchHidden(dlg.FilePath)
 	w.settings.ManagedApps = append(w.settings.ManagedApps, config.ManagedAppEntry{
 		ID:           id,
 		Name:         name,
@@ -557,8 +614,8 @@ func (w *MainWindow) onAddProgram() {
 		WindowMatch: config.WindowMatchRule{
 			Strategy: config.MatchProcessNameThenTitle,
 		},
-		LaunchHiddenInBackground: false,
-		TrayBehavior:             config.TrayBehavior{AutoMinimizeAndHideOnLaunch: true},
+		LaunchHiddenInBackground: launchHiddenByDefault,
+		TrayBehavior:             config.TrayBehavior{AutoMinimizeAndHideOnLaunch: !launchHiddenByDefault},
 	})
 	w.refreshManagedList()
 	w.managedList.SetCurrentIndex(len(w.settings.ManagedApps) - 1)
@@ -567,7 +624,7 @@ func (w *MainWindow) onAddProgram() {
 }
 
 func (w *MainWindow) onSelectProgramForSelected() {
-	app, _, ok := w.selectedManagedApp()
+	app, idx, ok := w.selectedManagedApp()
 	if !ok {
 		// No item selected — fall back to adding a new entry
 		w.onAddProgram()
@@ -586,9 +643,18 @@ func (w *MainWindow) onSelectProgramForSelected() {
 	if name != "" {
 		app.Name = name
 	}
+	if shouldDefaultLaunchHidden(dlg.FilePath) {
+		app.LaunchHiddenInBackground = true
+		app.TrayBehavior.AutoMinimizeAndHideOnLaunch = false
+	}
 	w.refreshManagedList()
+	w.managedList.SetCurrentIndex(idx)
 	w.syncManagedEditor()
 	w.save()
+}
+
+func shouldDefaultLaunchHidden(path string) bool {
+	return strings.ToLower(filepath.Ext(path)) != ".exe"
 }
 
 func (w *MainWindow) onRemoveSelected() {
@@ -603,26 +669,33 @@ func (w *MainWindow) onRemoveSelected() {
 }
 
 func (w *MainWindow) refreshManagedList() {
-	selected := w.managedList.CurrentIndex()
-	items := make([]string, 0, len(w.settings.ManagedApps))
-	for _, app := range w.settings.ManagedApps {
-		items = append(items, i18n.FormatManagedListItem(w.settings.Language, app))
+	if w.managedList == nil || w.managedListModel == nil {
+		return
 	}
-	_ = w.managedList.SetModel(items)
-	if len(items) == 0 {
+	selected := w.managedList.CurrentIndex()
+	rows := make([]managedListRow, 0, len(w.settings.ManagedApps))
+	for _, app := range w.settings.ManagedApps {
+		rows = append(rows, managedListRow{
+			Name:  app.Name,
+			Path:  app.ExePath,
+			Param: i18n.FormatManagedParam(w.settings.Language, app),
+		})
+	}
+	w.managedListModel.SetRows(rows)
+	if len(rows) == 0 {
 		w.managedList.SetCurrentIndex(-1)
 		w.syncManagedEditor()
 		return
 	}
-	if selected >= len(items) {
-		selected = len(items) - 1
+	if selected >= len(rows) {
+		selected = len(rows) - 1
 	}
 	w.managedList.SetCurrentIndex(selected)
 	w.syncManagedEditor()
 }
 
 func (w *MainWindow) syncManagedEditor() {
-	if w.pathEdit == nil || w.argsEdit == nil || w.appAutoHide == nil || w.appLaunchHidden == nil {
+	if w.pathEdit == nil || w.argsEdit == nil || w.appAutoHide == nil || w.appLaunchHidden == nil || w.addProgramBtn == nil {
 		return
 	}
 	app, _, ok := w.selectedManagedApp()
@@ -632,14 +705,19 @@ func (w *MainWindow) syncManagedEditor() {
 	msg := i18n.For(w.settings.Language)
 	w.pathEdit.SetEnabled(ok)
 	w.argsEdit.SetEnabled(ok)
+	w.argsEdit.SetReadOnly(!ok)
 	w.browseBtn.SetEnabled(true)
+	w.addProgramBtn.SetEnabled(true)
 	w.appAutoHide.SetEnabled(ok)
 	w.appLaunchHidden.SetEnabled(ok)
+	w.noSelectLabel.SetVisible(false)
 	if ok {
-		w.noSelectLabel.SetVisible(false)
+		w.browseBtn.SetText(msg.ModifyProgram)
+		w.addProgramBtn.SetText(msg.AddProgram)
+		w.addProgramBtn.SetVisible(true)
 	} else {
-		w.noSelectLabel.SetText(msg.ManagedNoSelectionHint)
-		w.noSelectLabel.SetVisible(true)
+		w.browseBtn.SetText(msg.AddProgram)
+		w.addProgramBtn.SetVisible(false)
 	}
 
 	if !ok {
@@ -733,34 +811,59 @@ func (w *MainWindow) clearManagedSelection() {
 	if w.managedList == nil {
 		return
 	}
-	w.managedList.SendMessage(win.LB_SETCURSEL, ^uintptr(0), 0)
+	_ = w.managedList.SetSelectedIndexes([]int{})
+	_ = w.managedList.SetCurrentIndex(-1)
 	w.syncManagedEditor()
 }
 
-func (w *MainWindow) listClickHitsItem(x, y int) bool {
+func (w *MainWindow) tableViewHitOnItem(x, y int) bool {
 	if w.managedList == nil {
 		return false
 	}
-	if len(w.settings.ManagedApps) == 0 {
+	hti := win.LVHITTESTINFO{Pt: win.POINT{X: int32(x), Y: int32(y)}}
+	w.managedList.SendMessage(win.LVM_HITTEST, 0, uintptr(unsafe.Pointer(&hti)))
+	if hti.IItem < 0 {
 		return false
 	}
-	point := win.MAKELONG(uint16(x), uint16(y))
-	result := w.managedList.SendMessage(win.LB_ITEMFROMPOINT, 0, uintptr(point))
-	outside := ((result >> 16) & 0xFFFF) != 0
-	if outside {
-		return false
+	return (hti.Flags & win.LVHT_ONITEM) != 0
+}
+
+type managedListRow struct {
+	Name  string
+	Path  string
+	Param string
+}
+
+type managedListTableModel struct {
+	walk.TableModelBase
+	rows []managedListRow
+}
+
+func newManagedListTableModel() *managedListTableModel {
+	return &managedListTableModel{rows: make([]managedListRow, 0)}
+}
+
+func (m *managedListTableModel) RowCount() int {
+	return len(m.rows)
+}
+
+func (m *managedListTableModel) Value(row, col int) any {
+	if row < 0 || row >= len(m.rows) {
+		return ""
 	}
-	index := int(result & 0xFFFF)
-	if index < 0 || index >= len(w.settings.ManagedApps) {
-		return false
+	switch col {
+	case 0:
+		return m.rows[row].Name
+	case 1:
+		return m.rows[row].Path
+	case 2:
+		return m.rows[row].Param
+	default:
+		return ""
 	}
-	var rect win.RECT
-	ret := w.managedList.SendMessage(win.LB_GETITEMRECT, uintptr(index), uintptr(unsafe.Pointer(&rect)))
-	if int32(ret) == win.LB_ERR {
-		return false
-	}
-	if y < int(rect.Top) || y >= int(rect.Bottom) {
-		return false
-	}
-	return true
+}
+
+func (m *managedListTableModel) SetRows(rows []managedListRow) {
+	m.rows = rows
+	m.PublishRowsReset()
 }
