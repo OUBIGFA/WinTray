@@ -1,6 +1,9 @@
 package orchestrator
 
 import (
+	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	"wintray/internal/config"
@@ -253,5 +256,93 @@ func TestParseArgs(t *testing.T) {
 				t.Errorf("parseArgs(%q)[%d] = %q, want %q", tc.input, i, got[i], tc.want[i])
 			}
 		}
+	}
+}
+
+func TestIsPowerShellScript(t *testing.T) {
+	if !isPowerShellScript(`C:\Scripts\start-all.ps1`) {
+		t.Fatal("expected .ps1 to be recognized as PowerShell script")
+	}
+	if isPowerShellScript(`C:\Scripts\start-all.cmd`) {
+		t.Fatal("expected .cmd to not be recognized as PowerShell script")
+	}
+}
+
+func TestBuildLaunchCommand_PowerShellScript(t *testing.T) {
+	cmd := buildLaunchCommand(`C:\My Scripts\start-all.ps1`, `-Mode "full run" -DryRun`, true)
+	if !strings.EqualFold(filepath.Base(cmd.Path), "powershell.exe") {
+		t.Fatalf("expected powershell.exe launcher, got %q", cmd.Path)
+	}
+
+	want := []string{"powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", `C:\My Scripts\start-all.ps1`, "-Mode", "full run", "-DryRun"}
+	if len(cmd.Args) != len(want) {
+		t.Fatalf("unexpected args len: got=%d want=%d args=%v", len(cmd.Args), len(want), cmd.Args)
+	}
+	for i := range want {
+		if cmd.Args[i] != want[i] {
+			t.Fatalf("arg[%d] mismatch: got=%q want=%q (all=%v)", i, cmd.Args[i], want[i], cmd.Args)
+		}
+	}
+
+	if cmd.SysProcAttr == nil {
+		t.Fatal("expected hidden launch to configure SysProcAttr")
+	}
+}
+
+func TestBuildLaunchCommand_ExeWithArgs_UsesDirectProcess(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-specific launch behavior")
+	}
+
+	cmd := buildLaunchCommand(`D:\Software\AI Toolbox\ai-toolbox.exe`, `--mode "full run" --port 8080`, false)
+	if strings.EqualFold(filepath.Base(cmd.Path), "cmd.exe") {
+		t.Fatalf("expected direct executable launch for .exe with args, got shell launcher path=%q", cmd.Path)
+	}
+	if !strings.EqualFold(filepath.Base(cmd.Path), "ai-toolbox.exe") {
+		t.Fatalf("expected ai-toolbox.exe launcher, got %q", cmd.Path)
+	}
+
+	want := []string{"D:\\Software\\AI Toolbox\\ai-toolbox.exe", "--mode", "full run", "--port", "8080"}
+	if len(cmd.Args) != len(want) {
+		t.Fatalf("unexpected args len: got=%d want=%d args=%v", len(cmd.Args), len(want), cmd.Args)
+	}
+	for i := range want {
+		if cmd.Args[i] != want[i] {
+			t.Fatalf("arg[%d] mismatch: got=%q want=%q (all=%v)", i, cmd.Args[i], want[i], cmd.Args)
+		}
+	}
+}
+
+func TestBuildLaunchCommand_CmdScript_UsesShellLauncher(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-specific launch behavior")
+	}
+
+	cmd := buildLaunchCommand(`C:\Scripts\start.cmd`, `--foo bar`, false)
+	if !strings.EqualFold(filepath.Base(cmd.Path), "cmd.exe") {
+		t.Fatalf("expected cmd.exe launcher for cmd script, got %q", cmd.Path)
+	}
+	if cmd.SysProcAttr == nil {
+		t.Fatal("expected SysProcAttr with CmdLine for cmd script launcher")
+	}
+}
+
+func TestBuildLaunchCommand_ExeHidden_ConfiguresNoWindow(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-specific launch behavior")
+	}
+
+	cmd := buildLaunchCommand(`D:\Tools\openclaw.exe`, "--silent", true)
+	if !strings.EqualFold(filepath.Base(cmd.Path), "openclaw.exe") {
+		t.Fatalf("expected openclaw.exe launcher, got %q", cmd.Path)
+	}
+	if cmd.SysProcAttr == nil {
+		t.Fatal("expected hidden executable launch to configure SysProcAttr")
+	}
+	if cmd.SysProcAttr.CreationFlags != createNoWindow {
+		t.Fatalf("expected CreationFlags=%d, got %d", createNoWindow, cmd.SysProcAttr.CreationFlags)
+	}
+	if !cmd.SysProcAttr.HideWindow {
+		t.Fatal("expected HideWindow=true for hidden executable launch")
 	}
 }

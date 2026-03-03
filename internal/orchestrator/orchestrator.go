@@ -29,9 +29,9 @@ func (s *Service) StartAndManage(ctx context.Context, entry config.ManagedAppEnt
 		if !entry.LaunchHiddenInBackground && entry.TrayBehavior.AutoMinimizeAndHideOnLaunch {
 			ok := s.manageFirstMatchingWindow(ctx, func(w ManagedWindowInfo) bool {
 				return matchesExecutableWithIdentityFallback(w, expectedPath, expectedName) && matchStrategy(w, entry.WindowMatch.Strategy)
-			}, expectedPath, expectedName, nil, nil, retrySeconds, "hide")
+			}, expectedPath, expectedName, nil, nil, retrySeconds, "close")
 			if ok {
-				return Result{AppName: entry.Name, Managed: true, Action: "hide", Message: "already running managed existing"}
+				return Result{AppName: entry.Name, Managed: true, Action: "close", Message: "already running managed existing"}
 			}
 		}
 		return Result{AppName: entry.Name, Managed: true, Message: "already running skipped"}
@@ -94,11 +94,11 @@ func (s *Service) HideExisting(ctx context.Context, entry config.ManagedAppEntry
 	expectedPath := normalizePath(entry.ExePath)
 	ok := s.manageFirstMatchingWindow(ctx, func(w ManagedWindowInfo) bool {
 		return matchesExecutableWithIdentityFallback(w, expectedPath, expectedName) && matchStrategy(w, entry.WindowMatch.Strategy)
-	}, expectedPath, expectedName, nil, nil, retrySeconds, "hide")
+	}, expectedPath, expectedName, nil, nil, retrySeconds, "close")
 	if !ok {
 		return Result{AppName: entry.Name, Managed: false, Message: "no existing window managed"}
 	}
-	return Result{AppName: entry.Name, Managed: true, Action: "hide", Message: "managed existing"}
+	return Result{AppName: entry.Name, Managed: true, Action: "close", Message: "managed existing"}
 }
 
 func (s *Service) manageFirstMatchingWindow(ctx context.Context, predicate func(ManagedWindowInfo) bool, expectedPath, expectedName string, launchedPID *uint32, baseline map[uintptr]struct{}, retrySeconds int, actionType string) bool {

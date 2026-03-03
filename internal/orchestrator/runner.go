@@ -52,32 +52,63 @@ const createNoWindow = 0x08000000
 func buildLaunchCommand(exePath, args string, hidden bool) *exec.Cmd {
 	trimmedArgs := strings.TrimSpace(args)
 	if runtime.GOOS == "windows" {
-		needsShell := isCmdScript(exePath) || trimmedArgs != ""
-		if hidden || needsShell {
+		if isPowerShellScript(exePath) {
+			return buildPowerShellCommand(exePath, trimmedArgs, hidden)
+		}
+
+		if isCmdScript(exePath) {
 			cleanPath := strings.Trim(strings.TrimSpace(exePath), "\"")
 			commandLine := fmt.Sprintf("cmd.exe /c \"%s\"", cleanPath)
 			if trimmedArgs != "" {
 				commandLine = commandLine + " " + trimmedArgs
 			}
 			cmd := exec.Command("cmd.exe")
-			attr := &syscall.SysProcAttr{CmdLine: commandLine}
+			cmd.SysProcAttr = &syscall.SysProcAttr{CmdLine: commandLine}
 			if hidden {
-				attr.CreationFlags = createNoWindow
-				attr.HideWindow = true
+				cmd.SysProcAttr.CreationFlags = createNoWindow
+				cmd.SysProcAttr.HideWindow = true
 			}
-			cmd.SysProcAttr = attr
 			return cmd
 		}
 	}
 	if trimmedArgs == "" {
-		return exec.Command(exePath)
+		cmd := exec.Command(exePath)
+		if runtime.GOOS == "windows" && hidden {
+			cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNoWindow, HideWindow: true}
+		}
+		return cmd
 	}
-	return exec.Command(exePath, parseArgs(trimmedArgs)...)
+	cmd := exec.Command(exePath, parseArgs(trimmedArgs)...)
+	if runtime.GOOS == "windows" && hidden {
+		cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNoWindow, HideWindow: true}
+	}
+	return cmd
 }
 
 func isCmdScript(exePath string) bool {
 	ext := strings.ToLower(filepath.Ext(exePath))
 	return ext == ".bat" || ext == ".cmd"
+}
+
+func isPowerShellScript(exePath string) bool {
+	ext := strings.ToLower(filepath.Ext(exePath))
+	return ext == ".ps1"
+}
+
+func buildPowerShellCommand(scriptPath, args string, hidden bool) *exec.Cmd {
+	cleanPath := strings.Trim(strings.TrimSpace(scriptPath), "\"")
+	cmdArgs := []string{"-NoProfile", "-ExecutionPolicy", "Bypass", "-File", cleanPath}
+	if args != "" {
+		cmdArgs = append(cmdArgs, parseArgs(args)...)
+	}
+	cmd := exec.Command("powershell.exe", cmdArgs...)
+	if hidden {
+		cmd.SysProcAttr = &syscall.SysProcAttr{
+			CreationFlags: createNoWindow,
+			HideWindow:    true,
+		}
+	}
+	return cmd
 }
 
 // parseArgs splits an argument string respecting double-quoted segments.
