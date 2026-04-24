@@ -30,6 +30,7 @@ type Messages struct {
 	ModifyProgram                  string
 	ManagedAutoHide                string
 	ManagedLaunchHidden            string
+	ManagedPauseTask               string
 	AddProgram                     string
 	RemoveSelected                 string
 	OpenLogs                       string
@@ -48,6 +49,7 @@ type Messages struct {
 	ManagedListHiddenTemplate      string
 	ManagedListParamTemplate       string
 	ManagedListParamHiddenTemplate string
+	ManagedListParamPausedTemplate string
 	RunSummaryTitle                string
 	RunSummaryNone                 string
 	RunSummaryLine                 string
@@ -87,7 +89,8 @@ var zhCN = Messages{
 	SelectProgram:                  "选择程序",
 	ModifyProgram:                  "修改程序",
 	ManagedAutoHide:                "启动后关闭窗口（未勾选仅启动）",
-	ManagedLaunchHidden:            "隐藏后台启动（适用于 cmd/bat/ps1）",
+	ManagedLaunchHidden:            "隐藏后台启动（适用于 cmd/bat/ps1/py）",
+	ManagedPauseTask:               "暂停任务（取消勾选后下次继续执行）",
 	AddProgram:                     "添加程序",
 	RemoveSelected:                 "删除选中",
 	OpenLogs:                       "打开日志",
@@ -99,13 +102,14 @@ var zhCN = Messages{
 	TrayExit:                       "退出 WinTray",
 	TrayToolTip:                    "WinTray",
 	SelectManagedExe:               "选择要托管的程序",
-	ExeFilter:                      "程序文件 (*.exe;*.cmd;*.bat;*.ps1)|*.exe;*.cmd;*.bat;*.ps1",
+	ExeFilter:                      "程序文件 (*.exe;*.cmd;*.bat;*.ps1;*.py)|*.exe;*.cmd;*.bat;*.ps1;*.py",
 	AllFilesFilter:                 "所有文件 (*.*)|*.*",
 	NewAppName:                     "新程序",
 	ManagedListItemTemplate:        "%s | %s | 启动后关闭界面=%t",
 	ManagedListHiddenTemplate:      "%s | %s | 隐藏后台启动=%t",
 	ManagedListParamTemplate:       "关闭界面=%t",
 	ManagedListParamHiddenTemplate: "隐藏后台=%t",
+	ManagedListParamPausedTemplate: "已暂停",
 	RunSummaryTitle:                "受管任务结果",
 	RunSummaryNone:                 "没有可执行的受管任务。",
 	RunSummaryLine:                 "%s：%s",
@@ -145,7 +149,8 @@ var enUS = Messages{
 	SelectProgram:                  "Select Program",
 	ModifyProgram:                  "Modify Program",
 	ManagedAutoHide:                "Close window after launch (unchecked: launch only)",
-	ManagedLaunchHidden:            "Launch hidden in background (for cmd/bat/ps1)",
+	ManagedLaunchHidden:            "Launch hidden in background (for cmd/bat/ps1/py)",
+	ManagedPauseTask:               "Pause task (resume on next run when unchecked)",
 	AddProgram:                     "Add Program",
 	RemoveSelected:                 "Remove Selected",
 	OpenLogs:                       "Open Logs",
@@ -157,13 +162,14 @@ var enUS = Messages{
 	TrayExit:                       "Exit WinTray",
 	TrayToolTip:                    "WinTray",
 	SelectManagedExe:               "Select program to manage",
-	ExeFilter:                      "Program files (*.exe;*.cmd;*.bat;*.ps1)|*.exe;*.cmd;*.bat;*.ps1",
+	ExeFilter:                      "Program files (*.exe;*.cmd;*.bat;*.ps1;*.py)|*.exe;*.cmd;*.bat;*.ps1;*.py",
 	AllFilesFilter:                 "All Files (*.*)|*.*",
 	NewAppName:                     "New App",
 	ManagedListItemTemplate:        "%s | %s | CloseAfterLaunch=%t",
 	ManagedListHiddenTemplate:      "%s | %s | LaunchHidden=%t",
 	ManagedListParamTemplate:       "CloseAfterLaunch=%t",
 	ManagedListParamHiddenTemplate: "LaunchHidden=%t",
+	ManagedListParamPausedTemplate: "Paused",
 	RunSummaryTitle:                "Managed Task Results",
 	RunSummaryNone:                 "No managed tasks to run.",
 	RunSummaryLine:                 "%s: %s",
@@ -209,6 +215,9 @@ func LanguageOptions() []string {
 
 func FormatManagedListItem(language string, app config.ManagedAppEntry) string {
 	msg := For(language)
+	if !app.RunOnStartup {
+		return fmt.Sprintf("%s | %s | %s", app.Name, app.ExePath, msg.ManagedListParamPausedTemplate)
+	}
 	if strings.ToLower(filepath.Ext(app.ExePath)) != ".exe" {
 		return fmt.Sprintf(msg.ManagedListHiddenTemplate, app.Name, app.ExePath, app.LaunchHiddenInBackground)
 	}
@@ -217,6 +226,9 @@ func FormatManagedListItem(language string, app config.ManagedAppEntry) string {
 
 func FormatManagedParam(language string, app config.ManagedAppEntry) string {
 	msg := For(language)
+	if !app.RunOnStartup {
+		return msg.ManagedListParamPausedTemplate
+	}
 	if strings.ToLower(filepath.Ext(app.ExePath)) != ".exe" {
 		return fmt.Sprintf(msg.ManagedListParamHiddenTemplate, app.LaunchHiddenInBackground)
 	}

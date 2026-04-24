@@ -52,6 +52,10 @@ const createNoWindow = 0x08000000
 func buildLaunchCommand(exePath, args string, hidden bool) *exec.Cmd {
 	trimmedArgs := strings.TrimSpace(args)
 	if runtime.GOOS == "windows" {
+		if isPythonScript(exePath) {
+			return buildPythonCommand(exePath, trimmedArgs, hidden)
+		}
+
 		if isPowerShellScript(exePath) {
 			return buildPowerShellCommand(exePath, trimmedArgs, hidden)
 		}
@@ -93,6 +97,27 @@ func isCmdScript(exePath string) bool {
 func isPowerShellScript(exePath string) bool {
 	ext := strings.ToLower(filepath.Ext(exePath))
 	return ext == ".ps1"
+}
+
+func isPythonScript(exePath string) bool {
+	ext := strings.ToLower(filepath.Ext(exePath))
+	return ext == ".py" || ext == ".pyw"
+}
+
+func buildPythonCommand(scriptPath, args string, hidden bool) *exec.Cmd {
+	cleanPath := strings.Trim(strings.TrimSpace(scriptPath), "\"")
+	cmdArgs := []string{cleanPath}
+	if args != "" {
+		cmdArgs = append(cmdArgs, parseArgs(args)...)
+	}
+	cmd := exec.Command("python.exe", cmdArgs...)
+	if hidden {
+		cmd.SysProcAttr = &syscall.SysProcAttr{
+			CreationFlags: createNoWindow,
+			HideWindow:    true,
+		}
+	}
+	return cmd
 }
 
 func buildPowerShellCommand(scriptPath, args string, hidden bool) *exec.Cmd {

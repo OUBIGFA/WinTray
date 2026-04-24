@@ -39,7 +39,7 @@ type Settings struct {
 }
 
 func ShouldLaunchViaWinTray(entry ManagedAppEntry) bool {
-	return entry.LaunchHiddenInBackground || entry.TrayBehavior.AutoMinimizeAndHideOnLaunch || entry.RunOnStartup
+	return entry.RunOnStartup
 }
 
 func DefaultSettings() Settings {

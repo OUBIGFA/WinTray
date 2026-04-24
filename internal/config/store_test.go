@@ -2,6 +2,47 @@ package config
 
 import "testing"
 
+func TestShouldLaunchViaWinTray_RunOnStartupIsMasterSwitch(t *testing.T) {
+	tests := []struct {
+		name  string
+		entry ManagedAppEntry
+		want  bool
+	}{
+		{
+			name: "paused hidden task does not launch",
+			entry: ManagedAppEntry{
+				RunOnStartup:             false,
+				LaunchHiddenInBackground: true,
+			},
+			want: false,
+		},
+		{
+			name: "paused auto hide task does not launch",
+			entry: ManagedAppEntry{
+				RunOnStartup: false,
+				TrayBehavior: TrayBehavior{AutoMinimizeAndHideOnLaunch: true},
+			},
+			want: false,
+		},
+		{
+			name: "enabled launch only task launches",
+			entry: ManagedAppEntry{
+				RunOnStartup: true,
+			},
+			want: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ShouldLaunchViaWinTray(tc.entry)
+			if got != tc.want {
+				t.Fatalf("ShouldLaunchViaWinTray(%+v) = %v, want %v", tc.entry, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestMigrate_LegacySchemaEnablesRunOnStartup(t *testing.T) {
 	input := Settings{
 		SchemaVersion: 1,
