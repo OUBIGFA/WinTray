@@ -10,7 +10,7 @@
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-lightgrey.svg)]()
 [![Go 1.22](https://img.shields.io/badge/Go-1.22-00ADD8.svg)]()
 
-[English](README.en.md) | 简体中文
+[English](README.en.md) | [简体中文](README.md)
 
 </div>
 
