@@ -35,16 +35,6 @@ WinTray is a Windows startup organizer. It sits in the system tray and, when tri
 
 ---
 
-## System Requirements
-
-| Item | Requirement |
-| --- | --- |
-| OS | Windows 10 / 11 |
-| Runtime | No additional dependencies (standalone executable) |
-| Build from source | Go 1.22+ |
-
----
-
 ## Download & Usage
 
 WinTray is **portable only** — no installation needed.
@@ -56,35 +46,16 @@ Go to the [Releases](../../releases) page, download `WinTray-Portable.zip`, extr
 
 ---
 
-## Data Directory
-
-| Type | Path |
-| --- | --- |
-| Configuration | `%LOCALAPPDATA%\WinTray\settings.json` |
-| Logs | `%LOCALAPPDATA%\WinTray\wintray.log` |
-
----
-
-## Command-Line Arguments
-
-| Argument | Description |
-| --- | --- |
-| `--background` | Start without showing the main window (for auto-start scenarios) |
-| `--autorun` | Execute managed program tasks automatically (used by auto-start) |
-| `--cleanup-restore` | Only perform cleanup: clear `%LOCALAPPDATA%\WinTray\` and exit |
-
----
-
 ## Supported Program Types
 
 WinTray supports adding the following program types to the managed list, automatically launching and handling their windows at startup:
 
-| Type | File Extension | Launch Behavior |
-| --- | --- | --- |
-| Executable | `.exe` | Foreground launch by default; can optionally close the window to hide to tray |
-| Batch script | `.bat` / `.cmd` | Hidden background launch by default (no console window) |
-| PowerShell script | `.ps1` | Hidden background launch by default |
-| Python script | `.py` / `.pyw` | Hidden background launch by default, automatically invokes `python.exe` |
+| Type              | File Extension  | Launch Behavior                                                               |
+| ----------------- | --------------- | ----------------------------------------------------------------------------- |
+| Executable        | `.exe`          | Foreground launch by default; can optionally close the window to hide to tray |
+| Batch script      | `.bat` / `.cmd` | Hidden background launch by default (no console window)                       |
+| PowerShell script | `.ps1`          | Hidden background launch by default                                           |
+| Python script     | `.py` / `.pyw`  | Hidden background launch by default, automatically invokes `python.exe`       |
 
 > Non-`.exe` scripts (`.bat` / `.cmd` / `.ps1` / `.py`) automatically enable the "Launch hidden in background" option when added, and cannot simultaneously use "Close window after launch".
 
@@ -99,12 +70,12 @@ WinTray supports adding the following program types to the managed list, automat
 
 WinTray uses a scoring system to precisely identify target windows and avoid false positives:
 
-| Strategy | Description |
-| --- | --- |
+| Strategy                         | Description                                                                        |
+| -------------------------------- | ---------------------------------------------------------------------------------- |
 | `processNameThenTitle` (default) | Matches by process name first, then scores by window title — best overall accuracy |
-| `titleContains` | Matches windows whose title contains a keyword |
-| `className` | Matches windows by their class name |
-| `any` | Matches any window under the process |
+| `titleContains`                  | Matches windows whose title contains a keyword                                     |
+| `className`                      | Matches windows by their class name                                                |
+| `any`                            | Matches any window under the process                                               |
 
 Scoring system (an action is only taken when the total score ≥ 500):
 
@@ -118,12 +89,41 @@ Scoring system (an action is only taken when the total score ≥ 500):
 
 ### Common Use Cases
 
-| Scenario | Configuration |
-| --- | --- |
-| QQ / WeChat / DingTalk auto-start and minimize to tray | Add `.exe`, enable "Close window after launch" |
+| Scenario                                                     | Configuration                                            |
+| ------------------------------------------------------------ | -------------------------------------------------------- |
+| QQ / WeChat / DingTalk auto-start and minimize to tray       | Add `.exe`, enable "Close window after launch"           |
 | Tunnel scripts (frpc / SSH) running in background at startup | Add `.bat` / `.ps1`, hidden background launch by default |
-| Python crawler/service starting silently in background | Add `.py`, hidden background launch by default |
-| Auto-start only, no window handling | Add program, leave "Close window after launch" unchecked |
+| Python crawler/service starting silently in background       | Add `.py`, hidden background launch by default           |
+| Auto-start only, no window handling                          | Add program, leave "Close window after launch" unchecked |
+
+---
+
+## System Requirements
+
+| Item              | Requirement                                        |
+| ----------------- | -------------------------------------------------- |
+| OS                | Windows 10 / 11                                    |
+| Runtime           | No additional dependencies (standalone executable) |
+| Build from source | Go 1.22+                                           |
+
+---
+
+## Data Directory
+
+| Type          | Path                                   |
+| ------------- | -------------------------------------- |
+| Configuration | `%LOCALAPPDATA%\WinTray\settings.json` |
+| Logs          | `%LOCALAPPDATA%\WinTray\wintray.log`   |
+
+---
+
+## Command-Line Arguments
+
+| Argument            | Description                                                      |
+| ------------------- | ---------------------------------------------------------------- |
+| `--background`      | Start without showing the main window (for auto-start scenarios) |
+| `--autorun`         | Execute managed program tasks automatically (used by auto-start) |
+| `--cleanup-restore` | Only perform cleanup: clear `%LOCALAPPDATA%\WinTray\` and exit   |
 
 ---
 
@@ -155,3 +155,4 @@ A: Make sure the program has "Close window after launch" enabled, and that WinTr
 ## License
 
 This project is released under the [MIT License](LICENSE).
+
