@@ -1,8 +1,8 @@
-<div></div>
+<div align="center">
 
 # WinTray
 
-![WinTray Logo](internal/branding/assets/logo.png)
+<img src="internal/branding/assets/logo.png" alt="WinTray Logo" width="120" />
 
 **Windows 开机自动整理桌面的托盘工具**
 
@@ -11,6 +11,8 @@
 [![Go 1.22](https://img.shields.io/badge/Go-1.22-00ADD8.svg)]()
 
 [English](README.en.md) | 简体中文
+
+</div>
 
 ---
 
