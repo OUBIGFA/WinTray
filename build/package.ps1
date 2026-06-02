@@ -1,10 +1,14 @@
 param(
-  [string]$OutputDir = "dist"
+  [string]$OutputDir = "dist",
+  [string]$Version = ""
 )
 
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
+Push-Location $root
+try {
+
 $localConfig = Join-Path $PSScriptRoot "package.local.ps1"
 if (Test-Path $localConfig) {
   . $localConfig
@@ -62,7 +66,8 @@ if (Test-Path $manifestTarget) {
   Copy-Item -Path $manifestTarget -Destination $portableManifest -Force
 }
 
-$zipTarget = Join-Path $publishDir "WinTray-Portable.zip"
+$zipName = if ($Version) { "WinTray-Portable-$Version.zip" } else { "WinTray-Portable.zip" }
+$zipTarget = Join-Path $publishDir $zipName
 $tempZipTarget = Join-Path $publishDir "WinTray-Portable.tmp.zip"
 if (Test-Path $tempZipTarget) {
   $timestamp = Get-Date -Format "yyyyMMddHHmmss"
@@ -73,3 +78,7 @@ Compress-Archive -Path (Join-Path $portableDir "*") -DestinationPath $tempZipTar
 Move-Item -Path $tempZipTarget -Destination $zipTarget -Force
 Write-Host "Packaged portable version: $portableDir"
 Write-Host "Packaged portable archive: $zipTarget"
+
+} finally {
+  Pop-Location
+}

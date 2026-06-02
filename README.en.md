@@ -39,7 +39,7 @@ WinTray is a Windows startup organizer. It sits in the system tray and, when tri
 
 WinTray is **portable only** — no installation needed.
 
-Go to the [Releases](../../releases) page, download `WinTray-Portable.zip`, extract it, and run `WinTray.exe` directly.
+Go to the [Releases](../../releases) page, download the latest `WinTray-Portable-vX.Y.Z.zip`, extract it, and run `WinTray.exe` directly.
 
 - Configuration and logs are stored in `%LOCALAPPDATA%\WinTray\` with no registry dependencies
 - To remove completely, simply close the program and delete the folder

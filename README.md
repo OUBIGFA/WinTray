@@ -38,7 +38,7 @@ WinTray 是一款面向 Windows 的开机整理工具。它在系统托盘常驻
 
 WinTray 仅提供**便携版**，无需安装。
 
-前往 [Releases](../../releases) 页面，下载 `WinTray-Portable.zip`，解压后直接运行 `WinTray.exe` 即可。
+前往 [Releases](../../releases) 页面，下载最新版本的 `WinTray-Portable-vX.Y.Z.zip`，解压后直接运行 `WinTray.exe` 即可。
 
 - 配置与日志写入 `%LOCALAPPDATA%\WinTray\`，不依赖任何注册表安装项
 - 不再使用时关闭程序、删除文件夹即可彻底移除

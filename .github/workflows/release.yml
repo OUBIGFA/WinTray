@@ -23,9 +23,21 @@ jobs:
           go-version: "1.22"
           cache: true
 
+      - name: Determine version
+        id: version
+        shell: pwsh
+        run: |
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $ver = "${{ github.ref_name }}"
+          } else {
+            $ver = "dev-$(Get-Date -Format 'yyyyMMddHHmmss')"
+          }
+          Write-Host "Version: $ver"
+          "version=$ver" >> $env:GITHUB_OUTPUT
+
       - name: Build release package
         shell: pwsh
-        run: ./build/package.ps1 -OutputDir dist
+        run: ./build/package.ps1 -OutputDir dist -Version "${{ steps.version.outputs.version }}"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
@@ -33,6 +45,4 @@ jobs:
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |
-            dist/WinTray.exe
-            dist/WinTray.exe.manifest
-            dist/checksums.txt
+            publish/WinTray-Portable-${{ steps.version.outputs.version }}.zip

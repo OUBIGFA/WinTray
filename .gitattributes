@@ -6,5 +6,6 @@
 *.json text eol=lf
 go.mod text eol=lf
 go.sum text eol=lf
+LICENSE text eol=lf
 .gitignore text eol=lf
 *.exe binary
