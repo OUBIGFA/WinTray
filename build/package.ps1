@@ -5,6 +5,19 @@ param(
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
+$localConfig = Join-Path $PSScriptRoot "package.local.ps1"
+if (Test-Path $localConfig) {
+  . $localConfig
+}
+
+$goCommand = "go"
+if ($GoExe) {
+  if (!(Test-Path $GoExe)) {
+    throw "Configured Go executable was not found: $GoExe"
+  }
+  $goCommand = $GoExe
+}
+
 $out = Join-Path $root $OutputDir
 if (!(Test-Path $out)) {
   New-Item -ItemType Directory -Path $out | Out-Null
@@ -14,7 +27,7 @@ $exe = Join-Path $out "WinTray.exe"
 $manifestSource = Join-Path $PSScriptRoot "WinTray.exe.manifest"
 $manifestTarget = "$exe.manifest"
 
-go build -trimpath -ldflags "-s -w -H=windowsgui" -o $exe ./cmd/wintray
+& $goCommand build -trimpath -ldflags "-s -w -H=windowsgui" -o $exe ./cmd/wintray
 if ($LASTEXITCODE -ne 0) {
   throw "go build failed"
 }
@@ -34,17 +47,29 @@ if (!(Test-Path $publishDir)) {
   New-Item -ItemType Directory -Path $publishDir | Out-Null
 }
 
-# Create a portable zip package
-$zipTarget = Join-Path $publishDir "WinTray-Portable.zip"
-if (Test-Path $zipTarget) {
-  Remove-Item -Path $zipTarget -Force
+$portableDir = Join-Path $publishDir "WinTray-Portable"
+if (!(Test-Path $portableDir)) {
+  New-Item -ItemType Directory -Path $portableDir | Out-Null
 }
 
-$filesToZip = @($exe, $checksumsPath)
+$portableExe = Join-Path $portableDir "WinTray.exe"
+$portableManifest = Join-Path $portableDir "WinTray.exe.manifest"
+$portableChecksums = Join-Path $portableDir "checksums.txt"
+
+Copy-Item -Path $exe -Destination $portableExe -Force
+Copy-Item -Path $checksumsPath -Destination $portableChecksums -Force
 if (Test-Path $manifestTarget) {
-  $filesToZip += $manifestTarget
+  Copy-Item -Path $manifestTarget -Destination $portableManifest -Force
 }
 
-Compress-Archive -Path $filesToZip -DestinationPath $zipTarget -Force
-Write-Host "Packaged portable version: $zipTarget"
+$zipTarget = Join-Path $publishDir "WinTray-Portable.zip"
+$tempZipTarget = Join-Path $publishDir "WinTray-Portable.tmp.zip"
+if (Test-Path $tempZipTarget) {
+  $timestamp = Get-Date -Format "yyyyMMddHHmmss"
+  Move-Item -Path $tempZipTarget -Destination (Join-Path $publishDir "WinTray-Portable.tmp.$timestamp.zip") -Force
+}
 
+Compress-Archive -Path (Join-Path $portableDir "*") -DestinationPath $tempZipTarget -Force
+Move-Item -Path $tempZipTarget -Destination $zipTarget -Force
+Write-Host "Packaged portable version: $portableDir"
+Write-Host "Packaged portable archive: $zipTarget"

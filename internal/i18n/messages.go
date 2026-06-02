@@ -17,12 +17,16 @@ const (
 
 type Messages struct {
 	WindowTitle                    string
+	GlobalSettingsTitle            string
 	RunAtLogon                     string
 	StartHidden                    string
 	ExitOnDone                     string
 	RetrySeconds                   string
 	LanguageLabel                  string
 	ManagedListTitle               string
+	ManagedColumnName              string
+	ManagedColumnPath              string
+	ManagedColumnRule              string
 	ManagedEditorTitle             string
 	ManagedAppPath                 string
 	ManagedAppArgs                 string
@@ -77,20 +81,24 @@ type Messages struct {
 
 var zhCN = Messages{
 	WindowTitle:                    "WinTray",
+	GlobalSettingsTitle:            "全局设置",
 	RunAtLogon:                     "WinTray 开机启动",
 	StartHidden:                    "启动后最小化到托盘",
-	ExitOnDone:                     "完成所有任务后自行退出",
+	ExitOnDone:                     "完成所有任务后自动退出",
 	RetrySeconds:                   "窗口重试秒数 (0-120):",
-	LanguageLabel:                  "语言：",
-	ManagedListTitle:               "程序列表（开机自动按配置处理窗口）",
+	LanguageLabel:                  "语言:",
+	ManagedListTitle:               "程序列表",
+	ManagedColumnName:              "程序",
+	ManagedColumnPath:              "路径",
+	ManagedColumnRule:              "规则",
 	ManagedEditorTitle:             "程序设置",
-	ManagedAppPath:                 "程序路径：",
-	ManagedAppArgs:                 "启动参数（选填）：",
+	ManagedAppPath:                 "程序路径:",
+	ManagedAppArgs:                 "启动参数:",
 	SelectProgram:                  "选择程序",
-	ModifyProgram:                  "修改程序",
-	ManagedAutoHide:                "启动后关闭窗口（未勾选仅启动）",
-	ManagedLaunchHidden:            "隐藏后台启动（适用于 cmd/bat/ps1/py）",
-	ManagedPauseTask:               "暂停任务（取消勾选后下次继续执行）",
+	ModifyProgram:                  "更换程序",
+	ManagedAutoHide:                "启动后关闭窗口",
+	ManagedLaunchHidden:            "隐藏后台启动",
+	ManagedPauseTask:               "暂停任务",
 	AddProgram:                     "添加程序",
 	RemoveSelected:                 "删除选中",
 	OpenLogs:                       "打开日志",
@@ -105,52 +113,56 @@ var zhCN = Messages{
 	ExeFilter:                      "程序文件 (*.exe;*.cmd;*.bat;*.ps1;*.py)|*.exe;*.cmd;*.bat;*.ps1;*.py",
 	AllFilesFilter:                 "所有文件 (*.*)|*.*",
 	NewAppName:                     "新程序",
-	ManagedListItemTemplate:        "%s | %s | 启动后关闭界面=%t",
+	ManagedListItemTemplate:        "%s | %s | 启动后关闭窗口=%t",
 	ManagedListHiddenTemplate:      "%s | %s | 隐藏后台启动=%t",
-	ManagedListParamTemplate:       "关闭界面=%t",
+	ManagedListParamTemplate:       "关闭窗口=%t",
 	ManagedListParamHiddenTemplate: "隐藏后台=%t",
 	ManagedListParamPausedTemplate: "已暂停",
 	RunSummaryTitle:                "受管任务结果",
 	RunSummaryNone:                 "没有可执行的受管任务。",
-	RunSummaryLine:                 "%s：%s",
-	RunSummaryHeader:               "执行完成：",
+	RunSummaryLine:                 "%s: %s",
+	RunSummaryHeader:               "执行完成:",
 	FatalStartupTitle:              "WinTray 启动失败",
-	FatalStartupBodyTemplate:       "%s\n\n日志：%s",
+	FatalStartupBodyTemplate:       "%s\n\n日志: %s",
 	AlreadyRunningTitle:            "WinTray",
 	AlreadyRunningBody:             "WinTray 已在运行。",
-	StatusLaunchFailTemplate:       "启动失败：%s (%s)",
-	StatusManageFailTemplate:       "托管失败：%s (%s)",
-	StatusManageOkTemplate:         "托管成功：%s",
+	StatusLaunchFailTemplate:       "启动失败: %s (%s)",
+	StatusManageFailTemplate:       "托管失败: %s (%s)",
+	StatusManageOkTemplate:         "托管成功: %s",
 	StatusNoTasks:                  "没有受管任务。",
 	StatusRetryExhausted:           "重试超时，未找到可托管窗口",
-	StatusPermissionHint:           "可能是权限限制（UIPI）：请尝试以管理员身份运行 WinTray。",
+	StatusPermissionHint:           "可能是权限限制 (UIPI): 请尝试以管理员身份运行 WinTray。",
 	StatusOpenLogsFailed:           "打开日志失败",
 	CleanupConfirmTitle:            "清理并恢复默认",
 	CleanupConfirmBody:             "将清除 WinTray 的本地配置与日志，并恢复默认设置。\r\n\r\n是否继续？",
 	CleanupDoneTitle:               "已计划清理",
 	CleanupDoneBody:                "已恢复默认设置，WinTray 将在退出后清理本地数据。",
 	CleanupFailedTitle:             "清理失败",
-	CleanupFailedBody:              "清理并恢复默认失败：%s",
+	CleanupFailedBody:              "清理并恢复默认失败: %s",
 	LanguageZhLabel:                "中文",
 	LanguageEnLabel:                "English",
 }
 
 var enUS = Messages{
 	WindowTitle:                    "WinTray",
+	GlobalSettingsTitle:            "Global Settings",
 	RunAtLogon:                     "Run WinTray at logon",
 	StartHidden:                    "Minimize to tray after launch",
 	ExitOnDone:                     "Exit automatically after all tasks complete",
 	RetrySeconds:                   "Window retry seconds (0-120):",
 	LanguageLabel:                  "Language:",
-	ManagedListTitle:               "Program list (apply rules at startup)",
+	ManagedListTitle:               "Program List",
+	ManagedColumnName:              "Program",
+	ManagedColumnPath:              "Path",
+	ManagedColumnRule:              "Rule",
 	ManagedEditorTitle:             "Program Settings",
-	ManagedAppPath:                 "Executable path:",
-	ManagedAppArgs:                 "Launch arguments (optional):",
+	ManagedAppPath:                 "Program path:",
+	ManagedAppArgs:                 "Launch arguments:",
 	SelectProgram:                  "Select Program",
-	ModifyProgram:                  "Modify Program",
-	ManagedAutoHide:                "Close window after launch (unchecked: launch only)",
-	ManagedLaunchHidden:            "Launch hidden in background (for cmd/bat/ps1/py)",
-	ManagedPauseTask:               "Pause task (resume on next run when unchecked)",
+	ModifyProgram:                  "Change Program",
+	ManagedAutoHide:                "Close window after launch",
+	ManagedLaunchHidden:            "Launch hidden in background",
+	ManagedPauseTask:               "Pause task",
 	AddProgram:                     "Add Program",
 	RemoveSelected:                 "Remove Selected",
 	OpenLogs:                       "Open Logs",
@@ -261,7 +273,7 @@ func TranslateResultMessage(language, message string) string {
 		if Resolve(language) == LangEnUS {
 			return "started only"
 		}
-		return "仅启动（未执行托管动作）"
+		return "仅启动，未执行托管动作"
 	case "started hidden":
 		if Resolve(language) == LangEnUS {
 			return "started hidden in background"
@@ -283,7 +295,7 @@ func TranslateResultMessage(language, message string) string {
 		if Resolve(language) == LangEnUS {
 			return "front window closed"
 		}
-		return "前台界面已关闭"
+		return "前台窗口已关闭"
 	case "invalid process name":
 		if Resolve(language) == LangEnUS {
 			return "invalid process name"

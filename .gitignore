@@ -1,6 +1,7 @@
 dist/
 publish/
 tmp/
+build/package.local.ps1
 *.exe
 *.dll
 *.so

@@ -33,6 +33,8 @@ type MainWindow struct {
 	applyingLocale bool
 	updatingEditor bool
 
+	globalTitle *walk.Label
+
 	managedList      *walk.TableView
 	managedListModel *managedListTableModel
 	editorTitle      *walk.Label
@@ -72,10 +74,16 @@ func NewMainWindow(initial config.Settings, callbacks Callbacks) (*MainWindow, e
 	}
 	w := &MainWindow{mw: mw, settings: initial, callbacks: callbacks}
 
-	mw.SetSize(walk.Size{Width: 940, Height: 620})
+	mw.SetSize(walk.Size{Width: 980, Height: 680})
+	if font, fontErr := walk.NewFont("Segoe UI", 9, 0); fontErr == nil {
+		mw.SetFont(font)
+	}
+	if bg, bgErr := walk.NewSolidColorBrush(walk.RGB(248, 249, 251)); bgErr == nil {
+		mw.SetBackground(bg)
+	}
 	layout := walk.NewVBoxLayout()
-	layout.SetMargins(walk.Margins{HNear: 14, VNear: 14, HFar: 14, VFar: 14})
-	layout.SetSpacing(10)
+	layout.SetMargins(walk.Margins{HNear: 24, VNear: 20, HFar: 24, VFar: 20})
+	layout.SetSpacing(22)
 	if err = mw.SetLayout(layout); err != nil {
 		return nil, err
 	}
@@ -122,17 +130,35 @@ func NewMainWindow(initial config.Settings, callbacks Callbacks) (*MainWindow, e
 }
 
 func (w *MainWindow) buildTopOptions() error {
-	optionsRow, err := walk.NewComposite(w.mw)
+	options, err := walk.NewComposite(w.mw)
 	if err != nil {
 		return err
 	}
-	optionsLayout := walk.NewHBoxLayout()
-	optionsLayout.SetSpacing(12)
-	if err = optionsRow.SetLayout(optionsLayout); err != nil {
+	optionsLayout := walk.NewVBoxLayout()
+	optionsLayout.SetMargins(walk.Margins{})
+	optionsLayout.SetSpacing(8)
+	if err = options.SetLayout(optionsLayout); err != nil {
 		return err
 	}
 
-	if _, err = walk.NewHSpacer(optionsRow); err != nil {
+	globalTitle, err := walk.NewLabel(options)
+	if err != nil {
+		return err
+	}
+	globalTitle.SetTextColor(walk.RGB(38, 45, 58))
+	if font, fontErr := walk.NewFont("Segoe UI", 10, walk.FontBold); fontErr == nil {
+		globalTitle.SetFont(font)
+	}
+	w.globalTitle = globalTitle
+
+	optionsRow, err := walk.NewComposite(options)
+	if err != nil {
+		return err
+	}
+	optionsRowLayout := walk.NewHBoxLayout()
+	optionsRowLayout.SetMargins(walk.Margins{})
+	optionsRowLayout.SetSpacing(18)
+	if err = optionsRow.SetLayout(optionsRowLayout); err != nil {
 		return err
 	}
 
@@ -173,11 +199,12 @@ func (w *MainWindow) buildTopOptions() error {
 		return err
 	}
 
-	settingsRow, err := walk.NewComposite(w.mw)
+	settingsRow, err := walk.NewComposite(options)
 	if err != nil {
 		return err
 	}
 	settingsLayout := walk.NewHBoxLayout()
+	settingsLayout.SetMargins(walk.Margins{})
 	settingsLayout.SetSpacing(10)
 	if err = settingsRow.SetLayout(settingsLayout); err != nil {
 		return err
@@ -257,15 +284,19 @@ func (w *MainWindow) buildManagedList() error {
 	if err != nil {
 		return err
 	}
+	title.SetTextColor(walk.RGB(38, 45, 58))
+	if font, fontErr := walk.NewFont("Segoe UI", 10, walk.FontBold); fontErr == nil {
+		title.SetFont(font)
+	}
 	w.managedTitle = title
 
 	list, err := walk.NewTableView(w.mw)
 	if err != nil {
 		return err
 	}
-	list.SetMinMaxSize(walk.Size{Width: 860, Height: 320}, walk.Size{})
+	list.SetMinMaxSize(walk.Size{Width: 880, Height: 300}, walk.Size{})
 	list.SetColumnsOrderable(false)
-	list.SetHeaderHidden(true)
+	list.SetHeaderHidden(false)
 	list.SetGridlines(false)
 	list.SetLastColumnStretched(true)
 	list.SetSelectionHiddenWithoutFocus(true)
@@ -279,14 +310,14 @@ func (w *MainWindow) buildManagedList() error {
 	}
 	pathCol := walk.NewTableViewColumn()
 	pathCol.SetTitle("path")
-	pathCol.SetWidth(510)
+	pathCol.SetWidth(540)
 	_ = pathCol.SetAlignment(walk.AlignNear)
 	if err = list.Columns().Add(pathCol); err != nil {
 		return err
 	}
 	paramCol := walk.NewTableViewColumn()
 	paramCol.SetTitle("param")
-	paramCol.SetWidth(160)
+	paramCol.SetWidth(150)
 	_ = paramCol.SetAlignment(walk.AlignNear)
 	if err = list.Columns().Add(paramCol); err != nil {
 		return err
@@ -320,35 +351,22 @@ func (w *MainWindow) buildManagedEditor() error {
 		return err
 	}
 	v := walk.NewVBoxLayout()
-	v.SetSpacing(8)
+	v.SetMargins(walk.Margins{})
+	v.SetSpacing(10)
 	if err = editor.SetLayout(v); err != nil {
 		return err
 	}
 
-	editorTitleRow, err := walk.NewComposite(editor)
+	editorTitle, err := walk.NewLabel(editor)
 	if err != nil {
 		return err
 	}
-	hTitle := walk.NewHBoxLayout()
-	hTitle.SetSpacing(0)
-	if err = editorTitleRow.SetLayout(hTitle); err != nil {
-		return err
+	editorTitle.SetTextAlignment(walk.AlignNear)
+	editorTitle.SetTextColor(walk.RGB(38, 45, 58))
+	if font, fontErr := walk.NewFont("Segoe UI", 10, walk.FontBold); fontErr == nil {
+		editorTitle.SetFont(font)
 	}
-	if _, err = walk.NewHSpacer(editorTitleRow); err != nil {
-		return err
-	}
-
-	editorTitle, err := walk.NewLabel(editorTitleRow)
-	if err != nil {
-		return err
-	}
-	editorTitle.SetTextAlignment(walk.AlignCenter)
-	editorTitle.SetMinMaxSize(walk.Size{Width: 240, Height: 0}, walk.Size{Width: 240, Height: 0})
 	w.editorTitle = editorTitle
-
-	if _, err = walk.NewHSpacer(editorTitleRow); err != nil {
-		return err
-	}
 
 	noSelectLabel, err := walk.NewLabel(editor)
 	if err != nil {
@@ -357,6 +375,7 @@ func (w *MainWindow) buildManagedEditor() error {
 	noSelectLabel.SetMinMaxSize(walk.Size{Width: 860, Height: 22}, walk.Size{Width: 860, Height: 22})
 	noSelectLabel.SetAlwaysConsumeSpace(false)
 	noSelectLabel.SetVisible(false)
+	noSelectLabel.SetTextColor(walk.RGB(84, 93, 108))
 	w.noSelectLabel = noSelectLabel
 
 	pathRow, err := walk.NewComposite(editor)
@@ -381,7 +400,7 @@ func (w *MainWindow) buildManagedEditor() error {
 		return err
 	}
 	pathEdit.SetReadOnly(true)
-	pathEdit.SetMinMaxSize(walk.Size{Width: 520, Height: 0}, walk.Size{Width: 520, Height: 0})
+	pathEdit.SetMinMaxSize(walk.Size{Width: 560, Height: 0}, walk.Size{})
 	w.pathEdit = pathEdit
 
 	browseBtn, err := walk.NewPushButton(pathRow)
@@ -419,7 +438,7 @@ func (w *MainWindow) buildManagedEditor() error {
 	if err != nil {
 		return err
 	}
-	argsEdit.SetMinMaxSize(walk.Size{Width: 760, Height: 0}, walk.Size{Width: 760, Height: 0})
+	argsEdit.SetMinMaxSize(walk.Size{Width: 760, Height: 0}, walk.Size{})
 	argsEdit.EditingFinished().Attach(func() {
 		if w.updatingEditor {
 			return
@@ -438,6 +457,7 @@ func (w *MainWindow) buildManagedEditor() error {
 		return err
 	}
 	hOpt := walk.NewHBoxLayout()
+	hOpt.SetMargins(walk.Margins{})
 	hOpt.SetSpacing(12)
 	if err = optionsRow.SetLayout(hOpt); err != nil {
 		return err
@@ -517,7 +537,8 @@ func (w *MainWindow) buildActions() error {
 		return err
 	}
 	h := walk.NewHBoxLayout()
-	h.SetSpacing(10)
+	h.SetMargins(walk.Margins{})
+	h.SetSpacing(8)
 	if err = row.SetLayout(h); err != nil {
 		return err
 	}
@@ -529,6 +550,10 @@ func (w *MainWindow) buildActions() error {
 	removeBtn.Clicked().Attach(w.onRemoveSelected)
 	removeBtn.SetMinMaxSize(walk.Size{Width: 110, Height: 0}, walk.Size{Width: 110, Height: 0})
 	w.removeBtn = removeBtn
+
+	if _, err = walk.NewHSpacer(row); err != nil {
+		return err
+	}
 
 	openLogsBtn, err := walk.NewPushButton(row)
 	if err != nil {
@@ -576,6 +601,7 @@ func (w *MainWindow) applyLanguage(language string) {
 	defer func() { w.applyingLocale = false }()
 
 	w.mw.SetTitle(msg.WindowTitle)
+	w.globalTitle.SetText(msg.GlobalSettingsTitle)
 	w.runAtLogon.SetText(msg.RunAtLogon)
 	w.startHidden.SetText(msg.StartHidden)
 	w.exitOnDone.SetText(msg.ExitOnDone)
@@ -599,6 +625,11 @@ func (w *MainWindow) applyLanguage(language string) {
 		w.languageCombo.SetCurrentIndex(1)
 	} else {
 		w.languageCombo.SetCurrentIndex(0)
+	}
+	if w.managedList != nil {
+		w.managedList.Columns().At(0).SetTitle(msg.ManagedColumnName)
+		w.managedList.Columns().At(1).SetTitle(msg.ManagedColumnPath)
+		w.managedList.Columns().At(2).SetTitle(msg.ManagedColumnRule)
 	}
 	w.syncManagedEditor()
 }
@@ -646,7 +677,7 @@ func (w *MainWindow) onAddProgram() {
 func (w *MainWindow) onSelectProgramForSelected() {
 	app, idx, ok := w.selectedManagedApp()
 	if !ok {
-		// No item selected — fall back to adding a new entry
+		// No item selected; fall back to adding a new entry.
 		w.onAddProgram()
 		return
 	}
