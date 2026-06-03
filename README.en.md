@@ -20,6 +20,8 @@ English | [简体中文](README.md)
 
 WinTray is a Windows startup organizer. It sits in the system tray and, when triggered by the auto-start flow, automatically manages the windows of specified programs (e.g., minimizing or hiding them) based on configurable rules — saving you the hassle of manually cleaning up your desktop after every boot.
 
+![](image/01.png)
+
 ---
 
 ## Features
