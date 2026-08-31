@@ -4,7 +4,7 @@
 
 <img src="internal/branding/assets/logo.png" alt="WinTray Logo" width="120" />
 
-**Windows 开机自动整理桌面的托盘工具**
+**Windows 开机自动隐藏程序界面的工具**
 
 [English](README.en.md) | 简体中文
 
