@@ -35,10 +35,21 @@ type Messages struct {
 	ManagedAutoHide                string
 	ManagedLaunchHidden            string
 	ManagedPauseTask               string
+	ManagedLaunchNow               string
+	ManagedLaunchNowBusy           string
+	LaunchNowDoneBody              string
 	AddProgram                     string
 	RemoveSelected                 string
 	OpenLogs                       string
 	CleanupRestore                 string
+	CheckUpdate                    string
+	CheckUpdateBusy                string
+	GitHubTooltip                  string
+	VersionLabel                   string
+	UpdateTitle                    string
+	UpdateAvailableBody            string
+	UpdateLatestBody               string
+	UpdateFailedBody               string
 	ExitApp                        string
 	TrayOpenSettings               string
 	TrayOpenLogs                   string
@@ -99,10 +110,21 @@ var zhCN = Messages{
 	ManagedAutoHide:                "启动后关闭窗口",
 	ManagedLaunchHidden:            "隐藏后台启动",
 	ManagedPauseTask:               "暂停任务",
+	ManagedLaunchNow:               "马上启动",
+	ManagedLaunchNowBusy:           "启动中…",
+	LaunchNowDoneBody:              "已启动: %s",
 	AddProgram:                     "添加程序",
 	RemoveSelected:                 "删除选中",
 	OpenLogs:                       "打开日志",
 	CleanupRestore:                 "清理并恢复默认",
+	CheckUpdate:                    "检查更新",
+	CheckUpdateBusy:                "检查中…",
+	GitHubTooltip:                  "在 GitHub 上查看项目",
+	VersionLabel:                   "版本 %s",
+	UpdateTitle:                    "检查更新",
+	UpdateAvailableBody:            "发现新版本 %s（当前 %s）。\r\n\r\n是否前往下载页面？",
+	UpdateLatestBody:               "当前已是最新版本 %s。",
+	UpdateFailedBody:               "检查更新失败: %s",
 	ExitApp:                        "退出 WinTray",
 	TrayOpenSettings:               "打开设置",
 	TrayOpenLogs:                   "打开日志",
@@ -163,10 +185,21 @@ var enUS = Messages{
 	ManagedAutoHide:                "Close window after launch",
 	ManagedLaunchHidden:            "Launch hidden in background",
 	ManagedPauseTask:               "Pause task",
+	ManagedLaunchNow:               "Launch Now",
+	ManagedLaunchNowBusy:           "Starting…",
+	LaunchNowDoneBody:              "Started: %s",
 	AddProgram:                     "Add Program",
 	RemoveSelected:                 "Remove Selected",
 	OpenLogs:                       "Open Logs",
 	CleanupRestore:                 "Cleanup && Restore Defaults",
+	CheckUpdate:                    "Check for Updates",
+	CheckUpdateBusy:                "Checking…",
+	GitHubTooltip:                  "View the project on GitHub",
+	VersionLabel:                   "Version %s",
+	UpdateTitle:                    "Check for Updates",
+	UpdateAvailableBody:            "Version %s is available (current %s).\r\n\r\nOpen the download page?",
+	UpdateLatestBody:               "You are on the latest version %s.",
+	UpdateFailedBody:               "Update check failed: %s",
 	ExitApp:                        "Exit WinTray",
 	TrayOpenSettings:               "Open Settings",
 	TrayOpenLogs:                   "Open Logs",

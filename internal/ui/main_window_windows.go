@@ -16,12 +16,16 @@ import (
 	"wintray/internal/config"
 	"wintray/internal/i18n"
 	"wintray/internal/stringutil"
+	"wintray/internal/version"
 )
 
 type Callbacks struct {
 	OnSave           func(config.Settings)
 	OnOpenLogs       func()
 	OnCleanupRestore func()
+	OnLaunchNow      func(config.ManagedAppEntry)
+	OnCheckUpdate    func()
+	OnOpenRepository func()
 	OnExit           func()
 }
 
@@ -32,6 +36,8 @@ type MainWindow struct {
 	callbacks      Callbacks
 	applyingLocale bool
 	updatingEditor bool
+	launchNowBusy  bool
+	checkingUpdate bool
 
 	globalTitle *walk.Label
 
@@ -48,6 +54,7 @@ type MainWindow struct {
 	appAutoHide      *walk.CheckBox
 	appLaunchHidden  *walk.CheckBox
 	appPauseTask     *walk.CheckBox
+	launchNowBtn     *walk.PushButton
 	retryEdit        *walk.LineEdit
 	runAtLogon       *walk.CheckBox
 	startHidden      *walk.CheckBox
@@ -60,6 +67,9 @@ type MainWindow struct {
 	openLogsBtn      *walk.PushButton
 	cleanupBtn       *walk.PushButton
 	exitBtn          *walk.PushButton
+	versionLabel     *walk.Label
+	checkUpdateBtn   *walk.PushButton
+	githubLink       *walk.ImageView
 }
 
 func NewMainWindow(initial config.Settings, callbacks Callbacks) (*MainWindow, error) {
@@ -98,6 +108,9 @@ func NewMainWindow(initial config.Settings, callbacks Callbacks) (*MainWindow, e
 		return nil, err
 	}
 	if err = w.buildActions(); err != nil {
+		return nil, err
+	}
+	if err = w.buildFooter(); err != nil {
 		return nil, err
 	}
 
@@ -528,7 +541,44 @@ func (w *MainWindow) buildManagedEditor() error {
 	})
 	w.appPauseTask = appPauseTask
 
+	launchNowBtn, err := walk.NewPushButton(optionsRow)
+	if err != nil {
+		return err
+	}
+	launchNowBtn.Clicked().Attach(w.onLaunchNow)
+	w.launchNowBtn = launchNowBtn
+
 	return nil
+}
+
+func (w *MainWindow) onLaunchNow() {
+	app, _, ok := w.selectedManagedApp()
+	if !ok || w.launchNowBusy || w.callbacks.OnLaunchNow == nil {
+		return
+	}
+	w.setLaunchNowBusy(true)
+	w.callbacks.OnLaunchNow(*app)
+}
+
+// SetLaunchNowBusy reflects an in-flight launch on the button so the user can
+// tell the click was accepted and does not keep clicking it.
+func (w *MainWindow) SetLaunchNowBusy(busy bool) {
+	w.synchronize(func() { w.setLaunchNowBusy(busy) })
+}
+
+func (w *MainWindow) setLaunchNowBusy(busy bool) {
+	if w.launchNowBtn == nil || w.managedList == nil {
+		return
+	}
+	w.launchNowBusy = busy
+	msg := i18n.For(w.settings.Language)
+	if busy {
+		w.launchNowBtn.SetText(msg.ManagedLaunchNowBusy)
+	} else {
+		w.launchNowBtn.SetText(msg.ManagedLaunchNow)
+	}
+	_, _, ok := w.selectedManagedApp()
+	w.launchNowBtn.SetEnabled(ok && !busy)
 }
 
 func (w *MainWindow) buildActions() error {
@@ -594,6 +644,91 @@ func (w *MainWindow) buildActions() error {
 	return nil
 }
 
+func (w *MainWindow) buildFooter() error {
+	row, err := walk.NewComposite(w.mw)
+	if err != nil {
+		return err
+	}
+	h := walk.NewHBoxLayout()
+	h.SetMargins(walk.Margins{})
+	h.SetSpacing(8)
+	if err = row.SetLayout(h); err != nil {
+		return err
+	}
+
+	versionLabel, err := walk.NewLabel(row)
+	if err != nil {
+		return err
+	}
+	versionLabel.SetTextColor(walk.RGB(84, 93, 108))
+	w.versionLabel = versionLabel
+
+	if _, err = walk.NewHSpacer(row); err != nil {
+		return err
+	}
+
+	checkUpdateBtn, err := walk.NewPushButton(row)
+	if err != nil {
+		return err
+	}
+	checkUpdateBtn.Clicked().Attach(w.onCheckUpdate)
+	checkUpdateBtn.SetMinMaxSize(walk.Size{Width: 110, Height: 0}, walk.Size{Width: 110, Height: 0})
+	w.checkUpdateBtn = checkUpdateBtn
+
+	githubLink, err := walk.NewImageView(row)
+	if err != nil {
+		return err
+	}
+	githubIcon, err := branding.GitHubIcon()
+	if err != nil {
+		return err
+	}
+	githubLink.SetMode(walk.ImageViewModeIdeal)
+	if err = githubLink.SetImage(githubIcon); err != nil {
+		return err
+	}
+	githubLink.SetCursor(walk.CursorHand())
+	githubLink.MouseUp().Attach(func(_, _ int, button walk.MouseButton) {
+		if button != walk.LeftButton {
+			return
+		}
+		if w.callbacks.OnOpenRepository != nil {
+			w.callbacks.OnOpenRepository()
+		}
+	})
+	githubLink.SetMinMaxSize(walk.Size{Width: 24, Height: 24}, walk.Size{Width: 24, Height: 24})
+	w.githubLink = githubLink
+
+	return nil
+}
+
+func (w *MainWindow) onCheckUpdate() {
+	if w.checkingUpdate || w.callbacks.OnCheckUpdate == nil {
+		return
+	}
+	w.setCheckUpdateBusy(true)
+	w.callbacks.OnCheckUpdate()
+}
+
+// SetCheckUpdateBusy reflects an in-flight update check on the button.
+func (w *MainWindow) SetCheckUpdateBusy(busy bool) {
+	w.synchronize(func() { w.setCheckUpdateBusy(busy) })
+}
+
+func (w *MainWindow) setCheckUpdateBusy(busy bool) {
+	if w.checkUpdateBtn == nil {
+		return
+	}
+	w.checkingUpdate = busy
+	msg := i18n.For(w.settings.Language)
+	if busy {
+		w.checkUpdateBtn.SetText(msg.CheckUpdateBusy)
+	} else {
+		w.checkUpdateBtn.SetText(msg.CheckUpdate)
+	}
+	w.checkUpdateBtn.SetEnabled(!busy)
+}
+
 func (w *MainWindow) applyLanguage(language string) {
 	msg := i18n.For(language)
 	w.settings.Language = string(i18n.Resolve(language))
@@ -615,11 +750,15 @@ func (w *MainWindow) applyLanguage(language string) {
 	w.appAutoHide.SetText(msg.ManagedAutoHide)
 	w.appLaunchHidden.SetText(msg.ManagedLaunchHidden)
 	w.appPauseTask.SetText(msg.ManagedPauseTask)
+	w.setLaunchNowBusy(w.launchNowBusy)
 	w.languageLabel.SetText(msg.LanguageLabel)
 	w.removeBtn.SetText(msg.RemoveSelected)
 	w.openLogsBtn.SetText(msg.OpenLogs)
 	w.cleanupBtn.SetText(msg.CleanupRestore)
 	w.exitBtn.SetText(msg.ExitApp)
+	w.versionLabel.SetText(fmt.Sprintf(msg.VersionLabel, version.Number))
+	w.githubLink.SetToolTipText(msg.GitHubTooltip)
+	w.setCheckUpdateBusy(w.checkingUpdate)
 	_ = w.languageCombo.SetModel([]string{msg.LanguageZhLabel, msg.LanguageEnLabel})
 	if w.settings.Language == string(i18n.LangEnUS) {
 		w.languageCombo.SetCurrentIndex(1)
@@ -635,7 +774,7 @@ func (w *MainWindow) applyLanguage(language string) {
 }
 
 func (w *MainWindow) SetLanguage(language string) {
-	w.mw.Synchronize(func() {
+	w.synchronize(func() {
 		w.applyLanguage(language)
 		w.refreshManagedList()
 	})
@@ -746,7 +885,7 @@ func (w *MainWindow) refreshManagedList() {
 }
 
 func (w *MainWindow) syncManagedEditor() {
-	if w.pathEdit == nil || w.argsEdit == nil || w.appAutoHide == nil || w.appLaunchHidden == nil || w.appPauseTask == nil || w.addProgramBtn == nil {
+	if w.pathEdit == nil || w.argsEdit == nil || w.appAutoHide == nil || w.appLaunchHidden == nil || w.appPauseTask == nil || w.launchNowBtn == nil || w.addProgramBtn == nil {
 		return
 	}
 	app, _, ok := w.selectedManagedApp()
@@ -762,6 +901,7 @@ func (w *MainWindow) syncManagedEditor() {
 	w.appAutoHide.SetEnabled(ok)
 	w.appLaunchHidden.SetEnabled(ok)
 	w.appPauseTask.SetEnabled(ok)
+	w.launchNowBtn.SetEnabled(ok && !w.launchNowBusy)
 	w.noSelectLabel.SetVisible(false)
 	if ok {
 		w.browseBtn.SetText(msg.ModifyProgram)
@@ -797,14 +937,35 @@ func (w *MainWindow) selectedManagedApp() (*config.ManagedAppEntry, int, bool) {
 	return &w.settings.ManagedApps[idx], idx, true
 }
 
+// synchronize queues f on the UI thread and wakes the message loop. walk only
+// drains its queue after it has dispatched a window message, so an idle window
+// would otherwise hold background results (status updates, dialogs) until the
+// user happened to touch the UI again.
+func (w *MainWindow) synchronize(f func()) {
+	w.mw.Synchronize(f)
+	if hwnd := w.mw.Handle(); hwnd != 0 {
+		win.PostMessage(hwnd, win.WM_NULL, 0, 0)
+	}
+}
+
 func (w *MainWindow) ShowInfo(title, body string) {
-	w.mw.Synchronize(func() {
+	w.synchronize(func() {
 		walk.MsgBox(w.mw, title, body, walk.MsgBoxIconInformation)
 	})
 }
 
+// Confirm asks a yes/no question on the UI thread and blocks until answered,
+// so background workers can prompt the user.
+func (w *MainWindow) Confirm(title, body string) bool {
+	answer := make(chan bool, 1)
+	w.synchronize(func() {
+		answer <- walk.MsgBox(w.mw, title, body, walk.MsgBoxYesNo|walk.MsgBoxIconQuestion) == walk.DlgCmdYes
+	})
+	return <-answer
+}
+
 func (w *MainWindow) ShowError(title, body string) {
-	w.mw.Synchronize(func() {
+	w.synchronize(func() {
 		walk.MsgBox(w.mw, title, body, walk.MsgBoxIconError)
 	})
 }
@@ -816,7 +977,7 @@ func (w *MainWindow) save() {
 }
 
 func (w *MainWindow) ShowMainWindow() {
-	w.mw.Synchronize(func() {
+	w.synchronize(func() {
 		hwnd := w.mw.Handle()
 		if hwnd != 0 {
 			win.ShowWindow(hwnd, win.SW_RESTORE)
@@ -841,7 +1002,7 @@ func (w *MainWindow) RequestExplicitClose() {
 	if w == nil || w.mw == nil {
 		return
 	}
-	w.mw.Synchronize(func() {
+	w.synchronize(func() {
 		if w.mw.IsDisposed() {
 			return
 		}

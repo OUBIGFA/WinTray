@@ -22,6 +22,8 @@ import (
 	"wintray/internal/startup"
 	"wintray/internal/tray"
 	"wintray/internal/ui"
+	"wintray/internal/update"
+	"wintray/internal/version"
 )
 
 const (
@@ -157,6 +159,51 @@ func Run(args []string) {
 			}
 		},
 		OnCleanupRestore: cleanupAndRestore,
+		OnLaunchNow: func(entry config.ManagedAppEntry) {
+			mu.Lock()
+			retrySeconds := latest.CloseWindowRetrySeconds
+			language := latest.Language
+			mu.Unlock()
+			go func() {
+				result := orch.StartNow(context.Background(), entry, retrySeconds)
+				m := i18n.For(language)
+				mainWindow.SetLaunchNowBusy(false)
+				if result.Managed {
+					mainWindow.ShowInfo(m.WindowTitle, fmt.Sprintf(m.LaunchNowDoneBody, result.AppName))
+					return
+				}
+				detail := i18n.TranslateResultMessage(language, result.Message)
+				if i18n.IsLikelyPermissionIssue(result.Message) {
+					detail += " " + m.StatusPermissionHint
+				}
+				logger.Warn(fmt.Sprintf("launch now failed: %s %s", result.AppName, result.Message))
+				mainWindow.ShowError(m.WindowTitle, fmt.Sprintf(m.StatusLaunchFailTemplate, result.AppName, detail))
+			}()
+		},
+		OnCheckUpdate: func() {
+			language := safeLanguage(mainWindow)
+			go func() {
+				result, checkErr := update.Check(context.Background(), version.Number)
+				m := i18n.For(language)
+				mainWindow.SetCheckUpdateBusy(false)
+				if checkErr != nil {
+					logger.Warn(fmt.Sprintf("update check failed: %v", checkErr))
+					mainWindow.ShowError(m.UpdateTitle, fmt.Sprintf(m.UpdateFailedBody, checkErr))
+					return
+				}
+				logger.Info(fmt.Sprintf("update check: current=%s latest=%s newer=%t", result.Current, result.Latest, result.HasUpdate))
+				if !result.HasUpdate {
+					mainWindow.ShowInfo(m.UpdateTitle, fmt.Sprintf(m.UpdateLatestBody, result.Latest))
+					return
+				}
+				if mainWindow.Confirm(m.UpdateTitle, fmt.Sprintf(m.UpdateAvailableBody, result.Latest, result.Current)) {
+					openRepository(result.PageURL, logger)
+				}
+			}()
+		},
+		OnOpenRepository: func() {
+			openRepository(version.RepositoryURL, logger)
+		},
 		OnExit: func() {
 			mainWindow.RequestExplicitClose()
 		},
@@ -333,6 +380,15 @@ func safeLanguage(mainWindow *ui.MainWindow) string {
 		return string(i18n.LangZhCN)
 	}
 	return mainWindow.Settings().Language
+}
+
+// openRepository hands a project URL to the default browser.
+func openRepository(url string, logger *logging.Logger) {
+	cmd := exec.Command("rundll32.exe", "url.dll,FileProtocolHandler", url)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	if err := cmd.Start(); err != nil {
+		logger.Warn(fmt.Sprintf("open repository failed: %v", err))
+	}
 }
 
 func openLogLocation() error {

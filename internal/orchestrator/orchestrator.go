@@ -13,7 +13,37 @@ import (
 	"wintray/internal/stringutil"
 )
 
+// startOptions describes how a managed entry should be brought up.
+// hideProcessWindow creates the process without a console window;
+// manageWindow closes/hides the top-level window it opens afterwards.
+// windowOptional treats window handling as best effort: a program that never
+// opens a window (background scripts) still counts as a successful launch.
+type startOptions struct {
+	hideProcessWindow bool
+	manageWindow      bool
+	windowOptional    bool
+}
+
 func (s *Service) StartAndManage(ctx context.Context, entry config.ManagedAppEntry, retrySeconds int) Result {
+	return s.start(ctx, entry, retrySeconds, startOptions{
+		hideProcessWindow: entry.LaunchHiddenInBackground,
+		manageWindow:      !entry.LaunchHiddenInBackground && entry.TrayBehavior.AutoMinimizeAndHideOnLaunch,
+	})
+}
+
+// StartNow launches the entry on demand using the very same behavior configured
+// on it (normal, hidden in background, or close the window after launch). Window
+// handling is best effort here: the launch itself already succeeded, so it must
+// not be reported as a failure.
+func (s *Service) StartNow(ctx context.Context, entry config.ManagedAppEntry, retrySeconds int) Result {
+	return s.start(ctx, entry, retrySeconds, startOptions{
+		hideProcessWindow: entry.LaunchHiddenInBackground,
+		manageWindow:      !entry.LaunchHiddenInBackground && entry.TrayBehavior.AutoMinimizeAndHideOnLaunch,
+		windowOptional:    true,
+	})
+}
+
+func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retrySeconds int, opts startOptions) Result {
 	if entry.ExePath == "" {
 		return Result{AppName: entry.Name, Managed: false, Message: "empty exe path"}
 	}
@@ -26,7 +56,7 @@ func (s *Service) StartAndManage(ctx context.Context, entry config.ManagedAppEnt
 	expectedPath := normalizePath(entry.ExePath)
 	if s.hasExistingManagedProcess(expectedPath, expectedName) || s.hasExistingManagedWindow(expectedPath, expectedName, entry.WindowMatch.Strategy) {
 		s.logger.Info(fmt.Sprintf("skip start: already running %s", entry.Name))
-		if !entry.LaunchHiddenInBackground && entry.TrayBehavior.AutoMinimizeAndHideOnLaunch {
+		if opts.manageWindow {
 			ok := s.manageFirstMatchingWindow(ctx, func(w ManagedWindowInfo) bool {
 				return matchesExecutableWithIdentityFallback(w, expectedPath, expectedName) && matchStrategy(w, entry.WindowMatch.Strategy)
 			}, expectedPath, expectedName, nil, nil, retrySeconds, "close")
@@ -41,41 +71,52 @@ func (s *Service) StartAndManage(ctx context.Context, entry config.ManagedAppEnt
 		return matchesExecutableWithIdentityFallback(w, expectedPath, expectedName) && matchStrategy(w, entry.WindowMatch.Strategy)
 	})
 
-	cmd, err := startProcess(entry.ExePath, entry.Args, entry.LaunchHiddenInBackground)
+	cmd, err := startProcess(entry.ExePath, entry.Args, opts.hideProcessWindow)
 	if err != nil {
 		s.logger.Error(fmt.Sprintf("start failed: %s err=%v", entry.Name, err))
 		return Result{AppName: entry.Name, Managed: false, Message: "process start failed"}
 	}
 	pid := uint32(cmd.Process.Pid)
-	s.logger.Info(fmt.Sprintf("started: %s pid=%d hidden=%t", entry.Name, pid, entry.LaunchHiddenInBackground))
+	s.logger.Info(fmt.Sprintf("started: %s pid=%d hidden=%t", entry.Name, pid, opts.hideProcessWindow))
 
-	if entry.LaunchHiddenInBackground {
-		return Result{AppName: entry.Name, Managed: true, Message: "started hidden"}
-	}
-
-	if !entry.TrayBehavior.AutoMinimizeAndHideOnLaunch {
-		return Result{AppName: entry.Name, Managed: true, Message: "started only"}
+	if !opts.manageWindow {
+		return startedResult(entry, opts)
 	}
 
 	ok := s.manageFirstMatchingWindow(ctx, func(w ManagedWindowInfo) bool {
 		return (w.ProcessID == pid || matchesExecutableWithIdentityFallback(w, expectedPath, expectedName)) && matchStrategy(w, entry.WindowMatch.Strategy)
 	}, expectedPath, expectedName, &pid, baseline, retrySeconds, "close")
 	if !ok {
+		if opts.windowOptional {
+			return startedResult(entry, opts)
+		}
 		return Result{AppName: entry.Name, Managed: false, Message: "no window managed"}
 	}
 	return Result{AppName: entry.Name, Managed: true, Action: "close", Message: "managed"}
+}
+
+func startedResult(entry config.ManagedAppEntry, opts startOptions) Result {
+	if opts.hideProcessWindow {
+		return Result{AppName: entry.Name, Managed: true, Message: "started hidden"}
+	}
+	return Result{AppName: entry.Name, Managed: true, Message: "started only"}
 }
 
 func (s *Service) hasExistingManagedProcess(expectedPath, expectedName string) bool {
 	return hasRunningProcessByIdentity(expectedPath, expectedName)
 }
 
+// hasExistingManagedWindow decides whether the program is already up, so it
+// only trusts strong evidence: the window's owning process must match by
+// executable path or process name. The loose title/class identity fallback is
+// deliberately not used here — an unrelated window whose title merely contains
+// the program name (common for short names) would otherwise suppress the launch.
 func (s *Service) hasExistingManagedWindow(expectedPath, expectedName string, strategy config.MatchStrategy) bool {
 	for _, w := range s.enumerator.EnumerateTopLevelWindows() {
 		if isUnmanageableWindow(w) {
 			continue
 		}
-		if !matchesExecutableWithIdentityFallback(w, expectedPath, expectedName) {
+		if !matchesExecutable(w, expectedPath, expectedName) {
 			continue
 		}
 		if !matchStrategy(w, strategy) {

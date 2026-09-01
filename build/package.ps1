@@ -31,7 +31,12 @@ $exe = Join-Path $out "WinTray.exe"
 $manifestSource = Join-Path $PSScriptRoot "WinTray.exe.manifest"
 $manifestTarget = "$exe.manifest"
 
-& $goCommand build -trimpath -ldflags "-s -w -H=windowsgui" -o $exe ./cmd/wintray
+$ldflags = "-s -w -H=windowsgui"
+if ($Version) {
+  $ldflags += " -X wintray/internal/version.Number=$($Version.TrimStart('v'))"
+}
+
+& $goCommand build -trimpath -ldflags $ldflags -o $exe ./cmd/wintray
 if ($LASTEXITCODE -ne 0) {
   throw "go build failed"
 }
