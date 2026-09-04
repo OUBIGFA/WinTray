@@ -216,14 +216,6 @@ func Run(args []string) int {
 	trayController, err = tray.New(
 		mainWindow.Native(),
 		mainWindow.ShowMainWindow,
-		func() {
-			if openErr := openLogLocation(); openErr != nil {
-				lang := safeLanguage(mainWindow)
-				m := i18n.For(lang)
-				mainWindow.ShowError(m.WindowTitle, fmt.Sprintf("%s: %v", m.StatusOpenLogsFailed, openErr))
-			}
-		},
-		cleanupAndRestore,
 		func() { mainWindow.RequestExplicitClose() },
 		settings.Language,
 	)

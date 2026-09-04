@@ -50,8 +50,6 @@ type Messages struct {
 	UpdateFailedBody               string
 	ExitApp                        string
 	TrayOpenSettings               string
-	TrayOpenLogs                   string
-	TrayCleanupRestore             string
 	TrayExit                       string
 	TrayToolTip                    string
 	SelectManagedExe               string
@@ -118,8 +116,6 @@ var zhCN = Messages{
 	UpdateFailedBody:               "检查更新失败: %s",
 	ExitApp:                        "退出 WinTray",
 	TrayOpenSettings:               "打开设置",
-	TrayOpenLogs:                   "打开日志",
-	TrayCleanupRestore:             "清理并恢复默认",
 	TrayExit:                       "退出 WinTray",
 	TrayToolTip:                    "WinTray",
 	SelectManagedExe:               "选择要托管的程序",
@@ -186,8 +182,6 @@ var enUS = Messages{
 	UpdateFailedBody:               "Update check failed: %s",
 	ExitApp:                        "Exit WinTray",
 	TrayOpenSettings:               "Open Settings",
-	TrayOpenLogs:                   "Open Logs",
-	TrayCleanupRestore:             "Cleanup && Restore Defaults",
 	TrayExit:                       "Exit WinTray",
 	TrayToolTip:                    "WinTray",
 	SelectManagedExe:               "Select program to manage",
