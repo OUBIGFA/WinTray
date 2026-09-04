@@ -20,18 +20,20 @@ English | [简体中文](README.md)
 
 WinTray is a Windows startup organizer. It sits in the system tray and, when triggered by the auto-start flow, automatically manages the windows of specified programs (e.g., minimizing or hiding them) based on configurable rules — saving you the hassle of manually cleaning up your desktop after every boot.
 
+WinTray is mainly designed for two scenarios: automatically closing the window of applications that can start with Windows but do not support minimizing to the system tray after launch, while keeping them running; and launching `.bat`, `.cmd`, `.ps1`, `.py`, and `.pyw` programs silently in the background without visible windows.
+
 ![](image/01.png)
 
 ---
 
 ## Features
 
-- **Tray Resident**: Lives in the notification area with one-click access to settings, logs, and exit
+- **Tray Resident**: Lives in the notification area with one-click access to settings and exit
 - **Managed Program List**: Maintain any number of programs, each with independent behavior configuration
 - **Auto Start**: Writes to the current user's `Run` registry key for automatic launch at Windows logon
 - **Auto Hide Windows**: When configured in the program list, the `--autorun` flow automatically minimizes and hides target windows
 - **Retry on Window Handling**: Configurable 0–120 second retry window for slow-starting programs
-- **Cleanup & Restore Defaults**: One-click cleanup of local config/logs from the main window or tray menu
+- **Cleanup & Restore Defaults**: One-click cleanup of local config/logs from the main window
 - **Bilingual UI**: Built-in Simplified Chinese / English, switchable instantly
 - **Single Instance Protection**: Prevents duplicate launches to avoid configuration conflicts
 
@@ -60,6 +62,8 @@ WinTray supports adding the following program types to the managed list, automat
 | Python script     | `.py` / `.pyw`  | Hidden background launch by default, invokes `python.exe` / `pythonw.exe`       |
 
 > Non-`.exe` scripts (`.bat` / `.cmd` / `.ps1` / `.py` / `.pyw`) automatically enable the "Launch hidden in background" option when added, and cannot simultaneously use "Close window after launch".
+
+> **Important:** Some applications contain multiple `.exe` files, such as launchers, updaters, helper processes, and the actual main program. When adding an application, select the executable that owns the main visible window. Selecting the wrong `.exe` may allow the program to start, but WinTray may not find its window, so closing or hiding the window after launch will not take effect.
 
 ### Per-Program Configuration Options
 
