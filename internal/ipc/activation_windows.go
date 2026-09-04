@@ -50,6 +50,7 @@ func (l *ActivationListener) Close() {
 	l.closeMu.Do(func() {
 		if atomic.LoadUint32(&l.started) == 1 {
 			close(l.stop)
+			_ = windows.SetEvent(l.event)
 			<-l.done
 		}
 		if l.event != 0 {
@@ -68,18 +69,21 @@ func (l *ActivationListener) listen(onActivated func()) {
 		default:
 		}
 
-		wait, err := windows.WaitForSingleObject(l.event, 250)
+		wait, err := windows.WaitForSingleObject(l.event, windows.INFINITE)
 		if err != nil {
-			continue
+			return
 		}
 
 		switch wait {
 		case windows.WAIT_OBJECT_0:
+			select {
+			case <-l.stop:
+				return
+			default:
+			}
 			onActivated()
-		case uint32(windows.WAIT_TIMEOUT):
-			continue
 		default:
-			continue
+			return
 		}
 	}
 }

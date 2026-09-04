@@ -11,7 +11,6 @@ import (
 var (
 	procIsWindow        = user32.NewProc("IsWindow")
 	procPostMessageW    = user32.NewProc("PostMessageW")
-	procSendMessageW    = user32.NewProc("SendMessageW")
 	procShowWindowAsync = user32.NewProc("ShowWindowAsync")
 )
 
@@ -19,31 +18,12 @@ const (
 	wmSysCommand = 0x0112
 	wmClose      = 0x0010
 	scClose      = 0xF060
-	scMinimize   = 0xF020
 	swHide       = 0
-	swMinimize   = 6
 )
 
 type Win32WindowManager struct{}
 
 func NewWin32WindowManager() *Win32WindowManager { return &Win32WindowManager{} }
-
-func (m *Win32WindowManager) MinimizeWindow(hwnd uintptr) (bool, error) {
-	if !isWindow(hwnd) {
-		return false, errors.New("target window is not valid")
-	}
-	ok, _, _ := procPostMessageW.Call(hwnd, wmSysCommand, scMinimize, 0)
-	if ok != 0 {
-		return true, nil
-	}
-	_, _, callErr := procShowWindowAsync.Call(hwnd, swMinimize)
-	if callErr != nil && callErr != syscall.Errno(0) {
-		return false, fmt.Errorf("showwindowasync minimize failed: %w", callErr)
-	}
-	// ShowWindowAsync returns the *previous* visibility state, not success/failure.
-	// A zero return value can still mean the minimize request was accepted.
-	return true, nil
-}
 
 func (m *Win32WindowManager) HideWindow(hwnd uintptr) (bool, error) {
 	if !isWindow(hwnd) {
@@ -64,17 +44,17 @@ func (m *Win32WindowManager) CloseWindow(hwnd uintptr) (bool, error) {
 	if ok != 0 {
 		return true, nil
 	}
-	_, _, sendErr := procSendMessageW.Call(hwnd, wmClose, 0, 0)
-	if sendErr != nil && sendErr != syscall.Errno(0) {
-		if callErr != nil && callErr != syscall.Errno(0) {
-			return false, fmt.Errorf("post sc_close failed: %v; send wm_close failed: %w", callErr, sendErr)
-		}
-		return false, fmt.Errorf("send wm_close failed: %w", sendErr)
+	ok, _, wmCloseErr := procPostMessageW.Call(hwnd, wmClose, 0, 0)
+	if ok != 0 {
+		return true, nil
 	}
-	if callErr != nil && callErr != syscall.Errno(0) {
-		return false, fmt.Errorf("post sc_close failed: %w", callErr)
+	if callErr != nil && callErr != syscall.Errno(0) && wmCloseErr != nil && wmCloseErr != syscall.Errno(0) {
+		return false, fmt.Errorf("post sc_close failed: %v; post wm_close failed: %w", callErr, wmCloseErr)
 	}
-	return true, nil
+	if wmCloseErr != nil && wmCloseErr != syscall.Errno(0) {
+		return false, fmt.Errorf("post wm_close failed: %w", wmCloseErr)
+	}
+	return false, fmt.Errorf("post close message failed")
 }
 
 func isWindow(hwnd uintptr) bool {

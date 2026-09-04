@@ -52,14 +52,14 @@ func processIdentityMatches(pid uint32, exeName, expectedPath, targetIdentity st
 		if ext := filepath.Ext(base); ext != "" {
 			base = base[:len(base)-len(ext)]
 		}
-		if normalizeIdentity(base) == targetIdentity {
-			if expectedPath == "" {
-				return true
-			}
-			if p := queryProcessImagePath(pid); p != "" && strings.EqualFold(normalizePath(p), expectedPath) {
-				return true
-			}
+		if normalizeIdentity(base) != targetIdentity {
+			return false
 		}
+		if expectedPath == "" {
+			return true
+		}
+		p := queryProcessImagePath(pid)
+		return p != "" && strings.EqualFold(normalizePath(p), expectedPath)
 	}
 
 	if expectedPath != "" {

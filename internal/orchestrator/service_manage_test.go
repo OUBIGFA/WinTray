@@ -32,8 +32,6 @@ func (m *testManager) HideWindow(hwnd uintptr) (bool, error) {
 	return true, nil
 }
 
-func (m *testManager) MinimizeWindow(hwnd uintptr) (bool, error) { return true, nil }
-
 type testLogger struct{}
 
 func (l *testLogger) Info(string)  {}
@@ -144,7 +142,7 @@ func TestHasExistingManagedWindow_IgnoresUnrelatedWindowWithNameInTitle(t *testi
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			svc := NewService(&testEnumerator{windows: []ManagedWindowInfo{tc.window}}, &testManager{}, &testLogger{})
-			got := svc.hasExistingManagedWindow(normalizePath(exePath), "123", config.MatchProcessNameThenTitle)
+			got := svc.hasExistingManagedWindow(normalizePath(exePath), "123")
 			if got != tc.want {
 				t.Fatalf("hasExistingManagedWindow = %t, want %t", got, tc.want)
 			}

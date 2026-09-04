@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,39 +19,74 @@ func NewStore(path string) *Store {
 }
 
 func (s *Store) Load() Settings {
-	if _, err := os.Stat(s.path); err != nil {
-		return DefaultSettings()
-	}
+	settings, _ := s.LoadWithError()
+	return settings
+}
+
+// LoadWithError distinguishes a missing settings file from an unreadable or
+// malformed one. Callers can then avoid replacing a user's file silently.
+func (s *Store) LoadWithError() (Settings, error) {
 	data, err := os.ReadFile(s.path)
+	if errors.Is(err, os.ErrNotExist) {
+		return DefaultSettings(), nil
+	}
 	if err != nil {
-		return DefaultSettings()
+		return DefaultSettings(), err
 	}
 	var settings Settings
 	if err = json.Unmarshal(data, &settings); err != nil {
 		_ = backupInvalidSettingsFile(s.path, data)
-		return DefaultSettings()
+		return DefaultSettings(), fmt.Errorf("invalid settings: %w", err)
 	}
-	return migrate(settings)
+	return migrate(settings), nil
 }
 
 func backupInvalidSettingsFile(path string, data []byte) error {
-	if len(data) == 0 {
-		return nil
-	}
-	stamp := time.Now().Format("20060102-150405")
+	stamp := time.Now().Format("20060102-150405.000000000")
 	backupPath := fmt.Sprintf("%s.invalid-%s.bak", path, stamp)
 	return os.WriteFile(backupPath, data, 0o644)
 }
 
 func (s *Store) Save(settings Settings) error {
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
+	dir := filepath.Dir(s.path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.path, data, 0o644)
+	tmp, err := os.CreateTemp(dir, ".settings-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	removeTemp := true
+	defer func() {
+		if removeTemp {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if _, err = tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err = tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err = tmp.Chmod(0o644); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err = tmp.Close(); err != nil {
+		return err
+	}
+	if err = os.Rename(tmpPath, s.path); err != nil {
+		return err
+	}
+	removeTemp = false
+	return nil
 }
 
 func migrate(settings Settings) Settings {
@@ -100,9 +136,6 @@ func migrate(settings Settings) Settings {
 	for i := range settings.ManagedApps {
 		if settings.ManagedApps[i].Name == "" {
 			settings.ManagedApps[i].Name = "New App"
-		}
-		if settings.ManagedApps[i].WindowMatch.Strategy == "" {
-			settings.ManagedApps[i].WindowMatch.Strategy = MatchProcessNameThenTitle
 		}
 		if settings.ManagedApps[i].LaunchHiddenInBackground {
 			settings.ManagedApps[i].TrayBehavior.AutoMinimizeAndHideOnLaunch = false

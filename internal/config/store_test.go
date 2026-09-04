@@ -1,6 +1,81 @@
 package config
 
-import "testing"
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestStoreSaveLoadWithError_RoundTripAndAtomicTempCleanup(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nested", "settings.json")
+	want := DefaultSettings()
+	want.Language = "en-US"
+	want.ManagedApps = []ManagedAppEntry{{Name: "Demo", ExePath: "C:\\\\Demo\\\\demo.exe", RunOnStartup: true}}
+
+	store := NewStore(path)
+	if err := store.Save(want); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	want.Language = "zh-CN"
+	if err := store.Save(want); err != nil {
+		t.Fatalf("second Save() error = %v", err)
+	}
+	got, err := store.LoadWithError()
+	if err != nil {
+		t.Fatalf("LoadWithError() error = %v", err)
+	}
+	if got.Language != want.Language || len(got.ManagedApps) != 1 || got.ManagedApps[0].Name != "Demo" {
+		t.Fatalf("round-trip mismatch: got=%+v want=%+v", got, want)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("settings file missing: %v", err)
+	}
+	if matches, _ := filepath.Glob(filepath.Join(filepath.Dir(path), ".settings-*.tmp")); len(matches) != 0 {
+		t.Fatalf("temporary settings files remain: %v", matches)
+	}
+}
+
+func TestStoreLoadWithError_InvalidFileIsBackedUp(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	data := []byte("{\\\"schemaVersion\\\":")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	got, err := NewStore(path).LoadWithError()
+	if err == nil || !strings.Contains(err.Error(), "invalid settings") {
+		t.Fatalf("LoadWithError() error = %v, want invalid settings error", err)
+	}
+	if got.SchemaVersion != DefaultSettings().SchemaVersion {
+		t.Fatalf("invalid file should return defaults, got schema %d", got.SchemaVersion)
+	}
+	backups, _ := filepath.Glob(path + ".invalid-*.bak")
+	if len(backups) != 1 {
+		t.Fatalf("invalid settings backup count = %d, want 1", len(backups))
+	}
+	backup, readErr := os.ReadFile(backups[0])
+	if readErr != nil || string(backup) != string(data) {
+		t.Fatalf("backup content mismatch: err=%v content=%q", readErr, backup)
+	}
+}
+
+func TestStoreLoadWithError_ReadFailureDoesNotLookLikeMissingFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatalf("Mkdir() error = %v", err)
+	}
+	_, err := NewStore(path).LoadWithError()
+	if err == nil {
+		t.Fatal("LoadWithError() returned nil error for unreadable settings path")
+	}
+	if _, marshalErr := json.Marshal(DefaultSettings()); marshalErr != nil {
+		t.Fatalf("defaults should remain serializable: %v", marshalErr)
+	}
+}
 
 func TestShouldLaunchViaWinTray_RunOnStartupIsMasterSwitch(t *testing.T) {
 	tests := []struct {

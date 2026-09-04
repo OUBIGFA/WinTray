@@ -1,31 +1,17 @@
 package config
 
-type MatchStrategy string
-
-const (
-	MatchProcessNameThenTitle MatchStrategy = "processNameThenTitle"
-	MatchTitleContains        MatchStrategy = "titleContains"
-	MatchClassName            MatchStrategy = "className"
-	MatchAny                  MatchStrategy = "any"
-)
-
-type WindowMatchRule struct {
-	Strategy MatchStrategy `json:"strategy"`
-}
-
 type TrayBehavior struct {
 	AutoMinimizeAndHideOnLaunch bool `json:"autoMinimizeAndHideOnLaunch"`
 }
 
 type ManagedAppEntry struct {
-	ID                       string          `json:"id"`
-	Name                     string          `json:"name"`
-	ExePath                  string          `json:"exePath"`
-	Args                     string          `json:"args"`
-	RunOnStartup             bool            `json:"runOnStartup"`
-	LaunchHiddenInBackground bool            `json:"launchHiddenInBackground"`
-	WindowMatch              WindowMatchRule `json:"windowMatch"`
-	TrayBehavior             TrayBehavior    `json:"trayBehavior"`
+	ID                       string       `json:"id"`
+	Name                     string       `json:"name"`
+	ExePath                  string       `json:"exePath"`
+	Args                     string       `json:"args"`
+	RunOnStartup             bool         `json:"runOnStartup"`
+	LaunchHiddenInBackground bool         `json:"launchHiddenInBackground"`
+	TrayBehavior             TrayBehavior `json:"trayBehavior"`
 }
 
 type Settings struct {

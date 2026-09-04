@@ -20,3 +20,12 @@ func TestFormatManagedParam_ShowsPausedState(t *testing.T) {
 		t.Fatalf("FormatManagedParam(zh-CN) = %q, want %q", got, "已暂停")
 	}
 }
+
+func TestTranslateResultCode_UsesTypedCode(t *testing.T) {
+	if got := TranslateResultCode("en-US", "started_hidden"); got != "started hidden in background" {
+		t.Fatalf("TranslateResultCode(en-US, started_hidden) = %q", got)
+	}
+	if got := TranslateResultCode("en-US", "unknown"); got != "" {
+		t.Fatalf("TranslateResultCode(unknown) = %q, want empty", got)
+	}
+}

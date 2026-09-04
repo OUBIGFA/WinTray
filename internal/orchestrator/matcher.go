@@ -33,7 +33,7 @@ func normalizePath(path string) string {
 	if err != nil {
 		return p
 	}
-	return strings.TrimRight(full, `\\/`)
+	return strings.TrimRight(full, `\/`)
 }
 
 func normalizeIdentity(value string) string {

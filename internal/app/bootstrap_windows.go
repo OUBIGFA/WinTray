@@ -16,7 +16,6 @@ import (
 	"wintray/internal/config"
 	"wintray/internal/i18n"
 	"wintray/internal/ipc"
-	"wintray/internal/lifecycle"
 	"wintray/internal/logging"
 	"wintray/internal/orchestrator"
 	"wintray/internal/startup"
@@ -32,53 +31,54 @@ const (
 	activationEvent    = "WinTray_ShowMainWindow"
 )
 
-func Run(args []string) {
+func Run(args []string) int {
 	if isCleanupRestoreLaunch(args) {
-		_ = runCleanupRestoreHeadless()
-		return
+		if err := runCleanupRestoreHeadless(); err != nil {
+			return 1
+		}
+		return 0
 	}
 
 	instance, alreadyRunning, err := ipc.Acquire(singleInstanceName)
 	if err != nil {
 		emitFatalBeforeUI("failed to acquire single-instance lock", err)
-		return
+		return 1
 	}
 	defer instance.Close()
 
 	if alreadyRunning {
 		if shouldSignalRunningInstance(args) {
 			if ipc.TrySignalActivation(activationEvent) {
-				return
+				return 0
 			}
 			msg := i18n.For("zh-CN")
 			showMessage(msg.AlreadyRunningTitle, msg.AlreadyRunningBody, walk.MsgBoxIconInformation)
 		}
-		return
+		return 0
 	}
 
 	settingsPath, settingsPathErr := config.SettingsPathWithError()
 	if settingsPathErr != nil {
 		emitFatalBeforeUI("failed to resolve settings path", settingsPathErr)
-		return
+		return 1
 	}
-	migrationErr := config.TryMigrateFromWinTray(settingsPath)
 	store := config.NewStore(settingsPath)
-	settings := store.Load()
+	settings, settingsErr := store.LoadWithError()
 
 	appDir, appDirErr := config.AppDirWithError()
 	if appDirErr != nil {
 		emitFatalBeforeUI("failed to resolve app data directory", appDirErr)
-		return
+		return 1
 	}
 
 	logger, err := logging.New(appDir)
 	if err != nil {
 		emitFatalBeforeUI("failed to initialize logger", err)
-		return
+		return 1
 	}
 	defer logger.Close()
-	if migrationErr != nil {
-		logger.Warn(fmt.Sprintf("settings migration failed: %v", migrationErr))
+	if settingsErr != nil {
+		logger.Warn(fmt.Sprintf("load settings failed; defaults kept in memory: %v", settingsErr))
 	}
 
 	enumerator := orchestrator.NewWin32WindowEnumerator()
@@ -87,15 +87,11 @@ func Run(args []string) {
 	registrar := startup.NewRegistrar()
 
 	if isAutorunLaunch(args) {
-		logger.Info("autorun mode: run managed apps without initializing UI")
-		runManagedApps(context.Background(), orch, nil, settings, false, logger)
-		return
+		logger.Info(fmt.Sprintf("autorun mode: run managed apps (exitAfterCompleted=%t)", settings.ExitAfterManagedAppsCompleted))
+		if runAutorunMode(context.Background(), orch, settings, logger) {
+			return 0
+		}
 	}
-
-	var (
-		mu     sync.Mutex
-		latest = settings
-	)
 
 	var trayController *tray.Controller
 	var mainWindow *ui.MainWindow
@@ -119,9 +115,6 @@ func Run(args []string) {
 		}
 
 		defaults := config.DefaultSettings()
-		mu.Lock()
-		latest = defaults
-		mu.Unlock()
 
 		if saveErr := store.Save(defaults); saveErr != nil {
 			mainWindow.ShowError(m.CleanupFailedTitle, fmt.Sprintf(m.CleanupFailedBody, saveErr))
@@ -140,9 +133,6 @@ func Run(args []string) {
 
 	mainWindow, err = ui.NewMainWindow(settings, ui.Callbacks{
 		OnSave: func(s config.Settings) {
-			mu.Lock()
-			latest = s
-			mu.Unlock()
 			if saveErr := store.Save(s); saveErr != nil {
 				logger.Warn(fmt.Sprintf("save settings failed: %v", saveErr))
 			}
@@ -160,10 +150,9 @@ func Run(args []string) {
 		},
 		OnCleanupRestore: cleanupAndRestore,
 		OnLaunchNow: func(entry config.ManagedAppEntry) {
-			mu.Lock()
-			retrySeconds := latest.CloseWindowRetrySeconds
-			language := latest.Language
-			mu.Unlock()
+			current := mainWindow.Settings()
+			retrySeconds := current.CloseWindowRetrySeconds
+			language := current.Language
 			go func() {
 				result := orch.StartNow(context.Background(), entry, retrySeconds)
 				m := i18n.For(language)
@@ -172,8 +161,11 @@ func Run(args []string) {
 					mainWindow.ShowInfo(m.WindowTitle, fmt.Sprintf(m.LaunchNowDoneBody, result.AppName))
 					return
 				}
-				detail := i18n.TranslateResultMessage(language, result.Message)
-				if i18n.IsLikelyPermissionIssue(result.Message) {
+				detail := i18n.TranslateResultCode(language, string(result.Code))
+				if detail == "" {
+					detail = i18n.TranslateResultMessage(language, result.Message)
+				}
+				if i18n.IsLikelyPermissionCode(string(result.Code)) || i18n.IsLikelyPermissionIssue(result.Message) {
 					detail += " " + m.StatusPermissionHint
 				}
 				logger.Warn(fmt.Sprintf("launch now failed: %s %s", result.AppName, result.Message))
@@ -211,7 +203,7 @@ func Run(args []string) {
 	if err != nil {
 		logger.Error(fmt.Sprintf("create main window failed: %v", err))
 		emitFatalWithLog(settings.Language, "failed to create main window", err)
-		return
+		return 1
 	}
 	if activation != nil {
 		activation.Start(func() {
@@ -224,17 +216,26 @@ func Run(args []string) {
 	trayController, err = tray.New(
 		mainWindow.Native(),
 		mainWindow.ShowMainWindow,
+		func() {
+			if openErr := openLogLocation(); openErr != nil {
+				lang := safeLanguage(mainWindow)
+				m := i18n.For(lang)
+				mainWindow.ShowError(m.WindowTitle, fmt.Sprintf("%s: %v", m.StatusOpenLogsFailed, openErr))
+			}
+		},
+		cleanupAndRestore,
 		func() { mainWindow.RequestExplicitClose() },
 		settings.Language,
 	)
 	if err != nil {
 		logger.Error(fmt.Sprintf("create tray failed: %v", err))
 		emitFatalWithLog(settings.Language, "failed to create system tray", err)
-		return
+		return 1
 	}
 	defer trayController.Dispose()
 
-	if shouldShowMainWindow(args) {
+	showMainWindow := shouldShowMainWindowForSettings(args, settings)
+	if showMainWindow {
 		mainWindow.ShowMainWindow()
 	} else {
 		mainWindow.HideMainWindow()
@@ -242,13 +243,15 @@ func Run(args []string) {
 
 	exitCode := mainWindow.Run()
 
-	mu.Lock()
-	finalSettings := latest
-	mu.Unlock()
-	if saveErr := store.Save(finalSettings); saveErr != nil {
-		logger.Warn(fmt.Sprintf("save settings on exit failed: %v", saveErr))
-	}
-	os.Exit(exitCode)
+	return exitCode
+}
+
+// runAutorunMode runs the logon task set and reports whether the process should
+// exit immediately. When the setting is disabled, Run continues into the
+// normal tray/UI path after the tasks complete.
+func runAutorunMode(ctx context.Context, orch *orchestrator.Service, settings config.Settings, logger *logging.Logger) bool {
+	runManagedApps(ctx, orch, nil, settings, false, logger)
+	return settings.ExitAfterManagedAppsCompleted
 }
 
 func runManagedApps(ctx context.Context, orch *orchestrator.Service, mainWindow *ui.MainWindow, settings config.Settings, autoExit bool, logger *logging.Logger) {
@@ -270,8 +273,11 @@ func runManagedApps(ctx context.Context, orch *orchestrator.Service, mainWindow 
 			defer wg.Done()
 			result := processManagedEntry(ctx, orch, settings, entry, logger)
 
-			detail := i18n.TranslateResultMessage(settings.Language, result.Message)
-			if !result.Managed && i18n.IsLikelyPermissionIssue(result.Message) {
+			detail := i18n.TranslateResultCode(settings.Language, string(result.Code))
+			if detail == "" {
+				detail = i18n.TranslateResultMessage(settings.Language, result.Message)
+			}
+			if !result.Managed && (i18n.IsLikelyPermissionCode(string(result.Code)) || i18n.IsLikelyPermissionIssue(result.Message)) {
 				detail += " " + msg.StatusPermissionHint
 			}
 			summaries[i] = fmt.Sprintf(msg.RunSummaryLine, result.AppName, detail)
@@ -287,9 +293,9 @@ func runManagedApps(ctx context.Context, orch *orchestrator.Service, mainWindow 
 	}
 
 	hadTasks := len(managedEntries) > 0
-	lifecycle.ExitIfCompleted(ctx, autoExit, hadTasks, func() {
+	if ctx.Err() == nil && autoExit && hadTasks && mainWindow != nil {
 		mainWindow.RequestExplicitClose()
-	})
+	}
 }
 
 func processManagedEntry(ctx context.Context, orch *orchestrator.Service, settings config.Settings, entry config.ManagedAppEntry, logger *logging.Logger) orchestrator.Result {
@@ -366,7 +372,10 @@ func emitFatalBeforeUI(message string, err error) {
 
 func emitFatalWithLog(language, message string, err error) {
 	msg := i18n.For(language)
-	logPath := config.LogPath()
+	logPath, pathErr := config.LogPathWithError()
+	if pathErr != nil {
+		logPath = "unavailable"
+	}
 	body := fmt.Sprintf(msg.FatalStartupBodyTemplate, fmt.Sprintf("%s: %v", message, err), logPath)
 	showMessage(msg.FatalStartupTitle, body, walk.MsgBoxIconError)
 }

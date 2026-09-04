@@ -9,15 +9,19 @@ import (
 )
 
 type Controller struct {
-	notifyIcon *walk.NotifyIcon
-	openAction *walk.Action
-	exitAction *walk.Action
-	language   string
+	notifyIcon    *walk.NotifyIcon
+	openAction    *walk.Action
+	logsAction    *walk.Action
+	cleanupAction *walk.Action
+	exitAction    *walk.Action
+	language      string
 }
 
 func New(
 	window *walk.MainWindow,
 	showMainWindow func(),
+	openLogs func(),
+	cleanupRestore func(),
 	exitApp func(),
 	language string,
 ) (*Controller, error) {
@@ -44,6 +48,24 @@ func New(
 	})
 	c.openAction = openAction
 	ni.ContextMenu().Actions().Add(openAction)
+
+	logsAction := walk.NewAction()
+	logsAction.Triggered().Attach(func() {
+		if openLogs != nil {
+			openLogs()
+		}
+	})
+	c.logsAction = logsAction
+	ni.ContextMenu().Actions().Add(logsAction)
+
+	cleanupAction := walk.NewAction()
+	cleanupAction.Triggered().Attach(func() {
+		if cleanupRestore != nil {
+			cleanupRestore()
+		}
+	})
+	c.cleanupAction = cleanupAction
+	ni.ContextMenu().Actions().Add(cleanupAction)
 
 	exitAction := walk.NewAction()
 	exitAction.Triggered().Attach(func() {
@@ -76,6 +98,12 @@ func (c *Controller) SetLanguage(language string) {
 	_ = c.notifyIcon.SetToolTip(msg.TrayToolTip)
 	if c.openAction != nil {
 		c.openAction.SetText(msg.TrayOpenSettings)
+	}
+	if c.logsAction != nil {
+		c.logsAction.SetText(msg.TrayOpenLogs)
+	}
+	if c.cleanupAction != nil {
+		c.cleanupAction.SetText(msg.TrayCleanupRestore)
 	}
 	if c.exitAction != nil {
 		c.exitAction.SetText(msg.TrayExit)

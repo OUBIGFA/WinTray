@@ -45,36 +45,36 @@ func (s *Service) StartNow(ctx context.Context, entry config.ManagedAppEntry, re
 
 func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retrySeconds int, opts startOptions) Result {
 	if entry.ExePath == "" {
-		return Result{AppName: entry.Name, Managed: false, Message: "empty exe path"}
+		return Result{AppName: entry.Name, Managed: false, Code: ResultEmptyExePath, Message: "empty exe path"}
 	}
 	if _, err := os.Stat(entry.ExePath); err != nil {
 		s.logger.Warn(fmt.Sprintf("skip invalid exe path: %s", entry.ExePath))
-		return Result{AppName: entry.Name, Managed: false, Message: "invalid exe path"}
+		return Result{AppName: entry.Name, Managed: false, Code: ResultInvalidExePath, Message: "invalid exe path"}
 	}
 
 	expectedName := stringutil.TrimExt(filepath.Base(entry.ExePath))
 	expectedPath := normalizePath(entry.ExePath)
-	if s.hasExistingManagedProcess(expectedPath, expectedName) || s.hasExistingManagedWindow(expectedPath, expectedName, entry.WindowMatch.Strategy) {
+	if s.hasExistingManagedProcess(expectedPath, expectedName) || s.hasExistingManagedWindow(expectedPath, expectedName) {
 		s.logger.Info(fmt.Sprintf("skip start: already running %s", entry.Name))
 		if opts.manageWindow {
 			ok := s.manageFirstMatchingWindow(ctx, func(w ManagedWindowInfo) bool {
-				return matchesExecutableWithIdentityFallback(w, expectedPath, expectedName) && matchStrategy(w, entry.WindowMatch.Strategy)
+				return matchesExecutableWithIdentityFallback(w, expectedPath, expectedName)
 			}, expectedPath, expectedName, nil, nil, retrySeconds, "close")
 			if ok {
-				return Result{AppName: entry.Name, Managed: true, Action: "close", Message: "already running managed existing"}
+				return Result{AppName: entry.Name, Managed: true, Action: "close", Code: ResultAlreadyRunningManaged, Message: "already running managed existing"}
 			}
 		}
-		return Result{AppName: entry.Name, Managed: true, Message: "already running skipped"}
+		return Result{AppName: entry.Name, Managed: true, Code: ResultAlreadyRunningSkipped, Message: "already running skipped"}
 	}
 
 	baseline := s.captureBaseline(func(w ManagedWindowInfo) bool {
-		return matchesExecutableWithIdentityFallback(w, expectedPath, expectedName) && matchStrategy(w, entry.WindowMatch.Strategy)
+		return matchesExecutableWithIdentityFallback(w, expectedPath, expectedName)
 	})
 
 	cmd, err := startProcess(entry.ExePath, entry.Args, opts.hideProcessWindow)
 	if err != nil {
 		s.logger.Error(fmt.Sprintf("start failed: %s err=%v", entry.Name, err))
-		return Result{AppName: entry.Name, Managed: false, Message: "process start failed"}
+		return Result{AppName: entry.Name, Managed: false, Code: ResultProcessStartFailed, Message: "process start failed"}
 	}
 	pid := uint32(cmd.Process.Pid)
 	s.logger.Info(fmt.Sprintf("started: %s pid=%d hidden=%t", entry.Name, pid, opts.hideProcessWindow))
@@ -84,22 +84,22 @@ func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retry
 	}
 
 	ok := s.manageFirstMatchingWindow(ctx, func(w ManagedWindowInfo) bool {
-		return (w.ProcessID == pid || matchesExecutableWithIdentityFallback(w, expectedPath, expectedName)) && matchStrategy(w, entry.WindowMatch.Strategy)
+		return w.ProcessID == pid || matchesExecutableWithIdentityFallback(w, expectedPath, expectedName)
 	}, expectedPath, expectedName, &pid, baseline, retrySeconds, "close")
 	if !ok {
 		if opts.windowOptional {
 			return startedResult(entry, opts)
 		}
-		return Result{AppName: entry.Name, Managed: false, Message: "no window managed"}
+		return Result{AppName: entry.Name, Managed: false, Code: ResultNoWindowManaged, Message: "no window managed"}
 	}
-	return Result{AppName: entry.Name, Managed: true, Action: "close", Message: "managed"}
+	return Result{AppName: entry.Name, Managed: true, Action: "close", Code: ResultManaged, Message: "managed"}
 }
 
 func startedResult(entry config.ManagedAppEntry, opts startOptions) Result {
 	if opts.hideProcessWindow {
-		return Result{AppName: entry.Name, Managed: true, Message: "started hidden"}
+		return Result{AppName: entry.Name, Managed: true, Code: ResultStartedHidden, Message: "started hidden"}
 	}
-	return Result{AppName: entry.Name, Managed: true, Message: "started only"}
+	return Result{AppName: entry.Name, Managed: true, Code: ResultStartedOnly, Message: "started only"}
 }
 
 func (s *Service) hasExistingManagedProcess(expectedPath, expectedName string) bool {
@@ -111,15 +111,12 @@ func (s *Service) hasExistingManagedProcess(expectedPath, expectedName string) b
 // executable path or process name. The loose title/class identity fallback is
 // deliberately not used here — an unrelated window whose title merely contains
 // the program name (common for short names) would otherwise suppress the launch.
-func (s *Service) hasExistingManagedWindow(expectedPath, expectedName string, strategy config.MatchStrategy) bool {
+func (s *Service) hasExistingManagedWindow(expectedPath, expectedName string) bool {
 	for _, w := range s.enumerator.EnumerateTopLevelWindows() {
 		if isUnmanageableWindow(w) {
 			continue
 		}
 		if !matchesExecutable(w, expectedPath, expectedName) {
-			continue
-		}
-		if !matchStrategy(w, strategy) {
 			continue
 		}
 		return true
@@ -130,26 +127,35 @@ func (s *Service) hasExistingManagedWindow(expectedPath, expectedName string, st
 func (s *Service) HideExisting(ctx context.Context, entry config.ManagedAppEntry, retrySeconds int) Result {
 	expectedName := stringutil.TrimExt(filepath.Base(entry.ExePath))
 	if expectedName == "" {
-		return Result{AppName: entry.Name, Managed: false, Message: "invalid process name"}
+		return Result{AppName: entry.Name, Managed: false, Code: ResultInvalidProcessName, Message: "invalid process name"}
 	}
 	expectedPath := normalizePath(entry.ExePath)
 	ok := s.manageFirstMatchingWindow(ctx, func(w ManagedWindowInfo) bool {
-		return matchesExecutableWithIdentityFallback(w, expectedPath, expectedName) && matchStrategy(w, entry.WindowMatch.Strategy)
+		return matchesExecutableWithIdentityFallback(w, expectedPath, expectedName)
 	}, expectedPath, expectedName, nil, nil, retrySeconds, "close")
 	if !ok {
-		return Result{AppName: entry.Name, Managed: false, Message: "no existing window managed"}
+		return Result{AppName: entry.Name, Managed: false, Code: ResultNoExistingWindowManaged, Message: "no existing window managed"}
 	}
-	return Result{AppName: entry.Name, Managed: true, Action: "close", Message: "managed existing"}
+	return Result{AppName: entry.Name, Managed: true, Action: "close", Code: ResultManagedExisting, Message: "managed existing"}
 }
 
 func (s *Service) manageFirstMatchingWindow(ctx context.Context, predicate func(ManagedWindowInfo) bool, expectedPath, expectedName string, launchedPID *uint32, baseline map[uintptr]struct{}, retrySeconds int, actionType string) bool {
-	attempts := max(1, max(0, retrySeconds)*2+1)
 	const delay = 500 * time.Millisecond
 	managedAny := false
+	singleRound := retrySeconds <= 0
+	timeout := 2 * time.Second
+	if actionType == "close" {
+		timeout = 4 * time.Second
+	}
+	if retrySeconds > 0 {
+		timeout = time.Duration(retrySeconds) * time.Second
+	}
+	actionCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 
-	for i := 0; i < attempts; i++ {
+	for round := 1; ; round++ {
 		select {
-		case <-ctx.Done():
+		case <-actionCtx.Done():
 			return false
 		default:
 		}
@@ -178,12 +184,12 @@ func (s *Service) manageFirstMatchingWindow(ctx context.Context, predicate func(
 		}
 		sort.Slice(candidates, func(i, j int) bool { return candidates[i].Score > candidates[j].Score })
 		if len(candidates) > 0 {
-			s.logger.Info(fmt.Sprintf("match round %d/%d candidates=%d top=%s", i+1, attempts, len(candidates), summarizeCandidates(candidates, 3)))
+			s.logger.Info(fmt.Sprintf("match round %d candidates=%d top=%s", round, len(candidates), summarizeCandidates(candidates, 3)))
 		}
 
 		managedThisRound := false
 		for _, c := range candidates {
-			if s.tryManageAndVerify(ctx, c.Window, c.Score, actionType) {
+			if s.tryManageAndVerify(actionCtx, c.Window, c.Score, actionType) {
 				if actionType != "hide" {
 					return true
 				}
@@ -195,7 +201,10 @@ func (s *Service) manageFirstMatchingWindow(ctx context.Context, predicate func(
 
 		if actionType == "hide" {
 			if managedThisRound {
-				if !waitWithContext(ctx, 150*time.Millisecond) {
+				if singleRound {
+					return true
+				}
+				if !waitWithContext(actionCtx, 150*time.Millisecond) {
 					return managedAny
 				}
 				continue
@@ -205,16 +214,13 @@ func (s *Service) manageFirstMatchingWindow(ctx context.Context, predicate func(
 			}
 		}
 
-		if i < attempts-1 {
-			if !waitWithContext(ctx, delay) {
-				return false
-			}
+		if singleRound {
+			return managedAny
+		}
+		if !waitWithContext(actionCtx, delay) {
+			return false
 		}
 	}
-	if actionType == "hide" {
-		return managedAny
-	}
-	return false
 }
 
 func (s *Service) tryManageAndVerify(ctx context.Context, window ManagedWindowInfo, score int, actionType string) bool {
@@ -223,19 +229,10 @@ func (s *Service) tryManageAndVerify(ctx context.Context, window ManagedWindowIn
 		return false
 	}
 
-	// "hide": WM_CLOSE first — many tray-oriented apps intercept close and hide
-	//         themselves to tray while preserving their own tray-click restore logic.
-	//         Fallback to SW_HIDE for apps that don't support close-to-tray.
-	// "close": WM_CLOSE first — asks the app to close itself (some apps hide to tray
-	//          on WM_CLOSE). Fallback to SW_HIDE for apps that ignore WM_CLOSE.
-	//
-	// Verification for "hide" accepts IsWindowVisible==0 as success; it does NOT
-	// require the window to vanish from EnumWindows (the window handle stays valid
-	// for hidden tray apps). Verification for "close" requires the handle to
-	// disappear from EnumWindows.
-	//
-	// A single primary action is attempted per candidate per round; no in-round
-	// fallback to avoid spamming a single window with redundant messages.
+	// "hide" uses WM_CLOSE first and falls back to SW_HIDE for callers that
+	// explicitly request a hide action. "close" sends WM_CLOSE only.
+	// A close succeeds when the window is destroyed or becomes invisible, which
+	// covers applications that intercept close and move themselves to the tray.
 	if actionType == "hide" {
 		// Prefer app-native close-to-tray behavior first. Many apps (Tauri/Electron)
 		// intercept close and move to tray, preserving tray-click restore semantics.
@@ -247,8 +244,7 @@ func (s *Service) tryManageAndVerify(ctx context.Context, window ManagedWindowIn
 	if s.applyAndVerify(ctx, window, score, "close", s.manager.CloseWindow) {
 		return true
 	}
-	s.logger.Info(fmt.Sprintf("close fallback to hide score=%d %s", score, describeWindow(window)))
-	return s.applyAndVerify(ctx, window, score, "hide", s.manager.HideWindow)
+	return false
 }
 
 func (s *Service) applyAndVerify(ctx context.Context, window ManagedWindowInfo, score int, action string, fn func(uintptr) (bool, error)) bool {
@@ -311,16 +307,13 @@ func (s *Service) verifyActionApplied(ctx context.Context, hwnd uintptr, score i
 		// For "hide": the window handle stays valid (tray apps keep the HWND alive
 		// but invisible). Accept IsWindowVisible==0 as success — do NOT require the
 		// handle to disappear from EnumWindows.
-		// For "close": the window should be fully destroyed; require it to vanish
-		// from EnumWindows (IsWindowVisible check alone is insufficient since the
-		// process might briefly hide before destroying).
+		// For "close": both destruction and close-to-tray hiding are successful.
 		if action == "hide" {
 			if !isWindowVisible(hwnd) {
 				return true
 			}
 		} else {
-			// For close we must verify destruction, not just invisibility.
-			if !isWindow(hwnd) {
+			if !isWindow(hwnd) || !isWindowVisible(hwnd) {
 				return true
 			}
 		}

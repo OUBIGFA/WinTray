@@ -30,8 +30,6 @@ type Messages struct {
 	ManagedEditorTitle             string
 	ManagedAppPath                 string
 	ManagedAppArgs                 string
-	SelectProgram                  string
-	ModifyProgram                  string
 	ManagedAutoHide                string
 	ManagedLaunchHidden            string
 	ManagedPauseTask               string
@@ -65,18 +63,13 @@ type Messages struct {
 	ManagedListParamTemplate       string
 	ManagedListParamHiddenTemplate string
 	ManagedListParamPausedTemplate string
-	RunSummaryTitle                string
 	RunSummaryNone                 string
 	RunSummaryLine                 string
-	RunSummaryHeader               string
 	FatalStartupTitle              string
 	FatalStartupBodyTemplate       string
 	AlreadyRunningTitle            string
 	AlreadyRunningBody             string
 	StatusLaunchFailTemplate       string
-	StatusManageFailTemplate       string
-	StatusManageOkTemplate         string
-	StatusNoTasks                  string
 	StatusRetryExhausted           string
 	StatusPermissionHint           string
 	StatusOpenLogsFailed           string
@@ -105,8 +98,6 @@ var zhCN = Messages{
 	ManagedEditorTitle:             "程序设置",
 	ManagedAppPath:                 "程序路径:",
 	ManagedAppArgs:                 "启动参数:",
-	SelectProgram:                  "选择程序",
-	ModifyProgram:                  "更换程序",
 	ManagedAutoHide:                "启动后关闭窗口",
 	ManagedLaunchHidden:            "隐藏后台启动",
 	ManagedPauseTask:               "暂停任务",
@@ -140,18 +131,13 @@ var zhCN = Messages{
 	ManagedListParamTemplate:       "关闭窗口=%t",
 	ManagedListParamHiddenTemplate: "隐藏后台=%t",
 	ManagedListParamPausedTemplate: "已暂停",
-	RunSummaryTitle:                "受管任务结果",
 	RunSummaryNone:                 "没有可执行的受管任务。",
 	RunSummaryLine:                 "%s: %s",
-	RunSummaryHeader:               "执行完成:",
 	FatalStartupTitle:              "WinTray 启动失败",
 	FatalStartupBodyTemplate:       "%s\n\n日志: %s",
 	AlreadyRunningTitle:            "WinTray",
 	AlreadyRunningBody:             "WinTray 已在运行。",
 	StatusLaunchFailTemplate:       "启动失败: %s (%s)",
-	StatusManageFailTemplate:       "托管失败: %s (%s)",
-	StatusManageOkTemplate:         "托管成功: %s",
-	StatusNoTasks:                  "没有受管任务。",
 	StatusRetryExhausted:           "重试超时，未找到可托管窗口",
 	StatusPermissionHint:           "可能是权限限制 (UIPI): 请尝试以管理员身份运行 WinTray。",
 	StatusOpenLogsFailed:           "打开日志失败",
@@ -180,8 +166,6 @@ var enUS = Messages{
 	ManagedEditorTitle:             "Program Settings",
 	ManagedAppPath:                 "Program path:",
 	ManagedAppArgs:                 "Launch arguments:",
-	SelectProgram:                  "Select Program",
-	ModifyProgram:                  "Change Program",
 	ManagedAutoHide:                "Close window after launch",
 	ManagedLaunchHidden:            "Launch hidden in background",
 	ManagedPauseTask:               "Pause task",
@@ -215,18 +199,13 @@ var enUS = Messages{
 	ManagedListParamTemplate:       "CloseAfterLaunch=%t",
 	ManagedListParamHiddenTemplate: "LaunchHidden=%t",
 	ManagedListParamPausedTemplate: "Paused",
-	RunSummaryTitle:                "Managed Task Results",
 	RunSummaryNone:                 "No managed tasks to run.",
 	RunSummaryLine:                 "%s: %s",
-	RunSummaryHeader:               "Completed:",
 	FatalStartupTitle:              "WinTray startup failed",
 	FatalStartupBodyTemplate:       "%s\n\nLog: %s",
 	AlreadyRunningTitle:            "WinTray",
 	AlreadyRunningBody:             "WinTray is already running.",
 	StatusLaunchFailTemplate:       "Launch failed: %s (%s)",
-	StatusManageFailTemplate:       "Manage failed: %s (%s)",
-	StatusManageOkTemplate:         "Managed: %s",
-	StatusNoTasks:                  "No managed tasks.",
 	StatusRetryExhausted:           "Retry exhausted, no manageable window found",
 	StatusPermissionHint:           "Possible UIPI permission limitation: try running WinTray as administrator.",
 	StatusOpenLogsFailed:           "Failed to open logs",
@@ -282,6 +261,32 @@ func FormatManagedParam(language string, app config.ManagedAppEntry) string {
 
 func IsLikelyPermissionIssue(message string) bool {
 	return message == "no window managed" || message == "no existing window managed"
+}
+
+func IsLikelyPermissionCode(code string) bool {
+	return code == "no_window_managed" || code == "no_existing_window_managed"
+}
+
+func TranslateResultCode(language, code string) string {
+	messages := map[string]string{
+		"empty_exe_path":             "empty exe path",
+		"invalid_exe_path":           "invalid exe path",
+		"process_start_failed":       "process start failed",
+		"started_only":               "started only",
+		"started_hidden":             "started hidden",
+		"already_running_skipped":    "already running skipped",
+		"already_running_managed":    "already running managed existing",
+		"no_window_managed":          "no window managed",
+		"invalid_process_name":       "invalid process name",
+		"no_existing_window_managed": "no existing window managed",
+		"managed":                    "managed",
+		"managed_existing":           "managed existing",
+	}
+	message, ok := messages[code]
+	if !ok {
+		return ""
+	}
+	return TranslateResultMessage(language, message)
 }
 
 func TranslateResultMessage(language, message string) string {

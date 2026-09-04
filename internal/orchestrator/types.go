@@ -1,7 +1,5 @@
 package orchestrator
 
-import "wintray/internal/config"
-
 type ManagedWindowInfo struct {
 	Handle       uintptr
 	ProcessID    uint32
@@ -23,7 +21,6 @@ type WindowEnumerator interface {
 type WindowManager interface {
 	CloseWindow(hwnd uintptr) (bool, error)
 	HideWindow(hwnd uintptr) (bool, error)
-	MinimizeWindow(hwnd uintptr) (bool, error)
 }
 
 type Logger interface {
@@ -31,6 +28,23 @@ type Logger interface {
 	Warn(msg string)
 	Error(msg string)
 }
+
+type ResultCode string
+
+const (
+	ResultEmptyExePath            ResultCode = "empty_exe_path"
+	ResultInvalidExePath          ResultCode = "invalid_exe_path"
+	ResultProcessStartFailed      ResultCode = "process_start_failed"
+	ResultAlreadyRunningManaged   ResultCode = "already_running_managed"
+	ResultAlreadyRunningSkipped   ResultCode = "already_running_skipped"
+	ResultNoWindowManaged         ResultCode = "no_window_managed"
+	ResultStartedHidden           ResultCode = "started_hidden"
+	ResultStartedOnly             ResultCode = "started_only"
+	ResultInvalidProcessName      ResultCode = "invalid_process_name"
+	ResultNoExistingWindowManaged ResultCode = "no_existing_window_managed"
+	ResultManaged                 ResultCode = "managed"
+	ResultManagedExisting         ResultCode = "managed_existing"
+)
 
 type Service struct {
 	enumerator WindowEnumerator
@@ -46,34 +60,11 @@ type Result struct {
 	AppName string
 	Managed bool
 	Action  string
+	Code    ResultCode
 	Message string
 }
 
 type MatchCandidate struct {
 	Window ManagedWindowInfo
 	Score  int
-}
-
-func matchStrategy(window ManagedWindowInfo, strategy config.MatchStrategy) bool {
-	hasTitle := window.Title != ""
-	hasClass := window.ClassName != ""
-
-	switch strategy {
-	case config.MatchAny, "":
-		return true
-	case config.MatchProcessNameThenTitle:
-		// This is the default strategy. Process name matching is handled by the
-		// caller's predicate; this filter only provides a secondary signal.
-		// Accept all windows here — the scoring system already penalizes titleless
-		// windows (no +50 bonus) and the threshold (500) ensures only high-confidence
-		// matches proceed to action. Filtering here would reject valid PID-matched
-		// windows during their brief titleless startup phase.
-		return true
-	case config.MatchTitleContains:
-		return hasTitle
-	case config.MatchClassName:
-		return hasClass
-	default:
-		return hasTitle || hasClass
-	}
 }

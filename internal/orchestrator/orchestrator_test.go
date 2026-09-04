@@ -5,8 +5,6 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-
-	"wintray/internal/config"
 )
 
 func TestNormalizePath(t *testing.T) {
@@ -192,47 +190,6 @@ func TestIsUnmanageableWindow(t *testing.T) {
 	}
 }
 
-func TestMatchStrategy(t *testing.T) {
-	withTitle := ManagedWindowInfo{Title: "Hello", ClassName: "Win"}
-	noTitle := ManagedWindowInfo{Title: "", ClassName: "Win"}
-	noClass := ManagedWindowInfo{Title: "Hello", ClassName: ""}
-	empty := ManagedWindowInfo{}
-
-	// MatchAny always true
-	if !matchStrategy(empty, config.MatchAny) {
-		t.Error("MatchAny should return true for any window")
-	}
-
-	// Empty strategy defaults to MatchAny
-	if !matchStrategy(empty, "") {
-		t.Error("empty strategy should return true")
-	}
-
-	// MatchProcessNameThenTitle accepts all windows (scoring handles confidence)
-	if !matchStrategy(withTitle, config.MatchProcessNameThenTitle) {
-		t.Error("ProcessNameThenTitle should accept window with title")
-	}
-	if !matchStrategy(noTitle, config.MatchProcessNameThenTitle) {
-		t.Error("ProcessNameThenTitle should accept window without title (scoring handles filtering)")
-	}
-
-	// MatchTitleContains requires title
-	if !matchStrategy(withTitle, config.MatchTitleContains) {
-		t.Error("TitleContains should accept window with title")
-	}
-	if matchStrategy(noTitle, config.MatchTitleContains) {
-		t.Error("TitleContains should reject window without title")
-	}
-
-	// MatchClassName requires class name
-	if !matchStrategy(withTitle, config.MatchClassName) {
-		t.Error("ClassName should accept window with class")
-	}
-	if matchStrategy(noClass, config.MatchClassName) {
-		t.Error("ClassName should reject window without class")
-	}
-}
-
 func TestParseArgs(t *testing.T) {
 	tests := []struct {
 		input string
@@ -286,6 +243,13 @@ func TestBuildLaunchCommand_PowerShellScript(t *testing.T) {
 
 	if cmd.SysProcAttr == nil {
 		t.Fatal("expected hidden launch to configure SysProcAttr")
+	}
+}
+
+func TestBuildLaunchCommand_PythonWindowedScriptUsesPythonw(t *testing.T) {
+	cmd := buildLaunchCommand(`C:\Scripts\start.pyw`, `--quiet`, true)
+	if !strings.EqualFold(filepath.Base(cmd.Path), "pythonw.exe") {
+		t.Fatalf("expected pythonw.exe launcher, got %q", cmd.Path)
 	}
 }
 

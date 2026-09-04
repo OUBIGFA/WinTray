@@ -81,6 +81,9 @@ if (Test-Path $tempZipTarget) {
 
 Compress-Archive -Path (Join-Path $portableDir "*") -DestinationPath $tempZipTarget -Force
 Move-Item -Path $tempZipTarget -Destination $zipTarget -Force
+$archiveHash = (Get-FileHash $zipTarget -Algorithm SHA256).Hash
+$archiveChecksumsPath = Join-Path $publishDir (([System.IO.Path]::GetFileNameWithoutExtension($zipTarget)) + ".sha256")
+[System.IO.File]::WriteAllText($archiveChecksumsPath, "$archiveHash  $(Split-Path $zipTarget -Leaf)" + [Environment]::NewLine, $utf8NoBom)
 Write-Host "Packaged portable version: $portableDir"
 Write-Host "Packaged portable archive: $zipTarget"
 

@@ -8,7 +8,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-lightgrey.svg)]()
-[![Go 1.22](https://img.shields.io/badge/Go-1.22-00ADD8.svg)]()
+[![Go 1.25](https://img.shields.io/badge/Go-1.25-00ADD8.svg)]()
 
 English | [简体中文](README.md)
 
@@ -57,27 +57,22 @@ WinTray supports adding the following program types to the managed list, automat
 | Executable        | `.exe`          | Foreground launch by default; can optionally close the window to hide to tray |
 | Batch script      | `.bat` / `.cmd` | Hidden background launch by default (no console window)                       |
 | PowerShell script | `.ps1`          | Hidden background launch by default                                           |
-| Python script     | `.py` / `.pyw`  | Hidden background launch by default, automatically invokes `python.exe`       |
+| Python script     | `.py` / `.pyw`  | Hidden background launch by default, invokes `python.exe` / `pythonw.exe`       |
 
-> Non-`.exe` scripts (`.bat` / `.cmd` / `.ps1` / `.py`) automatically enable the "Launch hidden in background" option when added, and cannot simultaneously use "Close window after launch".
+> Non-`.exe` scripts (`.bat` / `.cmd` / `.ps1` / `.py` / `.pyw`) automatically enable the "Launch hidden in background" option when added, and cannot simultaneously use "Close window after launch".
 
 ### Per-Program Configuration Options
 
 - **Launch Arguments**: Pass custom command-line arguments to the program
-- **Close Window After Launch**: Sends a close message (WM_CLOSE) after launch — most tray-aware apps minimize to tray rather than quitting; falls back to hiding the window (SW_HIDE) if the app ignores the close request
+- **Close Window After Launch**: Sends a close message (WM_CLOSE) after launch — most tray-aware apps minimize to tray rather than quitting; a destroyed or invisible window is considered successfully handled
 - **Launch Hidden in Background**: Starts the program without any visible window, suitable for command-line and script programs
 - **Pause Task**: Temporarily skip this program's auto-start task; it will run again on the next boot
 
-### Window Matching Strategy
+### Window Matching
 
-WinTray uses a scoring system to precisely identify target windows and avoid false positives:
-
-| Strategy                         | Description                                                                        |
-| -------------------------------- | ---------------------------------------------------------------------------------- |
-| `processNameThenTitle` (default) | Matches by process name first, then scores by window title — best overall accuracy |
-| `titleContains`                  | Matches windows whose title contains a keyword                                     |
-| `className`                      | Matches windows by their class name                                                |
-| `any`                            | Matches any window under the process                                               |
+WinTray automatically combines the process ID, executable path, process name, and
+window features to select a target. An action is only sent after the safety score
+reaches the threshold, so no matching strategy needs to be configured.
 
 Scoring system (an action is only taken when the total score ≥ 500):
 
@@ -102,11 +97,13 @@ Scoring system (an action is only taken when the total score ≥ 500):
 
 ## System Requirements
 
+The source and release package support Windows only; cross-platform builds are not supported.
+
 | Item              | Requirement                                        |
 | ----------------- | -------------------------------------------------- |
 | OS                | Windows 10 / 11                                    |
 | Runtime           | No additional dependencies (standalone executable) |
-| Build from source | Go 1.22+                                           |
+| Build from source | Go 1.25+                                           |
 
 ---
 
@@ -126,6 +123,10 @@ Scoring system (an action is only taken when the total score ≥ 500):
 | `--background`      | Start without showing the main window (for auto-start scenarios) |
 | `--autorun`         | Execute managed program tasks automatically (used by auto-start) |
 | `--cleanup-restore` | Only perform cleanup: clear `%LOCALAPPDATA%\WinTray\` and exit   |
+
+For auto-start, “Exit automatically after all tasks complete” controls whether
+WinTray exits after the task set finishes. When disabled, it remains in the tray;
+“Minimize to tray after launch” controls whether the main window is initially shown.
 
 ---
 
@@ -157,4 +158,3 @@ A: Make sure the program has "Close window after launch" enabled, and that WinTr
 ## License
 
 This project is released under the [MIT License](LICENSE).
-

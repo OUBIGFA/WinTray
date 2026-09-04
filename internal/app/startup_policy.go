@@ -1,6 +1,10 @@
 package app
 
-import "strings"
+import (
+	"strings"
+
+	"wintray/internal/config"
+)
 
 func isBackgroundLaunch(args []string) bool {
 	for _, arg := range args {
@@ -31,6 +35,13 @@ func isCleanupRestoreLaunch(args []string) bool {
 
 func shouldShowMainWindow(args []string) bool {
 	return !isBackgroundLaunch(args)
+}
+
+func shouldShowMainWindowForSettings(args []string, settings config.Settings) bool {
+	if !shouldShowMainWindow(args) {
+		return false
+	}
+	return !isAutorunLaunch(args) || !settings.StartMinimizedToTray
 }
 
 func shouldSignalRunningInstance(args []string) bool {

@@ -20,20 +20,6 @@ func AppDirWithError() (string, error) {
 	return filepath.Join(base, appDirName), nil
 }
 
-func AppDir() string {
-	dir, err := AppDirWithError()
-	if err == nil {
-		return dir
-	}
-	if home, homeErr := os.UserHomeDir(); homeErr == nil && home != "" {
-		if runtime.GOOS == "windows" {
-			return filepath.Join(home, "AppData", "Local", appDirName)
-		}
-		return filepath.Join(home, ".config", appDirName)
-	}
-	return filepath.Join(".", appDirName)
-}
-
 func SettingsPathWithError() (string, error) {
 	dir, err := AppDirWithError()
 	if err != nil {
@@ -42,20 +28,12 @@ func SettingsPathWithError() (string, error) {
 	return filepath.Join(dir, "settings.json"), nil
 }
 
-func SettingsPath() string {
-	return filepath.Join(AppDir(), "settings.json")
-}
-
 func LogPathWithError() (string, error) {
 	dir, err := AppDirWithError()
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(dir, "wintray.log"), nil
-}
-
-func LogPath() string {
-	return filepath.Join(AppDir(), "wintray.log")
 }
 
 func appDataBaseDir() (string, error) {

@@ -4,6 +4,7 @@ package orchestrator
 
 import (
 	"path/filepath"
+	"sync"
 	"syscall"
 	"unsafe"
 
@@ -22,6 +23,7 @@ var (
 	procGetWindowLongPtrW      = user32.NewProc("GetWindowLongPtrW")
 	procIsIconic               = user32.NewProc("IsIconic")
 	procGetForegroundWindow    = user32.NewProc("GetForegroundWindow")
+	enumWindowsCallback        = syscall.NewCallback(enumWindowsProc)
 )
 
 const (
@@ -33,53 +35,72 @@ var gwlExStyle = int32(-20)
 
 type Win32WindowEnumerator struct{}
 
+type enumState struct {
+	result     *[]ManagedWindowInfo
+	foreground uintptr
+	processes  map[uint32][2]string
+}
+
+var enumStateMu sync.Mutex
+var activeEnum enumState
+
 func NewWin32WindowEnumerator() *Win32WindowEnumerator { return &Win32WindowEnumerator{} }
 
 func (e *Win32WindowEnumerator) EnumerateTopLevelWindows() []ManagedWindowInfo {
+	enumStateMu.Lock()
+	defer enumStateMu.Unlock()
+
 	result := make([]ManagedWindowInfo, 0)
 	foreground, _, _ := procGetForegroundWindow.Call()
-	cb := syscall.NewCallback(func(hwnd uintptr, lparam uintptr) uintptr {
-		v, _, _ := procIsWindowVisible.Call(hwnd)
-		if v == 0 {
-			return 1
-		}
-
-		titleLen, _, _ := procGetWindowTextLengthW.Call(hwnd)
-		titleBuf := make([]uint16, titleLen+1)
-		if len(titleBuf) > 0 {
-			_, _, _ = procGetWindowTextW.Call(hwnd, uintptr(unsafe.Pointer(&titleBuf[0])), uintptr(len(titleBuf)))
-		}
-
-		classBuf := make([]uint16, 256)
-		_, _, _ = procGetClassNameW.Call(hwnd, uintptr(unsafe.Pointer(&classBuf[0])), uintptr(len(classBuf)))
-
-		owner, _, _ := procGetWindow.Call(hwnd, gwOwner)
-		exStyle, _, _ := procGetWindowLongPtrW.Call(hwnd, uintptr(gwlExStyle))
-		isTool := (exStyle & wsExToolWindow) != 0
-		isMin, _, _ := procIsIconic.Call(hwnd)
-
-		var pid uint32
-		_, _, _ = procGetWindowThreadProcess.Call(hwnd, uintptr(unsafe.Pointer(&pid)))
-		pname, ppath := processInfo(pid)
-
-		item := ManagedWindowInfo{
-			Handle:       hwnd,
-			ProcessID:    pid,
-			ProcessName:  pname,
-			ProcessPath:  ppath,
-			Title:        windows.UTF16ToString(titleBuf),
-			ClassName:    windows.UTF16ToString(classBuf),
-			IsVisible:    true,
-			IsMinimized:  isMin != 0,
-			IsForeground: hwnd == foreground,
-			OwnerHandle:  owner,
-			IsToolWindow: isTool,
-		}
-		result = append(result, item)
-		return 1
-	})
-	_, _, _ = procEnumWindows.Call(cb, 0)
+	activeEnum = enumState{result: &result, foreground: foreground, processes: make(map[uint32][2]string)}
+	defer func() { activeEnum = enumState{} }()
+	_, _, _ = procEnumWindows.Call(enumWindowsCallback, 0)
 	return result
+}
+
+func enumWindowsProc(hwnd uintptr, _ uintptr) uintptr {
+	v, _, _ := procIsWindowVisible.Call(hwnd)
+	if v == 0 {
+		return 1
+	}
+
+	titleLen, _, _ := procGetWindowTextLengthW.Call(hwnd)
+	titleBuf := make([]uint16, titleLen+1)
+	_, _, _ = procGetWindowTextW.Call(hwnd, uintptr(unsafe.Pointer(&titleBuf[0])), uintptr(len(titleBuf)))
+
+	classBuf := make([]uint16, 256)
+	_, _, _ = procGetClassNameW.Call(hwnd, uintptr(unsafe.Pointer(&classBuf[0])), uintptr(len(classBuf)))
+
+	owner, _, _ := procGetWindow.Call(hwnd, gwOwner)
+	exStyle, _, _ := procGetWindowLongPtrW.Call(hwnd, uintptr(gwlExStyle))
+	isTool := (exStyle & wsExToolWindow) != 0
+	isMin, _, _ := procIsIconic.Call(hwnd)
+
+	var pid uint32
+	_, _, _ = procGetWindowThreadProcess.Call(hwnd, uintptr(unsafe.Pointer(&pid)))
+	info, ok := activeEnum.processes[pid]
+	if !ok {
+		info = [2]string{}
+		if pid != 0 {
+			info[0], info[1] = processInfo(pid)
+		}
+		activeEnum.processes[pid] = info
+	}
+
+	*activeEnum.result = append(*activeEnum.result, ManagedWindowInfo{
+		Handle:       hwnd,
+		ProcessID:    pid,
+		ProcessName:  info[0],
+		ProcessPath:  info[1],
+		Title:        windows.UTF16ToString(titleBuf),
+		ClassName:    windows.UTF16ToString(classBuf),
+		IsVisible:    true,
+		IsMinimized:  isMin != 0,
+		IsForeground: hwnd == activeEnum.foreground,
+		OwnerHandle:  owner,
+		IsToolWindow: isTool,
+	})
+	return 1
 }
 
 func processInfo(pid uint32) (string, string) {

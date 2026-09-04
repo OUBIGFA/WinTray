@@ -796,14 +796,11 @@ func (w *MainWindow) onAddProgram() {
 	id := strconv.FormatInt(time.Now().UnixNano(), 10)
 	launchHiddenByDefault := shouldDefaultLaunchHidden(dlg.FilePath)
 	w.settings.ManagedApps = append(w.settings.ManagedApps, config.ManagedAppEntry{
-		ID:           id,
-		Name:         name,
-		ExePath:      dlg.FilePath,
-		Args:         "",
-		RunOnStartup: true,
-		WindowMatch: config.WindowMatchRule{
-			Strategy: config.MatchProcessNameThenTitle,
-		},
+		ID:                       id,
+		Name:                     name,
+		ExePath:                  dlg.FilePath,
+		Args:                     "",
+		RunOnStartup:             true,
 		LaunchHiddenInBackground: launchHiddenByDefault,
 		TrayBehavior:             config.TrayBehavior{AutoMinimizeAndHideOnLaunch: !launchHiddenByDefault},
 	})
@@ -904,7 +901,7 @@ func (w *MainWindow) syncManagedEditor() {
 	w.launchNowBtn.SetEnabled(ok && !w.launchNowBusy)
 	w.noSelectLabel.SetVisible(false)
 	if ok {
-		w.browseBtn.SetText(msg.ModifyProgram)
+		w.browseBtn.SetText(msg.SelectManagedExe)
 		w.addProgramBtn.SetText(msg.AddProgram)
 		w.addProgramBtn.SetVisible(true)
 	} else {
@@ -1041,44 +1038,4 @@ func (w *MainWindow) tableViewHitOnItem(x, y int) bool {
 		return false
 	}
 	return (hti.Flags & win.LVHT_ONITEM) != 0
-}
-
-type managedListRow struct {
-	Name  string
-	Path  string
-	Param string
-}
-
-type managedListTableModel struct {
-	walk.TableModelBase
-	rows []managedListRow
-}
-
-func newManagedListTableModel() *managedListTableModel {
-	return &managedListTableModel{rows: make([]managedListRow, 0)}
-}
-
-func (m *managedListTableModel) RowCount() int {
-	return len(m.rows)
-}
-
-func (m *managedListTableModel) Value(row, col int) any {
-	if row < 0 || row >= len(m.rows) {
-		return ""
-	}
-	switch col {
-	case 0:
-		return m.rows[row].Name
-	case 1:
-		return m.rows[row].Path
-	case 2:
-		return m.rows[row].Param
-	default:
-		return ""
-	}
-}
-
-func (m *managedListTableModel) SetRows(rows []managedListRow) {
-	m.rows = rows
-	m.PublishRowsReset()
 }

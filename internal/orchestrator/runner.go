@@ -110,7 +110,11 @@ func buildPythonCommand(scriptPath, args string, hidden bool) *exec.Cmd {
 	if args != "" {
 		cmdArgs = append(cmdArgs, parseArgs(args)...)
 	}
-	cmd := exec.Command("python.exe", cmdArgs...)
+	launcher := "python.exe"
+	if strings.EqualFold(filepath.Ext(cleanPath), ".pyw") {
+		launcher = "pythonw.exe"
+	}
+	cmd := exec.Command(launcher, cmdArgs...)
 	if hidden {
 		cmd.SysProcAttr = &syscall.SysProcAttr{
 			CreationFlags: createNoWindow,
