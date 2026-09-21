@@ -11,27 +11,33 @@ import (
 )
 
 func hasRunningProcessByIdentity(expectedPath, expectedName string) bool {
+	return findRunningProcessByIdentity(expectedPath, expectedName) != 0
+}
+
+// findRunningProcessByIdentity returns the PID of the first process matching
+// the executable identity, or 0 when none is running.
+func findRunningProcessByIdentity(expectedPath, expectedName string) uint32 {
 	expectedPath = normalizePath(expectedPath)
 	targetIdentity := normalizeIdentity(expectedName)
 	if expectedPath == "" && targetIdentity == "" {
-		return false
+		return 0
 	}
 
 	hSnapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
 	if err != nil {
-		return false
+		return 0
 	}
 	defer windows.CloseHandle(hSnapshot)
 
 	var pe windows.ProcessEntry32
 	pe.Size = uint32(unsafe.Sizeof(pe))
 	if err = windows.Process32First(hSnapshot, &pe); err != nil {
-		return false
+		return 0
 	}
 
 	for {
 		if processIdentityMatches(pe.ProcessID, windows.UTF16ToString(pe.ExeFile[:]), expectedPath, targetIdentity) {
-			return true
+			return pe.ProcessID
 		}
 		err = windows.Process32Next(hSnapshot, &pe)
 		if err != nil {
@@ -39,7 +45,7 @@ func hasRunningProcessByIdentity(expectedPath, expectedName string) bool {
 		}
 	}
 
-	return false
+	return 0
 }
 
 func processIdentityMatches(pid uint32, exeName, expectedPath, targetIdentity string) bool {
@@ -58,34 +64,30 @@ func processIdentityMatches(pid uint32, exeName, expectedPath, targetIdentity st
 		if expectedPath == "" {
 			return true
 		}
-		p := queryProcessImagePath(pid)
-		return p != "" && strings.EqualFold(normalizePath(p), expectedPath)
 	}
 
-	if expectedPath != "" {
-		if p := queryProcessImagePath(pid); p != "" && strings.EqualFold(normalizePath(p), expectedPath) {
-			return true
-		}
+	if expectedPath == "" {
+		return false
 	}
 
-	return false
+	fullPath := processExecutablePath(pid)
+	if fullPath == "" {
+		return false
+	}
+	return normalizePath(fullPath) == expectedPath
 }
 
-func queryProcessImagePath(pid uint32) string {
-	hProc, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+func processExecutablePath(pid uint32) string {
+	hProcess, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
 	if err != nil {
 		return ""
 	}
-	defer windows.CloseHandle(hProc)
+	defer windows.CloseHandle(hProcess)
 
-	buf := make([]uint16, windows.MAX_PATH)
+	buf := make([]uint16, windows.MAX_LONG_PATH)
 	size := uint32(len(buf))
-	if err = windows.QueryFullProcessImageName(hProc, 0, &buf[0], &size); err != nil {
+	if err = windows.QueryFullProcessImageName(hProcess, 0, &buf[0], &size); err != nil {
 		return ""
 	}
-	if size == 0 {
-		return ""
-	}
-
 	return windows.UTF16ToString(buf[:size])
 }

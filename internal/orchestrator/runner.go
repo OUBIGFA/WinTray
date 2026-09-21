@@ -10,9 +10,31 @@ import (
 	"syscall"
 )
 
-func startProcess(exePath, args string, hidden bool) (*exec.Cmd, error) {
+// launchMode selects how the new process gets (or does not get) a window.
+type launchMode int
+
+const (
+	// launchVisible starts the program normally.
+	launchVisible launchMode = iota
+	// launchNoWindow starts the program without any console window
+	// (CREATE_NO_WINDOW); used for scripts and "launch hidden" entries.
+	launchNoWindow
+	// launchHiddenConsole starts a console program with its console window
+	// created hidden (SW_HIDE). The window still exists, so it can be shown
+	// again later from a tray icon.
+	launchHiddenConsole
+)
+
+func startProcess(exePath, args string, mode launchMode) (*exec.Cmd, error) {
+	hidden := mode == launchNoWindow
 	dir := filepath.Dir(exePath)
 	cmd := buildLaunchCommand(exePath, args, hidden)
+	if mode == launchHiddenConsole {
+		// A fresh console is requested explicitly so the program never shares
+		// (and never inherits) another console; SW_HIDE then applies to that
+		// new console window, which stays hosted by conhost.
+		cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNewConsole, HideWindow: true}
+	}
 	if _, err := os.Stat(dir); err == nil {
 		cmd.Dir = dir
 	}
@@ -35,6 +57,10 @@ func startProcess(exePath, args string, hidden bool) (*exec.Cmd, error) {
 			attr.CreationFlags = createNoWindow
 			attr.HideWindow = true
 		}
+		if mode == launchHiddenConsole {
+			attr.CreationFlags = createNewConsole
+			attr.HideWindow = true
+		}
 		shellCmd.SysProcAttr = attr
 		if _, err := os.Stat(dir); err == nil {
 			shellCmd.Dir = dir
@@ -47,7 +73,10 @@ func startProcess(exePath, args string, hidden bool) (*exec.Cmd, error) {
 	return nil, startErr
 }
 
-const createNoWindow = 0x08000000
+const (
+	createNoWindow   = 0x08000000
+	createNewConsole = 0x00000010
+)
 
 func buildLaunchCommand(exePath, args string, hidden bool) *exec.Cmd {
 	trimmedArgs := strings.TrimSpace(args)

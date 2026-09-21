@@ -44,6 +44,7 @@ const (
 	ResultNoExistingWindowManaged ResultCode = "no_existing_window_managed"
 	ResultManaged                 ResultCode = "managed"
 	ResultManagedExisting         ResultCode = "managed_existing"
+	ResultHiddenToTray            ResultCode = "hidden_to_tray"
 )
 
 type Service struct {
@@ -62,6 +63,28 @@ type Result struct {
 	Action  string
 	Code    ResultCode
 	Message string
+	// Hidden is set when WinTray hid the window itself (SW_HIDE) instead of the
+	// program closing it into its own tray icon. Such a program has no way back
+	// to its window, so the caller must offer one (a hosted tray icon).
+	Hidden *HiddenWindow
+}
+
+// HiddenWindow identifies a window WinTray keeps hidden on behalf of a program
+// that has no tray icon of its own (console programs such as syncthing.exe).
+// Handle may be 0 when the window could not be located yet; ProcessID always
+// identifies the running program.
+type HiddenWindow struct {
+	Handle    uintptr
+	ProcessID uint32
+}
+
+// managedWindow is the outcome of a successful window action.
+type managedWindow struct {
+	Handle    uintptr
+	ProcessID uint32
+	// Hidden reports that WinTray hid the window itself rather than the
+	// program handling a close request.
+	Hidden bool
 }
 
 type MatchCandidate struct {

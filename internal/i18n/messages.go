@@ -52,6 +52,9 @@ type Messages struct {
 	TrayOpenSettings               string
 	TrayExit                       string
 	TrayToolTip                    string
+	HostedShowWindow               string
+	HostedHideWindow               string
+	HostedQuitProgram              string
 	SelectManagedExe               string
 	ExeFilter                      string
 	AllFilesFilter                 string
@@ -118,6 +121,9 @@ var zhCN = Messages{
 	TrayOpenSettings:               "打开设置",
 	TrayExit:                       "退出 WinTray",
 	TrayToolTip:                    "WinTray",
+	HostedShowWindow:               "显示窗口",
+	HostedHideWindow:               "隐藏窗口",
+	HostedQuitProgram:              "退出 %s",
 	SelectManagedExe:               "选择要托管的程序",
 	ExeFilter:                      "程序文件 (*.exe;*.cmd;*.bat;*.ps1;*.py)|*.exe;*.cmd;*.bat;*.ps1;*.py",
 	AllFilesFilter:                 "所有文件 (*.*)|*.*",
@@ -184,6 +190,9 @@ var enUS = Messages{
 	TrayOpenSettings:               "Open Settings",
 	TrayExit:                       "Exit WinTray",
 	TrayToolTip:                    "WinTray",
+	HostedShowWindow:               "Show Window",
+	HostedHideWindow:               "Hide Window",
+	HostedQuitProgram:              "Quit %s",
 	SelectManagedExe:               "Select program to manage",
 	ExeFilter:                      "Program files (*.exe;*.cmd;*.bat;*.ps1;*.py)|*.exe;*.cmd;*.bat;*.ps1;*.py",
 	AllFilesFilter:                 "All Files (*.*)|*.*",
@@ -275,6 +284,7 @@ func TranslateResultCode(language, code string) string {
 		"no_existing_window_managed": "no existing window managed",
 		"managed":                    "managed",
 		"managed_existing":           "managed existing",
+		"hidden_to_tray":             "hidden to tray",
 	}
 	message, ok := messages[code]
 	if !ok {
@@ -323,6 +333,11 @@ func TranslateResultMessage(language, message string) string {
 		return "程序已在运行，已处理现有窗口"
 	case "no window managed", "no existing window managed":
 		return msg.StatusRetryExhausted
+	case "hidden to tray":
+		if Resolve(language) == LangEnUS {
+			return "hidden to tray; use its tray icon to open the window"
+		}
+		return "已收入托盘，可通过托盘图标打开窗口"
 	case "managed", "managed existing":
 		if Resolve(language) == LangEnUS {
 			return "front window closed"

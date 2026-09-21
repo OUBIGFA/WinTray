@@ -86,14 +86,24 @@ func Run(args []string) int {
 	orch := orchestrator.NewService(enumerator, manager, logger)
 	registrar := startup.NewRegistrar()
 
+	var pendingHosted []tray.HostedWindow
+	hostingOnly := false
 	if isAutorunLaunch(args) {
 		logger.Info(fmt.Sprintf("autorun mode: run managed apps (exitAfterCompleted=%t)", settings.ExitAfterManagedAppsCompleted))
-		if runAutorunMode(context.Background(), orch, settings, logger) {
-			return 0
+		pendingHosted = runManagedApps(context.Background(), orch, settings, logger)
+		if settings.ExitAfterManagedAppsCompleted {
+			if len(pendingHosted) == 0 {
+				return 0
+			}
+			// Programs hidden into the tray need WinTray alive to bring them
+			// back, so stay resident in the background until the last one exits.
+			hostingOnly = true
+			logger.Info(fmt.Sprintf("autorun: staying resident to host %d hidden program(s)", len(pendingHosted)))
 		}
 	}
 
 	var trayController *tray.Controller
+	var host *tray.Host
 	var mainWindow *ui.MainWindow
 	activation, activationErr := ipc.NewActivationListener(activationEvent)
 	if activationErr != nil {
@@ -140,6 +150,9 @@ func Run(args []string) int {
 			if trayController != nil {
 				trayController.SetLanguage(s.Language)
 			}
+			if host != nil {
+				host.SetLanguage(s.Language)
+			}
 		},
 		OnOpenLogs: func() {
 			if openErr := openLogLocation(); openErr != nil {
@@ -158,6 +171,13 @@ func Run(args []string) int {
 				m := i18n.For(language)
 				mainWindow.SetLaunchNowBusy(false)
 				if result.Managed {
+					if hw, ok := hostedFromResult(entry, result); ok && host != nil {
+						mainWindow.Native().Synchronize(func() {
+							if addErr := host.Add(hw); addErr != nil {
+								logger.Warn(fmt.Sprintf("tray host add failed: %s %v", hw.Name, addErr))
+							}
+						})
+					}
 					mainWindow.ShowInfo(m.WindowTitle, fmt.Sprintf(m.LaunchNowDoneBody, result.AppName))
 					return
 				}
@@ -226,7 +246,24 @@ func Run(args []string) int {
 	}
 	defer trayController.Dispose()
 
-	showMainWindow := shouldShowMainWindowForSettings(args, settings)
+	host = tray.NewHost(settings.Language, logger, orchestrator.FindConsoleWindow)
+	defer host.RestoreAll()
+	for _, hw := range pendingHosted {
+		if addErr := host.Add(hw); addErr != nil {
+			logger.Warn(fmt.Sprintf("tray host add failed: %s %v", hw.Name, addErr))
+		}
+	}
+	if hostingOnly {
+		if host.Count() == 0 {
+			return 0
+		}
+		host.SetOnEmpty(func() {
+			logger.Info("all hosted programs exited; exiting as configured")
+			mainWindow.RequestExplicitClose()
+		})
+	}
+
+	showMainWindow := shouldShowMainWindowForSettings(args, settings) && !hostingOnly
 	if showMainWindow {
 		mainWindow.ShowMainWindow()
 	} else {
@@ -238,15 +275,9 @@ func Run(args []string) int {
 	return exitCode
 }
 
-// runAutorunMode runs the logon task set and reports whether the process should
-// exit immediately. When the setting is disabled, Run continues into the
-// normal tray/UI path after the tasks complete.
-func runAutorunMode(ctx context.Context, orch *orchestrator.Service, settings config.Settings, logger *logging.Logger) bool {
-	runManagedApps(ctx, orch, nil, settings, false, logger)
-	return settings.ExitAfterManagedAppsCompleted
-}
-
-func runManagedApps(ctx context.Context, orch *orchestrator.Service, mainWindow *ui.MainWindow, settings config.Settings, autoExit bool, logger *logging.Logger) {
+// runManagedApps runs the logon task set and returns the programs whose
+// windows WinTray hid itself; those need a hosted tray icon to come back.
+func runManagedApps(ctx context.Context, orch *orchestrator.Service, settings config.Settings, logger *logging.Logger) []tray.HostedWindow {
 	msg := i18n.For(settings.Language)
 	managedEntries := make([]config.ManagedAppEntry, 0, len(settings.ManagedApps))
 	for _, entry := range settings.ManagedApps {
@@ -256,6 +287,8 @@ func runManagedApps(ctx context.Context, orch *orchestrator.Service, mainWindow 
 	}
 
 	summaries := make([]string, len(managedEntries))
+	var hosted []tray.HostedWindow
+	var hostedMu sync.Mutex
 	var wg sync.WaitGroup
 	for i, entry := range managedEntries {
 		i := i
@@ -264,6 +297,11 @@ func runManagedApps(ctx context.Context, orch *orchestrator.Service, mainWindow 
 		go func() {
 			defer wg.Done()
 			result := processManagedEntry(ctx, orch, settings, entry, logger)
+			if hw, ok := hostedFromResult(entry, result); ok {
+				hostedMu.Lock()
+				hosted = append(hosted, hw)
+				hostedMu.Unlock()
+			}
 
 			detail := i18n.TranslateResultCode(settings.Language, string(result.Code))
 			if detail == "" {
@@ -283,11 +321,21 @@ func runManagedApps(ctx context.Context, orch *orchestrator.Service, mainWindow 
 	for _, line := range summaries {
 		logger.Info(fmt.Sprintf("managed summary: %s", line))
 	}
+	return hosted
+}
 
-	hadTasks := len(managedEntries) > 0
-	if ctx.Err() == nil && autoExit && hadTasks && mainWindow != nil {
-		mainWindow.RequestExplicitClose()
+// hostedFromResult converts a result whose window WinTray hid itself into a
+// tray host entry.
+func hostedFromResult(entry config.ManagedAppEntry, result orchestrator.Result) (tray.HostedWindow, bool) {
+	if result.Hidden == nil {
+		return tray.HostedWindow{}, false
 	}
+	return tray.HostedWindow{
+		Name:      entry.Name,
+		ExePath:   entry.ExePath,
+		Handle:    result.Hidden.Handle,
+		ProcessID: result.Hidden.ProcessID,
+	}, true
 }
 
 func processManagedEntry(ctx context.Context, orch *orchestrator.Service, settings config.Settings, entry config.ManagedAppEntry, logger *logging.Logger) orchestrator.Result {

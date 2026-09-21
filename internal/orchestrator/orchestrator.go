@@ -15,13 +15,27 @@ import (
 
 // startOptions describes how a managed entry should be brought up.
 // hideProcessWindow creates the process without a console window;
-// manageWindow closes/hides the top-level window it opens afterwards.
+// hideConsoleWindow creates a console program with its console hidden so the
+// window can later be shown from a tray icon; manageWindow closes/hides the
+// top-level window it opens afterwards.
 // windowOptional treats window handling as best effort: a program that never
 // opens a window (background scripts) still counts as a successful launch.
 type startOptions struct {
 	hideProcessWindow bool
+	hideConsoleWindow bool
 	manageWindow      bool
 	windowOptional    bool
+}
+
+func (o startOptions) launchMode() launchMode {
+	switch {
+	case o.hideProcessWindow:
+		return launchNoWindow
+	case o.hideConsoleWindow:
+		return launchHiddenConsole
+	default:
+		return launchVisible
+	}
 }
 
 func (s *Service) StartAndManage(ctx context.Context, entry config.ManagedAppEntry, retrySeconds int) Result {
@@ -54,26 +68,33 @@ func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retry
 
 	expectedName := stringutil.TrimExt(filepath.Base(entry.ExePath))
 	expectedPath := normalizePath(entry.ExePath)
+	// A console-subsystem program (syncthing.exe, frpc.exe, ...) owns no GUI
+	// window: its only window is the console host, and closing that terminates
+	// the process. "Close window after launch" therefore means "keep the
+	// window hidden and reachable from a tray icon" for these programs.
+	consoleProgram := opts.manageWindow && consoleExecutableCheck(entry.ExePath)
+
 	if s.hasExistingManagedProcess(expectedPath, expectedName) || s.hasExistingManagedWindow(expectedPath, expectedName) {
 		s.logger.Info(fmt.Sprintf("skip start: already running %s", entry.Name))
+		if consoleProgram {
+			if hidden, ok := s.adoptRunningConsole(ctx, entry, expectedPath, expectedName); ok {
+				return hiddenToTrayResult(entry, hidden)
+			}
+		}
 		if opts.manageWindow {
-			ok := s.manageFirstMatchingWindow(ctx, func(w ManagedWindowInfo) bool {
+			managed, ok := s.manageFirstMatchingWindow(ctx, func(w ManagedWindowInfo) bool {
 				return matchesExecutableWithIdentityFallback(w, expectedPath, expectedName)
 			}, expectedPath, expectedName, nil, nil, retrySeconds, "close")
 			if ok {
-				return Result{AppName: entry.Name, Managed: true, Action: "close", Code: ResultAlreadyRunningManaged, Message: "already running managed existing"}
+				return managedResult(entry, managed, ResultAlreadyRunningManaged, "already running managed existing")
 			}
 		}
 		return Result{AppName: entry.Name, Managed: true, Code: ResultAlreadyRunningSkipped, Message: "already running skipped"}
 	}
 
-	// A console-subsystem program has no window of its own to send back to the
-	// tray: closing its console kills the process. "Close window after launch"
-	// therefore means "keep it running without a window" for these programs, so
-	// launch them without a console instead of closing it afterwards.
-	if opts.manageWindow && consoleExecutableCheck(entry.ExePath) {
-		s.logger.Info(fmt.Sprintf("console executable detected, launching without console window instead of closing it: %s", entry.Name))
-		opts.hideProcessWindow = true
+	if consoleProgram {
+		s.logger.Info(fmt.Sprintf("console executable detected, launching with hidden console for tray hosting: %s", entry.Name))
+		opts.hideConsoleWindow = true
 		opts.manageWindow = false
 	}
 
@@ -81,19 +102,23 @@ func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retry
 		return matchesExecutableWithIdentityFallback(w, expectedPath, expectedName)
 	})
 
-	cmd, err := startProcess(entry.ExePath, entry.Args, opts.hideProcessWindow)
+	cmd, err := startProcess(entry.ExePath, entry.Args, opts.launchMode())
 	if err != nil {
 		s.logger.Error(fmt.Sprintf("start failed: %s err=%v", entry.Name, err))
 		return Result{AppName: entry.Name, Managed: false, Code: ResultProcessStartFailed, Message: "process start failed"}
 	}
 	pid := uint32(cmd.Process.Pid)
-	s.logger.Info(fmt.Sprintf("started: %s pid=%d hidden=%t", entry.Name, pid, opts.hideProcessWindow))
+	s.logger.Info(fmt.Sprintf("started: %s pid=%d mode=%d", entry.Name, pid, opts.launchMode()))
+
+	if opts.hideConsoleWindow {
+		return s.hostLaunchedConsole(ctx, entry, pid)
+	}
 
 	if !opts.manageWindow {
 		return startedResult(entry, opts)
 	}
 
-	ok := s.manageFirstMatchingWindow(ctx, func(w ManagedWindowInfo) bool {
+	managed, ok := s.manageFirstMatchingWindow(ctx, func(w ManagedWindowInfo) bool {
 		return w.ProcessID == pid || matchesExecutableWithIdentityFallback(w, expectedPath, expectedName)
 	}, expectedPath, expectedName, &pid, baseline, retrySeconds, "close")
 	if !ok {
@@ -102,7 +127,62 @@ func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retry
 		}
 		return Result{AppName: entry.Name, Managed: false, Code: ResultNoWindowManaged, Message: "no window managed"}
 	}
-	return Result{AppName: entry.Name, Managed: true, Action: "close", Code: ResultManaged, Message: "managed"}
+	return managedResult(entry, managed, ResultManaged, "managed")
+}
+
+// hostLaunchedConsole locates the hidden console window of a console program
+// WinTray just started so the caller can host it behind a tray icon. The
+// window is created hidden, so nothing needs to be closed; when the lookup
+// fails the program still runs and is hosted by process id only.
+func (s *Service) hostLaunchedConsole(ctx context.Context, entry config.ManagedAppEntry, pid uint32) Result {
+	hwnd := consoleWindowLookup(ctx, pid, consoleWindowWait)
+	if hwnd == 0 {
+		s.logger.Warn(fmt.Sprintf("console window not found after launch: %s pid=%d (hosted by process only)", entry.Name, pid))
+	} else {
+		s.logger.Info(fmt.Sprintf("console window hidden for tray hosting: %s pid=%d hwnd=0x%X", entry.Name, pid, hwnd))
+	}
+	return hiddenToTrayResult(entry, HiddenWindow{Handle: hwnd, ProcessID: pid})
+}
+
+// adoptRunningConsole handles a console program that is already running: it
+// finds the program's console window (visible or already hidden, e.g. after a
+// WinTray restart), hides it when needed and reports it for tray hosting.
+// ok is false when no matching process is running.
+func (s *Service) adoptRunningConsole(ctx context.Context, entry config.ManagedAppEntry, expectedPath, expectedName string) (HiddenWindow, bool) {
+	pid := runningProcessLookup(expectedPath, expectedName)
+	if pid == 0 {
+		return HiddenWindow{}, false
+	}
+	hwnd := consoleWindowLookup(ctx, pid, 0)
+	if hwnd == 0 {
+		s.logger.Warn(fmt.Sprintf("running console program has no console window: %s pid=%d (hosted by process only)", entry.Name, pid))
+		return HiddenWindow{ProcessID: pid}, true
+	}
+	if windowVisibleCheck(hwnd) {
+		if ok, err := s.manager.HideWindow(hwnd); !ok {
+			s.logger.Warn(fmt.Sprintf("hide running console failed: %s pid=%d hwnd=0x%X err=%v", entry.Name, pid, hwnd, err))
+			return HiddenWindow{}, false
+		}
+		s.logger.Info(fmt.Sprintf("running console window hidden for tray hosting: %s pid=%d hwnd=0x%X", entry.Name, pid, hwnd))
+	} else {
+		s.logger.Info(fmt.Sprintf("adopted already hidden console window: %s pid=%d hwnd=0x%X", entry.Name, pid, hwnd))
+	}
+	return HiddenWindow{Handle: hwnd, ProcessID: pid}, true
+}
+
+func hiddenToTrayResult(entry config.ManagedAppEntry, hidden HiddenWindow) Result {
+	h := hidden
+	return Result{AppName: entry.Name, Managed: true, Action: "hide", Code: ResultHiddenToTray, Message: "hidden to tray", Hidden: &h}
+}
+
+// managedResult reports a successful window action. When WinTray hid the
+// window itself the program has no tray icon to get it back, so the result
+// carries the hidden window for tray hosting.
+func managedResult(entry config.ManagedAppEntry, managed managedWindow, code ResultCode, message string) Result {
+	if managed.Hidden {
+		return hiddenToTrayResult(entry, HiddenWindow{Handle: managed.Handle, ProcessID: managed.ProcessID})
+	}
+	return Result{AppName: entry.Name, Managed: true, Action: "close", Code: code, Message: message}
 }
 
 func startedResult(entry config.ManagedAppEntry, opts startOptions) Result {
@@ -140,17 +220,28 @@ func (s *Service) HideExisting(ctx context.Context, entry config.ManagedAppEntry
 		return Result{AppName: entry.Name, Managed: false, Code: ResultInvalidProcessName, Message: "invalid process name"}
 	}
 	expectedPath := normalizePath(entry.ExePath)
-	ok := s.manageFirstMatchingWindow(ctx, func(w ManagedWindowInfo) bool {
+	if consoleExecutableCheck(entry.ExePath) {
+		if hidden, ok := s.adoptRunningConsole(ctx, entry, expectedPath, expectedName); ok {
+			return hiddenToTrayResult(entry, hidden)
+		}
+		if !s.hasExistingManagedWindow(expectedPath, expectedName) {
+			// Not running: let the caller launch it instead of waiting for a
+			// window that will never appear.
+			return Result{AppName: entry.Name, Managed: false, Code: ResultNoExistingWindowManaged, Message: "no existing window managed"}
+		}
+	}
+	managed, ok := s.manageFirstMatchingWindow(ctx, func(w ManagedWindowInfo) bool {
 		return matchesExecutableWithIdentityFallback(w, expectedPath, expectedName)
 	}, expectedPath, expectedName, nil, nil, retrySeconds, "close")
 	if !ok {
 		return Result{AppName: entry.Name, Managed: false, Code: ResultNoExistingWindowManaged, Message: "no existing window managed"}
 	}
-	return Result{AppName: entry.Name, Managed: true, Action: "close", Code: ResultManagedExisting, Message: "managed existing"}
+	return managedResult(entry, managed, ResultManagedExisting, "managed existing")
 }
 
-func (s *Service) manageFirstMatchingWindow(ctx context.Context, predicate func(ManagedWindowInfo) bool, expectedPath, expectedName string, launchedPID *uint32, baseline map[uintptr]struct{}, retrySeconds int, actionType string) bool {
+func (s *Service) manageFirstMatchingWindow(ctx context.Context, predicate func(ManagedWindowInfo) bool, expectedPath, expectedName string, launchedPID *uint32, baseline map[uintptr]struct{}, retrySeconds int, actionType string) (managedWindow, bool) {
 	const delay = 500 * time.Millisecond
+	var last managedWindow
 	managedAny := false
 	singleRound := retrySeconds <= 0
 	timeout := 2 * time.Second
@@ -166,7 +257,7 @@ func (s *Service) manageFirstMatchingWindow(ctx context.Context, predicate func(
 	for round := 1; ; round++ {
 		select {
 		case <-actionCtx.Done():
-			return false
+			return last, false
 		default:
 		}
 
@@ -199,9 +290,10 @@ func (s *Service) manageFirstMatchingWindow(ctx context.Context, predicate func(
 
 		managedThisRound := false
 		for _, c := range candidates {
-			if s.tryManageAndVerify(actionCtx, c.Window, c.Score, actionType) {
+			if managed, ok := s.tryManageAndVerify(actionCtx, c.Window, c.Score, actionType); ok {
+				last = managed
 				if actionType != "hide" {
-					return true
+					return last, true
 				}
 				managedAny = true
 				managedThisRound = true
@@ -212,38 +304,41 @@ func (s *Service) manageFirstMatchingWindow(ctx context.Context, predicate func(
 		if actionType == "hide" {
 			if managedThisRound {
 				if singleRound {
-					return true
+					return last, true
 				}
 				if !waitWithContext(actionCtx, 150*time.Millisecond) {
-					return managedAny
+					return last, managedAny
 				}
 				continue
 			}
 			if managedAny && len(candidates) == 0 {
-				return true
+				return last, true
 			}
 		}
 
 		if singleRound {
-			return managedAny
+			return last, managedAny
 		}
 		if !waitWithContext(actionCtx, delay) {
-			return false
+			return last, false
 		}
 	}
 }
 
-func (s *Service) tryManageAndVerify(ctx context.Context, window ManagedWindowInfo, score int, actionType string) bool {
+func (s *Service) tryManageAndVerify(ctx context.Context, window ManagedWindowInfo, score int, actionType string) (managedWindow, bool) {
 	if score < closeAllowedScoreThreshold {
 		s.logger.Warn(fmt.Sprintf("skip low confidence candidate score=%d threshold=%d %s", score, closeAllowedScoreThreshold, describeWindow(window)))
-		return false
+		return managedWindow{}, false
 	}
+	target := resolveActionTargetHandle(window)
+	closed := managedWindow{Handle: target, ProcessID: window.ProcessID}
+	hidden := managedWindow{Handle: target, ProcessID: window.ProcessID, Hidden: true}
 
 	// Console host windows (conhost / Windows Terminal) are never closed:
 	// closing them terminates the hosted program, while the user asked for the
 	// program to keep running out of sight. Hide the host window instead.
 	if isConsoleHostWindow(window) {
-		return s.applyAndVerify(ctx, window, score, "hide", s.manager.HideWindow)
+		return hidden, s.applyAndVerify(ctx, window, score, "hide", s.manager.HideWindow)
 	}
 
 	// "hide" uses WM_CLOSE first and falls back to SW_HIDE for callers that
@@ -254,14 +349,14 @@ func (s *Service) tryManageAndVerify(ctx context.Context, window ManagedWindowIn
 		// Prefer app-native close-to-tray behavior first. Many apps (Tauri/Electron)
 		// intercept close and move to tray, preserving tray-click restore semantics.
 		if s.applyAndVerify(ctx, window, score, "hide", s.manager.CloseWindow) {
-			return true
+			return closed, true
 		}
-		return s.applyAndVerify(ctx, window, score, "hide", s.manager.HideWindow)
+		return hidden, s.applyAndVerify(ctx, window, score, "hide", s.manager.HideWindow)
 	}
 	if s.applyAndVerify(ctx, window, score, "close", s.manager.CloseWindow) {
-		return true
+		return closed, true
 	}
-	return false
+	return managedWindow{}, false
 }
 
 func (s *Service) applyAndVerify(ctx context.Context, window ManagedWindowInfo, score int, action string, fn func(uintptr) (bool, error)) bool {

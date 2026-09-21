@@ -48,7 +48,7 @@ func TestManageFirstMatchingWindow_HideHandlesAllCandidatesInRound(t *testing.T)
 	svc := NewService(enum, mgr, &testLogger{})
 
 	expectedPath := normalizePath(`C:\Program Files\App\app.exe`)
-	ok := svc.manageFirstMatchingWindow(
+	_, ok := svc.manageFirstMatchingWindow(
 		context.Background(),
 		func(ManagedWindowInfo) bool { return true },
 		expectedPath,
@@ -180,7 +180,7 @@ func TestIsConsoleExecutable(t *testing.T) {
 	}
 }
 
-func TestStart_ConsoleExecutableLaunchesHiddenInsteadOfClosingWindow(t *testing.T) {
+func TestStart_ConsoleExecutableIsHiddenToTray(t *testing.T) {
 	// The stub launch falls back to a short-lived cmd.exe whose working
 	// directory is the stub folder, so clean that folder up with a retry
 	// instead of t.TempDir, which fails while cmd.exe is still exiting.
@@ -201,9 +201,9 @@ func TestStart_ConsoleExecutableLaunchesHiddenInsteadOfClosingWindow(t *testing.
 	if err := os.WriteFile(exePath, []byte("stub"), 0o600); err != nil {
 		t.Fatalf("write stub exe: %v", err)
 	}
-	original := consoleExecutableCheck
-	consoleExecutableCheck = func(path string) bool { return path == exePath }
-	t.Cleanup(func() { consoleExecutableCheck = original })
+	const consoleHwnd = uintptr(0x5A5A)
+	restore := overrideConsoleSeams(t, func(path string) bool { return path == exePath }, 0, consoleHwnd, false)
+	defer restore()
 
 	entry := config.ManagedAppEntry{
 		Name:         "Syncthing",
@@ -226,13 +226,76 @@ func TestStart_ConsoleExecutableLaunchesHiddenInsteadOfClosingWindow(t *testing.
 			mgr := &testManager{}
 			svc := NewService(enum, mgr, &testLogger{})
 			got := launch.run(svc)
-			if !got.Managed || got.Code != ResultStartedHidden {
-				t.Fatalf("result = %+v, want managed with code %s", got, ResultStartedHidden)
+			if !got.Managed || got.Code != ResultHiddenToTray || got.Hidden == nil {
+				t.Fatalf("result = %+v, want managed hidden_to_tray with hidden window", got)
+			}
+			if got.Hidden.Handle != consoleHwnd || got.Hidden.ProcessID == 0 {
+				t.Fatalf("hidden = %+v, want handle 0x%X with a live pid", *got.Hidden, consoleHwnd)
 			}
 			if len(mgr.closeCalls) != 0 || len(mgr.hideCalls) != 0 {
 				t.Fatalf("console program window was touched: close=%d hide=%d", len(mgr.closeCalls), len(mgr.hideCalls))
 			}
 		})
+	}
+}
+
+func TestConsoleProgramAlreadyRunning_IsHiddenToTrayWithoutClosing(t *testing.T) {
+	exePath := filepath.Join(t.TempDir(), "syncthing.exe")
+	if err := os.WriteFile(exePath, []byte("stub"), 0o600); err != nil {
+		t.Fatalf("write stub exe: %v", err)
+	}
+	const pid = uint32(4321)
+	const consoleHwnd = uintptr(0x777)
+	restore := overrideConsoleSeams(t, func(path string) bool { return path == exePath }, pid, consoleHwnd, true)
+	defer restore()
+	entry := config.ManagedAppEntry{Name: "Syncthing", ExePath: exePath, RunOnStartup: true, TrayBehavior: config.TrayBehavior{AutoMinimizeAndHideOnLaunch: true}}
+	visibleConsole := ManagedWindowInfo{Handle: consoleHwnd, ProcessID: pid, ProcessName: "syncthing", ProcessPath: exePath, Title: exePath, ClassName: "ConsoleWindowClass"}
+
+	for _, tc := range []struct {
+		name string
+		run  func(*Service) Result
+	}{
+		{name: "HideExisting", run: func(svc *Service) Result { return svc.HideExisting(context.Background(), entry, 10) }},
+		{name: "StartAndManage", run: func(svc *Service) Result { return svc.StartAndManage(context.Background(), entry, 10) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mgr := &testManager{}
+			svc := NewService(&testEnumerator{windows: []ManagedWindowInfo{visibleConsole}}, mgr, &testLogger{})
+			started := time.Now()
+			got := tc.run(svc)
+			if elapsed := time.Since(started); elapsed > 2*time.Second {
+				t.Fatalf("took %s, adoption must not wait for the retry window", elapsed)
+			}
+			if !got.Managed || got.Code != ResultHiddenToTray || got.Hidden == nil {
+				t.Fatalf("result = %+v, want hidden_to_tray", got)
+			}
+			if got.Hidden.Handle != consoleHwnd || got.Hidden.ProcessID != pid {
+				t.Fatalf("hidden = %+v, want {0x%X %d}", *got.Hidden, consoleHwnd, pid)
+			}
+			if len(mgr.closeCalls) != 0 {
+				t.Fatalf("console window received close: %v", mgr.closeCalls)
+			}
+			if len(mgr.hideCalls) != 1 || mgr.hideCalls[0] != consoleHwnd {
+				t.Fatalf("hide calls = %v, want [0x%X]", mgr.hideCalls, consoleHwnd)
+			}
+		})
+	}
+}
+
+func TestHideExisting_ConsoleProgramNotRunning_ReturnsImmediately(t *testing.T) {
+	exePath := filepath.Join(t.TempDir(), "syncthing.exe")
+	restore := overrideConsoleSeams(t, func(path string) bool { return path == exePath }, 0, 0, false)
+	defer restore()
+	entry := config.ManagedAppEntry{Name: "Syncthing", ExePath: exePath, RunOnStartup: true, TrayBehavior: config.TrayBehavior{AutoMinimizeAndHideOnLaunch: true}}
+	svc := NewService(&testEnumerator{}, &testManager{}, &testLogger{})
+
+	started := time.Now()
+	got := svc.HideExisting(context.Background(), entry, 10)
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("took %s, must not wait for a window of a program that is not running", elapsed)
+	}
+	if got.Managed || got.Code != ResultNoExistingWindowManaged {
+		t.Fatalf("result = %+v, want no existing window managed", got)
 	}
 }
 
@@ -249,8 +312,12 @@ func TestTryManageAndVerify_ConsoleHostWindowIsHiddenNotClosed(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			mgr := &testManager{}
 			svc := NewService(&testEnumerator{}, mgr, &testLogger{})
-			if !svc.tryManageAndVerify(context.Background(), tc.window, closeAllowedScoreThreshold, "close") {
+			managed, ok := svc.tryManageAndVerify(context.Background(), tc.window, closeAllowedScoreThreshold, "close")
+			if !ok {
 				t.Fatal("tryManageAndVerify(close) = false, want true")
+			}
+			if !managed.Hidden || managed.Handle != tc.window.Handle || managed.ProcessID != tc.window.ProcessID {
+				t.Fatalf("managed = %+v, want hidden window 0x%X pid %d", managed, tc.window.Handle, tc.window.ProcessID)
 			}
 			if len(mgr.closeCalls) != 0 {
 				t.Fatalf("console host window received close: %v", mgr.closeCalls)
@@ -264,10 +331,29 @@ func TestTryManageAndVerify_ConsoleHostWindowIsHiddenNotClosed(t *testing.T) {
 	gui := ManagedWindowInfo{Handle: 0x404, ProcessID: 4, ProcessName: "app", Title: "App", ClassName: "AppWindow"}
 	mgr := &testManager{}
 	svc := NewService(&testEnumerator{}, mgr, &testLogger{})
-	if !svc.tryManageAndVerify(context.Background(), gui, closeAllowedScoreThreshold, "close") {
+	managed, ok := svc.tryManageAndVerify(context.Background(), gui, closeAllowedScoreThreshold, "close")
+	if !ok {
 		t.Fatal("tryManageAndVerify(close) on GUI window = false, want true")
+	}
+	if managed.Hidden {
+		t.Fatalf("GUI window reported as hidden by WinTray: %+v", managed)
 	}
 	if len(mgr.closeCalls) != 1 || len(mgr.hideCalls) != 0 {
 		t.Fatalf("GUI window should still be closed: close=%v hide=%v", mgr.closeCalls, mgr.hideCalls)
+	}
+}
+
+// overrideConsoleSeams replaces the console probes: which files count as
+// console programs, which pid a running instance has (0 = not running), which
+// console window belongs to it (0 = none) and whether that window is visible.
+func overrideConsoleSeams(t *testing.T, isConsole func(string) bool, runningPID uint32, hwnd uintptr, visible bool) func() {
+	t.Helper()
+	origCheck, origLookup, origRunning, origVisible := consoleExecutableCheck, consoleWindowLookup, runningProcessLookup, windowVisibleCheck
+	consoleExecutableCheck = isConsole
+	consoleWindowLookup = func(context.Context, uint32, time.Duration) uintptr { return hwnd }
+	runningProcessLookup = func(string, string) uint32 { return runningPID }
+	windowVisibleCheck = func(uintptr) bool { return visible }
+	return func() {
+		consoleExecutableCheck, consoleWindowLookup, runningProcessLookup, windowVisibleCheck = origCheck, origLookup, origRunning, origVisible
 	}
 }

@@ -59,7 +59,7 @@ WinTray supports adding the following program types to the managed list, automat
 
 | Type              | File Extension  | Launch Behavior                                                               |
 | ----------------- | --------------- | ----------------------------------------------------------------------------- |
-| Executable        | `.exe`          | Foreground launch by default; can optionally close the window to hide to tray |
+| Executable        | `.exe`          | Foreground launch by default; can optionally close the window to hide to tray; console programs get a WinTray-hosted tray icon |
 | Batch script      | `.bat` / `.cmd` | Hidden background launch by default (no console window)                       |
 | PowerShell script | `.ps1`          | Hidden background launch by default                                           |
 | Python script     | `.py` / `.pyw`  | Hidden background launch by default, invokes `python.exe` / `pythonw.exe`       |
@@ -71,7 +71,7 @@ WinTray supports adding the following program types to the managed list, automat
 ### Per-Program Configuration Options
 
 - **Launch Arguments**: Pass custom command-line arguments to the program
-- **Close Window After Launch**: Sends a close message (WM_CLOSE) after launch — most tray-aware apps minimize to tray rather than quitting; a destroyed or invisible window is considered successfully handled
+- **Close Window After Launch**: Sends a close message (WM_CLOSE) after launch — most tray-aware apps minimize to tray rather than quitting; a destroyed or invisible window is considered successfully handled. Console programs without a tray icon of their own (such as `syncthing.exe` or `frpc.exe`) would be terminated by a close, so WinTray hides their console window instead and hosts a tray icon for them: left-click toggles the window, and the context menu can show, hide or quit the program. WinTray stays resident while hosting and shows the hidden windows again when it exits
 - **Launch Hidden in Background**: Starts the program without any visible window, suitable for command-line and script programs
 - **Pause Task**: Temporarily skip this program's auto-start task; it will run again on the next boot
 
@@ -96,6 +96,7 @@ Scoring system (an action is only taken when the total score ≥ 500):
 | Scenario                                                     | Configuration                                            |
 | ------------------------------------------------------------ | -------------------------------------------------------- |
 | QQ / WeChat / DingTalk auto-start and minimize to tray       | Add `.exe`, enable "Close window after launch"           |
+| syncthing / frpc console programs running in the background, reachable from the tray | Add `.exe`, enable "Close window after launch"; WinTray hosts the tray icon |
 | Tunnel scripts (frpc / SSH) running in background at startup | Add `.bat` / `.ps1`, hidden background launch by default |
 | Python crawler/service starting silently in background       | Add `.py`, hidden background launch by default           |
 | Auto-start only, no window handling                          | Add program, leave "Close window after launch" unchecked |
