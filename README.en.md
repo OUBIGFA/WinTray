@@ -4,7 +4,7 @@
 
 <img src="internal/branding/assets/logo.png" alt="WinTray Logo" width="120" />
 
-**A Windows tray tool that automatically organizes your desktop at startup**
+**A lightweight Windows startup organizer for silent launch and window management**
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-lightgrey.svg)]()
@@ -18,9 +18,12 @@ English | [简体中文](README.md)
 
 ## Introduction
 
-WinTray is a Windows startup organizer. It sits in the system tray and, when triggered by the auto-start flow, automatically manages the windows of specified programs (e.g., minimizing or hiding them) based on configurable rules — saving you the hassle of manually cleaning up your desktop after every boot.
+**WinTray** is a lightweight Windows startup organizer designed to eliminate desktop clutter from startup popups and flashing console windows, giving you a clean desktop after every boot.
 
-WinTray is mainly designed for two scenarios: automatically closing the window of applications that can start with Windows but do not support minimizing to the system tray after launch, while keeping them running; and launching `.bat`, `.cmd`, `.ps1`, `.py`, and `.pyw` programs silently in the background without visible windows.
+Core use cases:
+
+- **Auto-Hide Windows**: Automatically closes the main window of applications lacking a native "start minimized to tray" option, keeping them running quietly in the tray.
+- **Silent Script Launch**: Runs `.bat`, `.cmd`, `.ps1`, `.py`, and `.pyw` scripts completely hidden in the background without intrusive console windows.
 
 ![](image/01.png)
 
