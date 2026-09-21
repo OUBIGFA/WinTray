@@ -84,10 +84,10 @@ type Messages struct {
 var zhCN = Messages{
 	WindowTitle:                    "WinTray",
 	GlobalSettingsTitle:            "全局设置",
-	RunAtLogon:                     "WinTray 开机启动",
+	RunAtLogon:                     "开机自启动",
 	StartHidden:                    "启动后最小化到托盘",
 	ExitOnDone:                     "完成所有任务后自动退出",
-	RetrySeconds:                   "窗口重试秒数 (0-120):",
+	RetrySeconds:                   "窗口检测超时 (0-120秒):",
 	LanguageLabel:                  "语言:",
 	ManagedListTitle:               "程序列表",
 	ManagedColumnName:              "程序",
@@ -97,15 +97,15 @@ var zhCN = Messages{
 	ManagedAppPath:                 "程序路径:",
 	ManagedAppArgs:                 "启动参数:",
 	ManagedAutoHide:                "启动后关闭窗口",
-	ManagedLaunchHidden:            "隐藏后台启动",
+	ManagedLaunchHidden:            "后台静默启动",
 	ManagedPauseTask:               "暂停任务",
-	ManagedLaunchNow:               "马上启动",
+	ManagedLaunchNow:               "立即启动",
 	ManagedLaunchNowBusy:           "启动中…",
 	LaunchNowDoneBody:              "已启动: %s",
 	AddProgram:                     "添加程序",
 	RemoveSelected:                 "删除选中",
 	OpenLogs:                       "打开日志",
-	CleanupRestore:                 "清理并恢复默认",
+	CleanupRestore:                 "重置并清理数据",
 	CheckUpdate:                    "检查更新",
 	CheckUpdateBusy:                "检查中…",
 	GitHubTooltip:                  "在 GitHub 上查看项目",
@@ -123,9 +123,9 @@ var zhCN = Messages{
 	AllFilesFilter:                 "所有文件 (*.*)|*.*",
 	NewAppName:                     "新程序",
 	ManagedListItemTemplate:        "%s | %s | 启动后关闭窗口=%t",
-	ManagedListHiddenTemplate:      "%s | %s | 隐藏后台启动=%t",
+	ManagedListHiddenTemplate:      "%s | %s | 后台静默启动=%t",
 	ManagedListParamTemplate:       "关闭窗口=%t",
-	ManagedListParamHiddenTemplate: "隐藏后台=%t",
+	ManagedListParamHiddenTemplate: "静默启动=%t",
 	ManagedListParamPausedTemplate: "已暂停",
 	RunSummaryNone:                 "没有可执行的受管任务。",
 	RunSummaryLine:                 "%s: %s",
@@ -134,15 +134,15 @@ var zhCN = Messages{
 	AlreadyRunningTitle:            "WinTray",
 	AlreadyRunningBody:             "WinTray 已在运行。",
 	StatusLaunchFailTemplate:       "启动失败: %s (%s)",
-	StatusRetryExhausted:           "重试超时，未找到可托管窗口",
+	StatusRetryExhausted:           "等待超时，未检测到程序窗口",
 	StatusPermissionHint:           "可能是权限限制 (UIPI): 请尝试以管理员身份运行 WinTray。",
 	StatusOpenLogsFailed:           "打开日志失败",
-	CleanupConfirmTitle:            "清理并恢复默认",
+	CleanupConfirmTitle:            "重置并清理数据",
 	CleanupConfirmBody:             "将清除 WinTray 的本地配置与日志，并恢复默认设置。\r\n\r\n是否继续？",
 	CleanupDoneTitle:               "已计划清理",
 	CleanupDoneBody:                "已恢复默认设置，WinTray 将在退出后清理本地数据。",
 	CleanupFailedTitle:             "清理失败",
-	CleanupFailedBody:              "清理并恢复默认失败: %s",
+	CleanupFailedBody:              "重置并清理数据失败: %s",
 	LanguageZhLabel:                "中文",
 	LanguageEnLabel:                "English",
 }
@@ -305,17 +305,17 @@ func TranslateResultMessage(language, message string) string {
 		if Resolve(language) == LangEnUS {
 			return "started only"
 		}
-		return "仅启动，未执行托管动作"
+		return "已启动 (无窗口规则)"
 	case "started hidden":
 		if Resolve(language) == LangEnUS {
 			return "started hidden in background"
 		}
-		return "已隐藏后台启动"
+		return "已后台静默启动"
 	case "already running skipped":
 		if Resolve(language) == LangEnUS {
 			return "already running, skipped relaunch"
 		}
-		return "程序已在运行，已跳过重复拉起"
+		return "程序已在运行，已跳过启动"
 	case "already running managed existing":
 		if Resolve(language) == LangEnUS {
 			return "already running, managed existing window"
@@ -327,7 +327,7 @@ func TranslateResultMessage(language, message string) string {
 		if Resolve(language) == LangEnUS {
 			return "front window closed"
 		}
-		return "前台窗口已关闭"
+		return "前台窗口已成功收起"
 	case "invalid process name":
 		if Resolve(language) == LangEnUS {
 			return "invalid process name"

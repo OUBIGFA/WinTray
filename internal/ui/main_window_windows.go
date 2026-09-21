@@ -241,7 +241,7 @@ func (w *MainWindow) buildTopOptions() error {
 			if i18n.Resolve(w.settings.Language) == i18n.LangEnUS {
 				walk.MsgBox(w.mw, w.mw.Title(), "Retry seconds must be a number between 0 and 120.", walk.MsgBoxIconWarning)
 			} else {
-				walk.MsgBox(w.mw, w.mw.Title(), "重试秒数必须是 0 到 120 的数字。", walk.MsgBoxIconWarning)
+				walk.MsgBox(w.mw, w.mw.Title(), "超时秒数必须是 0 到 120 的数字。", walk.MsgBoxIconWarning)
 			}
 			v = w.settings.CloseWindowRetrySeconds
 		}
