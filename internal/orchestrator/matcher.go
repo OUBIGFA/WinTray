@@ -139,6 +139,18 @@ func isLikelyShellHost(processName string) bool {
 	return p == "windowsterminal" || p == "cmd" || p == "conhost" || p == "powershell" || p == "pwsh" || p == "wt"
 }
 
+// isConsoleHostWindow reports whether the window is a console host window
+// (legacy conhost or Windows Terminal) or belongs to a shell process. Closing
+// such a window terminates every program attached to it, so window actions on
+// it must hide rather than close.
+func isConsoleHostWindow(window ManagedWindowInfo) bool {
+	className := strings.ToLower(strings.TrimSpace(window.ClassName))
+	if className == "consolewindowclass" || className == "cascadia_hosting_window_class" {
+		return true
+	}
+	return isLikelyShellHost(window.ProcessName)
+}
+
 func isUnmanageableWindow(window ManagedWindowInfo) bool {
 	className := strings.ToLower(strings.TrimSpace(window.ClassName))
 

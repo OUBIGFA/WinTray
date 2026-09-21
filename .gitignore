@@ -9,6 +9,11 @@ build/package.local.ps1
 *.zip
 *.tar.gz
 
+# 根目录下的点目录（隐藏目录）一律不跟踪
+/.*/
+# 例外：CI / Release 工作流需要随仓库提交
+!/.github/
+
 # Local IDE/editor
 .idea/
 .vscode/

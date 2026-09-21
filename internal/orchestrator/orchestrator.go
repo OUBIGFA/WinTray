@@ -67,6 +67,16 @@ func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retry
 		return Result{AppName: entry.Name, Managed: true, Code: ResultAlreadyRunningSkipped, Message: "already running skipped"}
 	}
 
+	// A console-subsystem program has no window of its own to send back to the
+	// tray: closing its console kills the process. "Close window after launch"
+	// therefore means "keep it running without a window" for these programs, so
+	// launch them without a console instead of closing it afterwards.
+	if opts.manageWindow && consoleExecutableCheck(entry.ExePath) {
+		s.logger.Info(fmt.Sprintf("console executable detected, launching without console window instead of closing it: %s", entry.Name))
+		opts.hideProcessWindow = true
+		opts.manageWindow = false
+	}
+
 	baseline := s.captureBaseline(func(w ManagedWindowInfo) bool {
 		return matchesExecutableWithIdentityFallback(w, expectedPath, expectedName)
 	})
@@ -227,6 +237,13 @@ func (s *Service) tryManageAndVerify(ctx context.Context, window ManagedWindowIn
 	if score < closeAllowedScoreThreshold {
 		s.logger.Warn(fmt.Sprintf("skip low confidence candidate score=%d threshold=%d %s", score, closeAllowedScoreThreshold, describeWindow(window)))
 		return false
+	}
+
+	// Console host windows (conhost / Windows Terminal) are never closed:
+	// closing them terminates the hosted program, while the user asked for the
+	// program to keep running out of sight. Hide the host window instead.
+	if isConsoleHostWindow(window) {
+		return s.applyAndVerify(ctx, window, score, "hide", s.manager.HideWindow)
 	}
 
 	// "hide" uses WM_CLOSE first and falls back to SW_HIDE for callers that
