@@ -2,8 +2,6 @@ package i18n
 
 import (
 	"fmt"
-	"path/filepath"
-	"strings"
 
 	"wintray/internal/config"
 )
@@ -17,22 +15,36 @@ const (
 
 type Messages struct {
 	WindowTitle                    string
+	WindowSubtitle                 string
 	GlobalSettingsTitle            string
 	RunAtLogon                     string
 	StartHidden                    string
 	ExitOnDone                     string
 	RetrySeconds                   string
+	RetrySecondsInvalid            string
 	LanguageLabel                  string
 	ManagedListTitle               string
+	ManagedListCount               string
+	ManagedListEmpty               string
+	ManagedListEmptyHint           string
 	ManagedColumnName              string
 	ManagedColumnPath              string
 	ManagedColumnRule              string
 	ManagedEditorTitle             string
+	ManagedEditorHint              string
+	ManagedSelectedTitle           string
+	ManagedSelectionHint           string
 	ManagedAppPath                 string
+	BrowseProgram                  string
 	ManagedAppArgs                 string
+	ManagedArgsPlaceholder         string
+	ManagedLaunchOnly              string
 	ManagedAutoHide                string
+	ManagedAutoHideHint            string
 	ManagedLaunchHidden            string
+	ManagedLaunchHiddenHint        string
 	ManagedPauseTask               string
+	ManagedPauseTaskHint           string
 	ManagedLaunchNow               string
 	ManagedLaunchNowBusy           string
 	LaunchNowDoneBody              string
@@ -87,29 +99,43 @@ type Messages struct {
 
 var zhCN = Messages{
 	WindowTitle:                    "WinTray",
+	WindowSubtitle:                 "开机有序，桌面清爽",
 	GlobalSettingsTitle:            "全局设置",
-	RunAtLogon:                     "开机自启动",
+	RunAtLogon:                     "WinTray 开机自启动",
 	StartHidden:                    "启动后最小化到托盘",
 	ExitOnDone:                     "完成所有任务后自动退出",
-	RetrySeconds:                   "窗口检测超时 (0-120秒):",
+	RetrySeconds:                   "窗口检测超时 (0–120 秒)",
+	RetrySecondsInvalid:            "超时秒数必须是 0 到 120 的数字。",
 	LanguageLabel:                  "语言:",
 	ManagedListTitle:               "程序列表",
+	ManagedListCount:               "%d 个程序 · %d 个已启用",
+	ManagedListEmpty:               "还没有添加程序",
+	ManagedListEmptyHint:           "点击“添加程序”，选择应用或脚本开始配置。",
 	ManagedColumnName:              "程序",
 	ManagedColumnPath:              "路径",
-	ManagedColumnRule:              "规则",
+	ManagedColumnRule:              "启动方式",
 	ManagedEditorTitle:             "程序设置",
+	ManagedEditorHint:              "更改会自动保存",
+	ManagedSelectedTitle:           "程序设置 · %s",
+	ManagedSelectionHint:           "选择上方的程序以编辑启动方式。",
 	ManagedAppPath:                 "程序路径:",
+	BrowseProgram:                  "更换…",
 	ManagedAppArgs:                 "启动参数:",
+	ManagedArgsPlaceholder:         "可选，例如 --minimized",
+	ManagedLaunchOnly:              "仅启动",
 	ManagedAutoHide:                "启动后关闭窗口",
+	ManagedAutoHideHint:            "发送关闭消息（WM_CLOSE）：托盘应用通常会收起，其他应用可能退出；控制台窗口由 WinTray 隐藏并代管托盘图标。",
 	ManagedLaunchHidden:            "后台静默启动",
+	ManagedLaunchHiddenHint:        "适用于脚本或命令行程序；不能与“启动后关闭窗口”同时启用。",
 	ManagedPauseTask:               "暂停任务",
+	ManagedPauseTaskHint:           "暂停后跳过该程序的开机启动，仍可点击“立即启动”。",
 	ManagedLaunchNow:               "立即启动",
 	ManagedLaunchNowBusy:           "启动中…",
 	LaunchNowDoneBody:              "已启动: %s",
 	AddProgram:                     "添加程序",
-	RemoveSelected:                 "删除选中",
+	RemoveSelected:                 "移除",
 	OpenLogs:                       "打开日志",
-	CleanupRestore:                 "重置并清理数据",
+	CleanupRestore:                 "重置数据…",
 	CheckUpdate:                    "检查更新",
 	CheckUpdateBusy:                "检查中…",
 	GitHubTooltip:                  "在 GitHub 上查看项目",
@@ -157,29 +183,43 @@ var zhCN = Messages{
 
 var enUS = Messages{
 	WindowTitle:                    "WinTray",
+	WindowSubtitle:                 "A quieter start. A cleaner desktop.",
 	GlobalSettingsTitle:            "Global Settings",
 	RunAtLogon:                     "Run WinTray at logon",
 	StartHidden:                    "Minimize to tray after launch",
-	ExitOnDone:                     "Exit automatically after all tasks complete",
-	RetrySeconds:                   "Window retry seconds (0-120):",
+	ExitOnDone:                     "Exit after all tasks complete",
+	RetrySeconds:                   "Window timeout (0–120 s)",
+	RetrySecondsInvalid:            "Retry seconds must be a number between 0 and 120.",
 	LanguageLabel:                  "Language:",
 	ManagedListTitle:               "Program List",
+	ManagedListCount:               "%d programs · %d enabled",
+	ManagedListEmpty:               "No programs added yet",
+	ManagedListEmptyHint:           "Add an application or script to get started.",
 	ManagedColumnName:              "Program",
 	ManagedColumnPath:              "Path",
-	ManagedColumnRule:              "Rule",
+	ManagedColumnRule:              "Startup behavior",
 	ManagedEditorTitle:             "Program Settings",
+	ManagedEditorHint:              "Changes are saved automatically",
+	ManagedSelectedTitle:           "Program settings · %s",
+	ManagedSelectionHint:           "Select a program above to edit its startup behavior.",
 	ManagedAppPath:                 "Program path:",
+	BrowseProgram:                  "Change…",
 	ManagedAppArgs:                 "Launch arguments:",
+	ManagedArgsPlaceholder:         "Optional, e.g. --minimized",
+	ManagedLaunchOnly:              "Launch only",
 	ManagedAutoHide:                "Close window after launch",
+	ManagedAutoHideHint:            "Sends WM_CLOSE: tray-aware apps usually stay in the tray; other apps may exit. WinTray hides console windows and provides their tray icons.",
 	ManagedLaunchHidden:            "Launch hidden in background",
+	ManagedLaunchHiddenHint:        "For scripts or command-line programs. Cannot be combined with \"Close window after launch\".",
 	ManagedPauseTask:               "Pause task",
+	ManagedPauseTaskHint:           "Skips this program at startup. You can still use \"Launch Now\".",
 	ManagedLaunchNow:               "Launch Now",
 	ManagedLaunchNowBusy:           "Starting…",
 	LaunchNowDoneBody:              "Started: %s",
 	AddProgram:                     "Add Program",
-	RemoveSelected:                 "Remove Selected",
+	RemoveSelected:                 "Remove",
 	OpenLogs:                       "Open Logs",
-	CleanupRestore:                 "Cleanup && Restore Defaults",
+	CleanupRestore:                 "Reset data…",
 	CheckUpdate:                    "Check for Updates",
 	CheckUpdateBusy:                "Checking…",
 	GitHubTooltip:                  "View the project on GitHub",
@@ -244,14 +284,7 @@ func LanguageOptions() []string {
 }
 
 func FormatManagedListItem(language string, app config.ManagedAppEntry) string {
-	msg := For(language)
-	if !app.RunOnStartup {
-		return fmt.Sprintf("%s | %s | %s", app.Name, app.ExePath, msg.ManagedListParamPausedTemplate)
-	}
-	if strings.ToLower(filepath.Ext(app.ExePath)) != ".exe" {
-		return fmt.Sprintf(msg.ManagedListHiddenTemplate, app.Name, app.ExePath, app.LaunchHiddenInBackground)
-	}
-	return fmt.Sprintf(msg.ManagedListItemTemplate, app.Name, app.ExePath, app.TrayBehavior.AutoMinimizeAndHideOnLaunch)
+	return fmt.Sprintf("%s | %s | %s", app.Name, app.ExePath, FormatManagedParam(language, app))
 }
 
 func FormatManagedParam(language string, app config.ManagedAppEntry) string {
@@ -259,10 +292,13 @@ func FormatManagedParam(language string, app config.ManagedAppEntry) string {
 	if !app.RunOnStartup {
 		return msg.ManagedListParamPausedTemplate
 	}
-	if strings.ToLower(filepath.Ext(app.ExePath)) != ".exe" {
-		return fmt.Sprintf(msg.ManagedListParamHiddenTemplate, app.LaunchHiddenInBackground)
+	if app.LaunchHiddenInBackground {
+		return msg.ManagedLaunchHidden
 	}
-	return fmt.Sprintf(msg.ManagedListParamTemplate, app.TrayBehavior.AutoMinimizeAndHideOnLaunch)
+	if app.TrayBehavior.AutoMinimizeAndHideOnLaunch {
+		return msg.ManagedAutoHide
+	}
+	return msg.ManagedLaunchOnly
 }
 
 func IsLikelyPermissionIssue(message string) bool {
