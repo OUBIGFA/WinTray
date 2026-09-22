@@ -71,7 +71,7 @@ WinTray supports adding the following program types to the managed list, automat
 ### Per-Program Configuration Options
 
 - **Launch Arguments**: Pass custom command-line arguments to the program
-- **Close Window After Launch**: Sends a close message (WM_CLOSE) after launch — most tray-aware apps minimize to tray rather than quitting; a destroyed or invisible window is considered successfully handled. Console programs without a tray icon of their own (such as `syncthing.exe` or `frpc.exe`) would be terminated by a close, so WinTray hides their console window instead and hosts a tray icon for them: left-click toggles the window, and the context menu can show, hide or quit the program. WinTray stays resident while hosting and shows the hidden windows again when it exits
+- **Close Window After Launch**: Sends a close message (WM_CLOSE) after launch — most tray-aware apps minimize to tray rather than quitting; a destroyed or invisible window is considered successfully handled. Console programs without a tray icon of their own (such as `syncthing.exe` or `frpc.exe`) would be terminated by a close, so WinTray hides their console window instead and hosts a tray icon for them: left-click toggles the window, and the context menu can show, hide, stop hosting (the window comes back and the program keeps running) or quit the program. The icon is owned by a separate lightweight host process (an extra `WinTray.exe` in Task Manager), so it keeps working after the main WinTray process exits and goes away on its own once the program ends or hosting is stopped. Stop hosting or quit the hosted programs before deleting WinTray: while a host process runs, `WinTray.exe` is in use and cannot be deleted
 - **Launch Hidden in Background**: Starts the program without any visible window, suitable for command-line and script programs
 - **Pause Task**: Temporarily skip this program's auto-start task; it will run again on the next boot
 
@@ -131,6 +131,7 @@ The source and release package support Windows only; cross-platform builds are n
 | `--background`      | Start without showing the main window (for auto-start scenarios) |
 | `--autorun`         | Execute managed program tasks automatically (used by auto-start) |
 | `--cleanup-restore` | Only perform cleanup: clear `%LOCALAPPDATA%\WinTray\` and exit   |
+| `--host`            | Internal: hold the tray icon for one console program whose window is hidden; started by WinTray, exits when the program ends or hosting is stopped |
 
 For auto-start, “Exit automatically after all tasks complete” controls whether
 WinTray exits after the task set finishes. When disabled, it remains in the tray;

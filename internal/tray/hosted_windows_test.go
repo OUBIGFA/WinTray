@@ -79,3 +79,42 @@ func TestHostedWindowRejectsMissingIdentity(t *testing.T) {
 		t.Fatal("a window without a verifiable process must not be used")
 	}
 }
+
+func TestReleaseHostingShowsWindowAndDropsIconWithoutQuittingProgram(t *testing.T) {
+	oldDefer := deferOnUIThread
+	t.Cleanup(func() { deferOnUIThread = oldDefer })
+	deferOnUIThread = func(_ *hostedItem, f func()) { f() }
+
+	// The hosted "program" is this test process: a release that quit the
+	// program would end the test run, so surviving is part of the assertion.
+	pid := uint32(os.Getpid())
+	lookups := 0
+	host := NewHost("en-US", testLogger{}, func(got uint32) uintptr {
+		if got != pid {
+			t.Errorf("release looked up pid %d, want %d", got, pid)
+		}
+		lookups++
+		return 0 // no real window or desktop manipulation
+	})
+	emptied := 0
+	host.SetOnEmpty(func() { emptied++ })
+	item := &hostedItem{host: host, info: HostedWindow{ProcessID: pid, Name: "test"}, stop: make(chan struct{})}
+	host.items[pid] = item
+
+	item.releaseHosting()
+
+	if lookups != 1 {
+		t.Fatalf("window lookups = %d, want 1 (the window is shown once)", lookups)
+	}
+	if host.Count() != 0 || emptied != 1 {
+		t.Fatalf("count=%d onEmpty calls=%d; want 0 and 1", host.Count(), emptied)
+	}
+	select {
+	case <-item.stop:
+	default:
+		t.Fatal("process watcher was not stopped")
+	}
+	if !item.closed {
+		t.Fatal("item not marked closed")
+	}
+}

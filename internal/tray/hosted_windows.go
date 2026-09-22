@@ -51,6 +51,7 @@ type hostedItem struct {
 	ownedIcon walk.Image
 	show      *walk.Action
 	hide      *walk.Action
+	release   *walk.Action
 	quit      *walk.Action
 	stop      chan struct{}
 	closed    bool
@@ -82,9 +83,25 @@ func (h *Host) Count() int {
 	return len(h.items)
 }
 
+// ErrHostedProcessUnavailable reports that the program to host is not running
+// or cannot be opened, so retrying the hand-off is pointless.
+var ErrHostedProcessUnavailable = errors.New("hosted process unavailable")
+
 // Add creates a tray icon for the program. Adding the same process again only
-// refreshes the stored window handle.
+// refreshes the stored window handle. When the icon cannot be created the
+// window is shown again so the program never stays unreachable.
 func (h *Host) Add(w HostedWindow) error {
+	if err := h.TryAdd(w); err != nil {
+		h.Restore(w)
+		return err
+	}
+	return nil
+}
+
+// TryAdd is Add without the automatic restore: callers that retry (the
+// notification area may refuse icons right after logon) restore the window
+// themselves once they give up.
+func (h *Host) TryAdd(w HostedWindow) error {
 	if w.ProcessID == 0 {
 		return errors.New("hosted window without process id")
 	}
@@ -103,13 +120,11 @@ func (h *Host) Add(w HostedWindow) error {
 	// item behind if opening or creating the tray icon fails.
 	process, err := openHostedProcess(windows.SYNCHRONIZE, false, w.ProcessID)
 	if err != nil {
-		h.Restore(w)
-		return fmt.Errorf("open hosted process: %w", err)
+		return fmt.Errorf("%w: %w", ErrHostedProcessUnavailable, err)
 	}
 	item, err := createHostedItem(h, w)
 	if err != nil {
 		_ = windows.CloseHandle(process)
-		h.Restore(w)
 		return err
 	}
 	h.mu.Lock()
@@ -133,6 +148,12 @@ func (h *Host) Restore(w HostedWindow) {
 	}
 	item := hostedItem{host: h, info: w}
 	item.showWindow(false)
+}
+
+// RestoreWindow shows a hidden program's window again without activating it.
+// It is the recovery path when no host process will own the icon.
+func RestoreWindow(w HostedWindow, lookupWindow func(pid uint32) uintptr, logger Logger) {
+	NewHost("", logger, lookupWindow).Restore(w)
 }
 
 // SetLanguage relabels every hosted icon's menu.
@@ -195,11 +216,15 @@ func (h *Host) newItem(w HostedWindow) (*hostedItem, error) {
 	item.show.Triggered().Attach(func() { item.showWindow(true) })
 	item.hide = walk.NewAction()
 	item.hide.Triggered().Attach(item.hideWindow)
+	item.release = walk.NewAction()
+	item.release.Triggered().Attach(item.releaseHosting)
 	item.quit = walk.NewAction()
 	item.quit.Triggered().Attach(item.quitProgram)
 	actions := icon.ContextMenu().Actions()
 	_ = actions.Add(item.show)
 	_ = actions.Add(item.hide)
+	_ = actions.Add(walk.NewSeparatorAction())
+	_ = actions.Add(item.release)
 	_ = actions.Add(walk.NewSeparatorAction())
 	_ = actions.Add(item.quit)
 
@@ -234,6 +259,7 @@ func (item *hostedItem) applyLanguage(language string) {
 	_ = item.icon.SetToolTip(item.info.Name)
 	item.show.SetText(msg.HostedShowWindow)
 	item.hide.SetText(msg.HostedHideWindow)
+	item.release.SetText(msg.HostedReleaseWindow)
 	item.quit.SetText(fmt.Sprintf(msg.HostedQuitProgram, item.info.Name))
 }
 
@@ -291,6 +317,24 @@ func (item *hostedItem) toggleWindow() {
 		return
 	}
 	item.showWindow(true)
+}
+
+// releaseHosting hands the program back to the user: its window is shown and
+// activated, the tray icon goes away and the program keeps running on its own.
+// This is the clean way out before uninstalling WinTray, and the counterpart of
+// killing the host process, which would leave the window hidden for good.
+func (item *hostedItem) releaseHosting() {
+	item.host.logger.Info(fmt.Sprintf("tray host: releasing %s pid=%d", item.info.Name, item.info.ProcessID))
+	item.showWindow(true)
+	deferOnUIThread(item, func() { item.host.remove(item, true) })
+}
+
+// deferOnUIThread queues f behind the message being handled: removing an item
+// disposes the icon's owner window, so it must not run inside that window's
+// own menu callback. Tests replace it to run f at once.
+var deferOnUIThread = func(item *hostedItem, f func()) {
+	item.form.Synchronize(f)
+	win.PostMessage(item.form.Handle(), win.WM_NULL, 0, 0)
 }
 
 // quitProgram asks the program to end. For a console program WM_CLOSE on the

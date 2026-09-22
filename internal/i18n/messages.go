@@ -55,6 +55,7 @@ type Messages struct {
 	HostedShowWindow               string
 	HostedHideWindow               string
 	HostedQuitProgram              string
+	HostedReleaseWindow            string
 	SelectManagedExe               string
 	ExeFilter                      string
 	AllFilesFilter                 string
@@ -124,6 +125,7 @@ var zhCN = Messages{
 	HostedShowWindow:               "显示窗口",
 	HostedHideWindow:               "隐藏窗口",
 	HostedQuitProgram:              "退出 %s",
+	HostedReleaseWindow:            "结束托管并显示窗口",
 	SelectManagedExe:               "选择要托管的程序",
 	ExeFilter:                      "程序文件 (*.exe;*.cmd;*.bat;*.ps1;*.py)|*.exe;*.cmd;*.bat;*.ps1;*.py",
 	AllFilesFilter:                 "所有文件 (*.*)|*.*",
@@ -193,6 +195,7 @@ var enUS = Messages{
 	HostedShowWindow:               "Show Window",
 	HostedHideWindow:               "Hide Window",
 	HostedQuitProgram:              "Quit %s",
+	HostedReleaseWindow:            "Stop Hosting and Show Window",
 	SelectManagedExe:               "Select program to manage",
 	ExeFilter:                      "Program files (*.exe;*.cmd;*.bat;*.ps1;*.py)|*.exe;*.cmd;*.bat;*.ps1;*.py",
 	AllFilesFilter:                 "All Files (*.*)|*.*",
