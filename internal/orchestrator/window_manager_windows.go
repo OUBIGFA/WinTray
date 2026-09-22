@@ -29,9 +29,9 @@ func (m *Win32WindowManager) HideWindow(hwnd uintptr) (bool, error) {
 	if !isWindow(hwnd) {
 		return false, errors.New("target window is not valid")
 	}
-	_, _, callErr := procShowWindowAsync.Call(hwnd, swHide)
-	if callErr != nil && callErr != syscall.Errno(0) {
-		return false, fmt.Errorf("showwindowasync hide failed: %w", callErr)
+	ok, _, _ := procShowWindowAsync.Call(hwnd, swHide)
+	if ok == 0 {
+		return false, errors.New("showwindowasync hide failed")
 	}
 	return true, nil
 }

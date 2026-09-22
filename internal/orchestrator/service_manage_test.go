@@ -136,7 +136,7 @@ func TestHasExistingManagedWindow_IgnoresUnrelatedWindowWithNameInTitle(t *testi
 		{
 			name:   "same program name running from another folder",
 			window: ManagedWindowInfo{Handle: 0x203, ProcessID: 12, ProcessName: "123", ProcessPath: `D:\Other\123.exe`, Title: "123", ClassName: "AppWindow"},
-			want:   true,
+			want:   false,
 		},
 	}
 
@@ -181,25 +181,20 @@ func TestIsConsoleExecutable(t *testing.T) {
 }
 
 func TestStart_ConsoleExecutableIsHiddenToTray(t *testing.T) {
-	// The stub launch falls back to a short-lived cmd.exe whose working
-	// directory is the stub folder, so clean that folder up with a retry
-	// instead of t.TempDir, which fails while cmd.exe is still exiting.
-	dir, err := os.MkdirTemp("", "wintray-console-stub-")
+	// Use an isolated copy of the test executable: invalid PE files must fail
+	// to launch, and the running parent must not count as this managed app.
+	dir := t.TempDir()
+	self, err := os.Executable()
 	if err != nil {
-		t.Fatalf("mkdir temp: %v", err)
+		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		for i := 0; i < 20; i++ {
-			if os.RemoveAll(dir) == nil {
-				return
-			}
-			time.Sleep(250 * time.Millisecond)
-		}
-		t.Logf("stub dir %s left behind (still in use)", dir)
-	})
+	image, err := os.ReadFile(self)
+	if err != nil {
+		t.Fatal(err)
+	}
 	exePath := filepath.Join(dir, "syncthing.exe")
-	if err := os.WriteFile(exePath, []byte("stub"), 0o600); err != nil {
-		t.Fatalf("write stub exe: %v", err)
+	if err := os.WriteFile(exePath, image, 0o600); err != nil {
+		t.Fatalf("write helper exe: %v", err)
 	}
 	const consoleHwnd = uintptr(0x5A5A)
 	restore := overrideConsoleSeams(t, func(path string) bool { return path == exePath }, 0, consoleHwnd, false)
@@ -223,9 +218,24 @@ func TestStart_ConsoleExecutableIsHiddenToTray(t *testing.T) {
 		{name: "StartNow", run: func(svc *Service) Result { return svc.StartNow(context.Background(), entry, 0) }},
 	} {
 		t.Run(launch.name, func(t *testing.T) {
+			releaseFile := filepath.Join(dir, launch.name+".done")
+			entry.Args = runnerHelperArgs("wait", releaseFile)
 			mgr := &testManager{}
 			svc := NewService(enum, mgr, &testLogger{})
 			got := launch.run(svc)
+			if got.Hidden != nil && got.Hidden.ProcessID != 0 {
+				process, err := os.FindProcess(int(got.Hidden.ProcessID))
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() {
+					_ = process.Kill()
+					_, _ = process.Wait()
+				})
+				if err := os.WriteFile(releaseFile, nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if !got.Managed || got.Code != ResultHiddenToTray || got.Hidden == nil {
 				t.Fatalf("result = %+v, want managed hidden_to_tray with hidden window", got)
 			}

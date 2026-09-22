@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unsafe"
 
 	"github.com/lxn/walk"
 	"github.com/lxn/win"
@@ -1032,10 +1031,5 @@ func (w *MainWindow) tableViewHitOnItem(x, y int) bool {
 	if w.managedList == nil {
 		return false
 	}
-	hti := win.LVHITTESTINFO{Pt: win.POINT{X: int32(x), Y: int32(y)}}
-	w.managedList.SendMessage(win.LVM_HITTEST, 0, uintptr(unsafe.Pointer(&hti)))
-	if hti.IItem < 0 {
-		return false
-	}
-	return (hti.Flags & win.LVHT_ONITEM) != 0
+	return w.managedList.IndexAt(x, y) >= 0
 }

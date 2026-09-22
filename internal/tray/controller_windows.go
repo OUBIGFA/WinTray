@@ -33,7 +33,7 @@ func New(
 
 	if appIcon, iconErr := branding.AppIcon(); iconErr == nil && appIcon != nil {
 		if err = ni.SetIcon(appIcon); err != nil {
-			ni.Dispose()
+			disposeNotifyIcon(ni)
 			return nil, err
 		}
 	}
@@ -60,7 +60,7 @@ func New(
 
 	c.SetLanguage(language)
 	if err = ni.SetVisible(true); err != nil {
-		ni.Dispose()
+		disposeNotifyIcon(ni)
 		return nil, err
 	}
 
@@ -86,7 +86,6 @@ func (c *Controller) Dispose() {
 	if c == nil || c.notifyIcon == nil {
 		return
 	}
-	_ = c.notifyIcon.SetVisible(false)
-	c.notifyIcon.Dispose()
+	disposeNotifyIcon(c.notifyIcon)
 	c.notifyIcon = nil
 }

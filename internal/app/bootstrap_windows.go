@@ -85,12 +85,27 @@ func Run(args []string) int {
 	manager := orchestrator.NewWin32WindowManager()
 	orch := orchestrator.NewService(enumerator, manager, logger)
 	registrar := startup.NewRegistrar()
+	host := tray.NewHost(settings.Language, logger, orchestrator.FindConsoleWindow)
+	pendingRecovery := &pendingHostedWindows{}
+	launchCtx, cancelLaunches := context.WithCancel(context.Background())
+	var launchWG sync.WaitGroup
+	defer func() {
+		// The message loop may already have stopped. Do not depend on queued
+		// UI callbacks to recover a launch that was still in progress.
+		cancelLaunches()
+		launchWG.Wait()
+		pendingRecovery.restoreAll(host.Restore)
+		host.RestoreAll()
+	}()
 
 	var pendingHosted []tray.HostedWindow
 	hostingOnly := false
 	if isAutorunLaunch(args) {
 		logger.Info(fmt.Sprintf("autorun mode: run managed apps (exitAfterCompleted=%t)", settings.ExitAfterManagedAppsCompleted))
-		pendingHosted = runManagedApps(context.Background(), orch, settings, logger)
+		pendingHosted = runManagedApps(launchCtx, orch, settings, logger)
+		for _, hw := range pendingHosted {
+			pendingRecovery.remember(hw)
+		}
 		if settings.ExitAfterManagedAppsCompleted {
 			if len(pendingHosted) == 0 {
 				return 0
@@ -103,7 +118,6 @@ func Run(args []string) int {
 	}
 
 	var trayController *tray.Controller
-	var host *tray.Host
 	var mainWindow *ui.MainWindow
 	activation, activationErr := ipc.NewActivationListener(activationEvent)
 	if activationErr != nil {
@@ -166,18 +180,29 @@ func Run(args []string) int {
 			current := mainWindow.Settings()
 			retrySeconds := current.CloseWindowRetrySeconds
 			language := current.Language
+			launchWG.Add(1)
 			go func() {
-				result := orch.StartNow(context.Background(), entry, retrySeconds)
+				defer launchWG.Done()
+				result := orch.StartNow(launchCtx, entry, retrySeconds)
+				if hw, ok := hostedFromResult(entry, result); ok {
+					pendingRecovery.remember(hw)
+					if launchCtx.Err() != nil {
+						return
+					}
+					mainWindow.Native().Synchronize(func() {
+						if addErr := host.Add(hw); addErr != nil {
+							logger.Warn(fmt.Sprintf("tray host add failed: %s %v", hw.Name, addErr))
+						}
+						// Add either accepts ownership or restores on failure.
+						pendingRecovery.forget(hw)
+					})
+				}
+				if launchCtx.Err() != nil {
+					return
+				}
 				m := i18n.For(language)
 				mainWindow.SetLaunchNowBusy(false)
 				if result.Managed {
-					if hw, ok := hostedFromResult(entry, result); ok && host != nil {
-						mainWindow.Native().Synchronize(func() {
-							if addErr := host.Add(hw); addErr != nil {
-								logger.Warn(fmt.Sprintf("tray host add failed: %s %v", hw.Name, addErr))
-							}
-						})
-					}
 					mainWindow.ShowInfo(m.WindowTitle, fmt.Sprintf(m.LaunchNowDoneBody, result.AppName))
 					return
 				}
@@ -246,12 +271,11 @@ func Run(args []string) int {
 	}
 	defer trayController.Dispose()
 
-	host = tray.NewHost(settings.Language, logger, orchestrator.FindConsoleWindow)
-	defer host.RestoreAll()
 	for _, hw := range pendingHosted {
 		if addErr := host.Add(hw); addErr != nil {
 			logger.Warn(fmt.Sprintf("tray host add failed: %s %v", hw.Name, addErr))
 		}
+		pendingRecovery.forget(hw)
 	}
 	if hostingOnly {
 		if host.Count() == 0 {

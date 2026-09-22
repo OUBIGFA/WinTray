@@ -74,7 +74,7 @@ func processIdentityMatches(pid uint32, exeName, expectedPath, targetIdentity st
 	if fullPath == "" {
 		return false
 	}
-	return normalizePath(fullPath) == expectedPath
+	return strings.EqualFold(normalizePath(fullPath), expectedPath)
 }
 
 func processExecutablePath(pid uint32) string {

@@ -17,8 +17,9 @@ import (
 //   - -80:   window has WS_EX_TOOLWINDOW style (auxiliary window)
 //   - -60:   window has a non-zero owner (child/owned window)
 //
-// A threshold of 500 means at minimum an exact path match is required,
-// or a PID match, before any action is attempted.
+// The score ranks candidates only after a PID or executable-path match has
+// established their identity. Title/name/new-window bonuses are not identity
+// evidence: several weak signals must never authorize an unrelated window.
 const closeAllowedScoreThreshold = 500
 
 func normalizePath(path string) string {
@@ -69,10 +70,18 @@ func containsNormalizedIdentity(haystack, needle string) bool {
 
 func matchesExecutable(window ManagedWindowInfo, expectedExePath, expectedProcessName string) bool {
 	norm := normalizePath(window.ProcessPath)
-	if norm != "" && expectedExePath != "" && strings.EqualFold(norm, expectedExePath) {
-		return true
+	if norm != "" && expectedExePath != "" {
+		return strings.EqualFold(norm, expectedExePath)
 	}
 	return expectedProcessName != "" && strings.EqualFold(window.ProcessName, expectedProcessName)
+}
+
+func hasTrustedWindowIdentity(window ManagedWindowInfo, expectedExePath string, launchedPID *uint32) bool {
+	if launchedPID != nil && *launchedPID != 0 && window.ProcessID == *launchedPID {
+		return true
+	}
+	path := normalizePath(window.ProcessPath)
+	return path != "" && expectedExePath != "" && strings.EqualFold(path, expectedExePath)
 }
 
 func matchesExecutableWithIdentityFallback(window ManagedWindowInfo, expectedExePath, expectedProcessName string) bool {

@@ -44,15 +44,16 @@ type Host struct {
 }
 
 type hostedItem struct {
-	host   *Host
-	info   HostedWindow
-	form   *walk.MainWindow
-	icon   *walk.NotifyIcon
-	show   *walk.Action
-	hide   *walk.Action
-	quit   *walk.Action
-	stop   chan struct{}
-	closed bool
+	host      *Host
+	info      HostedWindow
+	form      *walk.MainWindow
+	icon      *walk.NotifyIcon
+	ownedIcon walk.Image
+	show      *walk.Action
+	hide      *walk.Action
+	quit      *walk.Action
+	stop      chan struct{}
+	closed    bool
 }
 
 // NewHost creates an empty host. lookupWindow resolves the window of a hosted
@@ -97,16 +98,41 @@ func (h *Host) Add(w HostedWindow) error {
 	}
 	h.mu.Unlock()
 
-	item, err := h.newItem(w)
+	// Open before publishing the icon: a short-lived process may disappear
+	// before an asynchronous watcher can open it. Never leave an unmonitored
+	// item behind if opening or creating the tray icon fails.
+	process, err := openHostedProcess(windows.SYNCHRONIZE, false, w.ProcessID)
 	if err != nil {
+		h.Restore(w)
+		return fmt.Errorf("open hosted process: %w", err)
+	}
+	item, err := createHostedItem(h, w)
+	if err != nil {
+		_ = windows.CloseHandle(process)
+		h.Restore(w)
 		return err
 	}
 	h.mu.Lock()
 	h.items[w.ProcessID] = item
 	h.mu.Unlock()
 	h.logger.Info(fmt.Sprintf("tray host: added %s pid=%d hwnd=0x%X", w.Name, w.ProcessID, w.Handle))
-	go item.watchProcess()
+	go item.watchProcess(process, item.form.Handle())
 	return nil
+}
+
+var (
+	openHostedProcess = windows.OpenProcess
+	createHostedItem  = (*Host).newItem
+)
+
+// Restore recovers a hidden program not yet accepted by the host. It never
+// activates the window and does not create an icon or take ownership.
+func (h *Host) Restore(w HostedWindow) {
+	if w.ProcessID == 0 {
+		return
+	}
+	item := hostedItem{host: h, info: w}
+	item.showWindow(false)
 }
 
 // SetLanguage relabels every hosted icon's menu.
@@ -154,8 +180,15 @@ func (h *Host) newItem(w HostedWindow) (*hostedItem, error) {
 	}
 	item := &hostedItem{host: h, info: w, form: form, icon: icon, stop: make(chan struct{})}
 
-	if img := programIcon(w.ExePath); img != nil {
-		_ = icon.SetIcon(img)
+	img, owned := programIcon(w.ExePath)
+	if owned {
+		item.ownedIcon = img
+	}
+	if img != nil {
+		if err := icon.SetIcon(img); err != nil {
+			item.disposeResources()
+			return nil, err
+		}
 	}
 
 	item.show = walk.NewAction()
@@ -178,23 +211,22 @@ func (h *Host) newItem(w HostedWindow) (*hostedItem, error) {
 
 	item.applyLanguage(h.language)
 	if err := icon.SetVisible(true); err != nil {
-		icon.Dispose()
-		form.Dispose()
+		item.disposeResources()
 		return nil, err
 	}
 	return item, nil
 }
 
-func programIcon(exePath string) walk.Image {
+func programIcon(exePath string) (walk.Image, bool) {
 	if exePath != "" {
 		if img, err := walk.NewIconExtractedFromFileWithSize(exePath, 0, 16); err == nil && img != nil {
-			return img
+			return img, true
 		}
 	}
 	if img, err := branding.AppIcon(); err == nil && img != nil {
-		return img
+		return img, false
 	}
-	return nil
+	return nil, false
 }
 
 func (item *hostedItem) applyLanguage(language string) {
@@ -207,16 +239,25 @@ func (item *hostedItem) applyLanguage(language string) {
 
 // window returns the live window handle, re-resolving it when needed.
 func (item *hostedItem) window() win.HWND {
-	if item.info.Handle != 0 && windows.IsWindow(windows.HWND(item.info.Handle)) {
+	if hostedWindowMatchesProcess(item.info.Handle, item.info.ProcessID) {
 		return win.HWND(item.info.Handle)
 	}
 	if item.host.lookupWindow != nil {
-		if hwnd := item.host.lookupWindow(item.info.ProcessID); hwnd != 0 {
+		if hwnd := item.host.lookupWindow(item.info.ProcessID); hostedWindowMatchesProcess(hwnd, item.info.ProcessID) {
 			item.info.Handle = hwnd
 			return win.HWND(hwnd)
 		}
 	}
 	return 0
+}
+
+func hostedWindowMatchesProcess(hwnd uintptr, pid uint32) bool {
+	if hwnd == 0 || pid == 0 {
+		return false
+	}
+	var owner uint32
+	_, err := windows.GetWindowThreadProcessId(windows.HWND(hwnd), &owner)
+	return err == nil && owner == pid
 }
 
 func (item *hostedItem) showWindow(activate bool) {
@@ -271,12 +312,7 @@ func (item *hostedItem) quitProgram() {
 
 // watchProcess removes the icon once the hosted process ends. Runs on its own
 // goroutine and hands the removal back to the UI thread.
-func (item *hostedItem) watchProcess() {
-	h, err := windows.OpenProcess(windows.SYNCHRONIZE, false, item.info.ProcessID)
-	if err != nil {
-		item.host.logger.Warn(fmt.Sprintf("tray host: cannot watch %s pid=%d: %v", item.info.Name, item.info.ProcessID, err))
-		return
-	}
+func (item *hostedItem) watchProcess(h windows.Handle, wakeWindow win.HWND) {
 	defer windows.CloseHandle(h)
 	for {
 		select {
@@ -285,17 +321,47 @@ func (item *hostedItem) watchProcess() {
 		default:
 		}
 		event, waitErr := windows.WaitForSingleObject(h, 1000)
-		if waitErr != nil {
-			item.host.logger.Warn(fmt.Sprintf("tray host: wait failed for %s pid=%d: %v", item.info.Name, item.info.ProcessID, waitErr))
-			return
-		}
-		if event == windows.WAIT_OBJECT_0 {
-			item.host.logger.Info(fmt.Sprintf("tray host: %s pid=%d exited", item.info.Name, item.info.ProcessID))
-			item.form.Synchronize(func() { item.host.remove(item, true) })
-			win.PostMessage(item.form.Handle(), win.WM_NULL, 0, 0)
+		if waitErr != nil || event == windows.WAIT_OBJECT_0 {
+			if waitErr != nil {
+				item.host.logger.Warn(fmt.Sprintf("tray host: wait failed for %s pid=%d: %v", item.info.Name, item.info.ProcessID, waitErr))
+			} else {
+				item.host.logger.Info(fmt.Sprintf("tray host: %s pid=%d exited", item.info.Name, item.info.ProcessID))
+			}
+			item.form.Synchronize(func() {
+				if item.closed {
+					return
+				}
+				if waitErr != nil {
+					item.showWindow(false)
+				}
+				item.host.remove(item, true)
+			})
+			win.PostMessage(wakeWindow, win.WM_NULL, 0, 0)
 			return
 		}
 	}
+}
+
+func (item *hostedItem) disposeResources() {
+	disposeNotifyIcon(item.icon)
+	if item.ownedIcon != nil {
+		item.ownedIcon.Dispose()
+		item.ownedIcon = nil
+	}
+	if item.form != nil {
+		item.form.Dispose()
+	}
+}
+
+// Walk's NotifyIcon does not own its menu or image. The shared branding image
+// remains alive; hostedItem separately releases only extracted program icons.
+func disposeNotifyIcon(icon *walk.NotifyIcon) {
+	if icon == nil {
+		return
+	}
+	_ = icon.SetVisible(false)
+	_ = icon.Dispose()
+	icon.ContextMenu().Dispose()
 }
 
 func (h *Host) remove(item *hostedItem, notifyEmpty bool) {
@@ -304,9 +370,7 @@ func (h *Host) remove(item *hostedItem, notifyEmpty bool) {
 	}
 	item.closed = true
 	close(item.stop)
-	_ = item.icon.SetVisible(false)
-	_ = item.icon.Dispose()
-	item.form.Dispose()
+	item.disposeResources()
 
 	h.mu.Lock()
 	delete(h.items, item.info.ProcessID)

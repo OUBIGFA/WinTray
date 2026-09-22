@@ -39,38 +39,10 @@ func startProcess(exePath, args string, mode launchMode) (*exec.Cmd, error) {
 		cmd.Dir = dir
 	}
 
-	startErr := cmd.Start()
-	if startErr == nil {
-		return cmd, nil
+	if err := cmd.Start(); err != nil {
+		return nil, err
 	}
-
-	if runtime.GOOS == "windows" {
-		// Retry with cmd.exe /c start "" as a last resort (handles shell-associated executables)
-		cleanPath := strings.Trim(strings.TrimSpace(exePath), "\"")
-		commandLine := fmt.Sprintf("cmd.exe /c start \"\" \"%s\"", cleanPath)
-		if trimmedArgs := strings.TrimSpace(args); trimmedArgs != "" {
-			commandLine += " " + trimmedArgs
-		}
-		shellCmd := exec.Command("cmd.exe")
-		attr := &syscall.SysProcAttr{CmdLine: commandLine}
-		if hidden {
-			attr.CreationFlags = createNoWindow
-			attr.HideWindow = true
-		}
-		if mode == launchHiddenConsole {
-			attr.CreationFlags = createNewConsole
-			attr.HideWindow = true
-		}
-		shellCmd.SysProcAttr = attr
-		if _, err := os.Stat(dir); err == nil {
-			shellCmd.Dir = dir
-		}
-		if shellErr := shellCmd.Start(); shellErr == nil {
-			return shellCmd, nil
-		}
-	}
-
-	return nil, startErr
+	return cmd, nil
 }
 
 const (
@@ -91,10 +63,14 @@ func buildLaunchCommand(exePath, args string, hidden bool) *exec.Cmd {
 
 		if isCmdScript(exePath) {
 			cleanPath := strings.Trim(strings.TrimSpace(exePath), "\"")
-			commandLine := fmt.Sprintf("cmd.exe /c \"%s\"", cleanPath)
+			// /s removes exactly the outer quote pair; the inner pair keeps
+			// script paths containing spaces quoted even with quoted arguments.
+			// /d prevents cmd's AutoRun registry commands from altering startup.
+			commandLine := fmt.Sprintf("cmd.exe /d /s /c \"\"%s\"", cleanPath)
 			if trimmedArgs != "" {
-				commandLine = commandLine + " " + trimmedArgs
+				commandLine += " " + trimmedArgs
 			}
+			commandLine += "\""
 			cmd := exec.Command("cmd.exe")
 			cmd.SysProcAttr = &syscall.SysProcAttr{CmdLine: commandLine}
 			if hidden {
@@ -169,30 +145,46 @@ func buildPowerShellCommand(scriptPath, args string, hidden bool) *exec.Cmd {
 	return cmd
 }
 
-// parseArgs splits an argument string respecting double-quoted segments.
-// e.g. `--config "C:\My Path\cfg.json" --verbose` → ["--config", "C:\My Path\cfg.json", "--verbose"]
+// parseArgs follows Windows command-line quoting rules, including empty
+// arguments and backslashes immediately before double quotes.
 func parseArgs(s string) []string {
 	var args []string
-	var current strings.Builder
-	inQuote := false
-	for i := 0; i < len(s); i++ {
-		ch := s[i]
-		switch {
-		case ch == '"':
-			inQuote = !inQuote
-		case ch == ' ' || ch == '\t':
-			if inQuote {
-				current.WriteByte(ch)
-			} else if current.Len() > 0 {
-				args = append(args, current.String())
-				current.Reset()
-			}
-		default:
-			current.WriteByte(ch)
+	for i := 0; i < len(s); {
+		for i < len(s) && (s[i] == ' ' || s[i] == '\t') {
+			i++
 		}
-	}
-	if current.Len() > 0 {
-		args = append(args, current.String())
+		if i == len(s) {
+			break
+		}
+		var arg strings.Builder
+		inQuote := false
+		for i < len(s) && (inQuote || (s[i] != ' ' && s[i] != '\t')) {
+			slashes := 0
+			for i < len(s) && s[i] == '\\' {
+				slashes++
+				i++
+			}
+			if i < len(s) && s[i] == '"' {
+				arg.WriteString(strings.Repeat(`\`, slashes/2))
+				if slashes%2 != 0 {
+					arg.WriteByte('"')
+				} else if inQuote && i+1 < len(s) && s[i+1] == '"' {
+					arg.WriteByte('"')
+					i++
+				} else {
+					inQuote = !inQuote
+				}
+				i++
+				continue
+			}
+			arg.WriteString(strings.Repeat(`\`, slashes))
+			if i == len(s) || (!inQuote && (s[i] == ' ' || s[i] == '\t')) {
+				break
+			}
+			arg.WriteByte(s[i])
+			i++
+		}
+		args = append(args, arg.String())
 	}
 	return args
 }

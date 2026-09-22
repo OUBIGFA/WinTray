@@ -36,10 +36,17 @@ func New(appDir string) (*Logger, error) {
 }
 
 func (l *Logger) Close() error {
-	if l == nil || l.file == nil {
+	if l == nil {
 		return nil
 	}
-	return l.file.Close()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.file == nil {
+		return nil
+	}
+	err := l.file.Close()
+	l.file = nil
+	return err
 }
 
 func (l *Logger) Info(msg string)  { l.write("INFO", msg) }
@@ -47,11 +54,14 @@ func (l *Logger) Warn(msg string)  { l.write("WARN", msg) }
 func (l *Logger) Error(msg string) { l.write("ERROR", msg) }
 
 func (l *Logger) write(level, msg string) {
-	if l == nil || l.file == nil {
+	if l == nil {
 		return
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.file == nil {
+		return
+	}
 	n, _ := fmt.Fprintf(l.file, "%s [%s] %s\n", time.Now().Format(time.RFC3339), level, msg)
 	l.written += int64(n)
 	if l.written >= maxLogSize {

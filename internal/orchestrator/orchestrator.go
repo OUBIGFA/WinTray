@@ -108,6 +108,7 @@ func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retry
 		return Result{AppName: entry.Name, Managed: false, Code: ResultProcessStartFailed, Message: "process start failed"}
 	}
 	pid := uint32(cmd.Process.Pid)
+	defer cmd.Process.Release()
 	s.logger.Info(fmt.Sprintf("started: %s pid=%d mode=%d", entry.Name, pid, opts.launchMode()))
 
 	if opts.hideConsoleWindow {
@@ -135,7 +136,9 @@ func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retry
 // window is created hidden, so nothing needs to be closed; when the lookup
 // fails the program still runs and is hosted by process id only.
 func (s *Service) hostLaunchedConsole(ctx context.Context, entry config.ManagedAppEntry, pid uint32) Result {
-	hwnd := consoleWindowLookup(ctx, pid, consoleWindowWait)
+	// Once a hidden process exists, finish the bounded lookup even during
+	// shutdown so its caller can restore the window instead of orphaning it.
+	hwnd := consoleWindowLookup(context.WithoutCancel(ctx), pid, consoleWindowWait)
 	if hwnd == 0 {
 		s.logger.Warn(fmt.Sprintf("console window not found after launch: %s pid=%d (hosted by process only)", entry.Name, pid))
 	} else {
@@ -264,7 +267,7 @@ func (s *Service) manageFirstMatchingWindow(ctx context.Context, predicate func(
 		windows := s.enumerator.EnumerateTopLevelWindows()
 		bestByRoot := map[uintptr]MatchCandidate{}
 		for _, w := range windows {
-			if !predicate(w) {
+			if !predicate(w) || !hasTrustedWindowIdentity(w, expectedPath, launchedPID) {
 				continue
 			}
 			if isUnmanageableWindow(w) {

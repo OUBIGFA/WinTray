@@ -201,6 +201,16 @@ func TestParseArgs(t *testing.T) {
 		{`  --flag   value  `, []string{"--flag", "value"}},
 		{`"quoted arg"`, []string{"quoted arg"}},
 		{`one two three`, []string{"one", "two", "three"}},
+		{`""`, []string{""}},
+		{`first "" last ""`, []string{"first", "", "last", ""}},
+		{`"C:\My Path\\" next`, []string{`C:\My Path\`, "next"}},
+		{`one\"two three`, []string{`one"two`, "three"}},
+		{`"say \"hello\""`, []string{`say "hello"`}},
+		{`a\\\"b`, []string{`a\"b`}},
+		{`a\\"b c" d`, []string{`a\b c`, "d"}},
+		{`prefix"middle part"suffix`, []string{"prefixmiddle partsuffix"}},
+		{`"unterminated argument`, []string{"unterminated argument"}},
+		{"\t\"\"\t中文\\path\t", []string{"", `中文\path`}},
 	}
 	for _, tc := range tests {
 		got := parseArgs(tc.input)
