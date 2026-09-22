@@ -39,7 +39,6 @@ type MainWindow struct {
 	checkingUpdate bool
 
 	globalTitle *walk.Label
-	subtitle    *walk.Label
 
 	managedCount     *walk.Label
 	emptyList        *walk.Composite
@@ -661,7 +660,6 @@ func (w *MainWindow) applyLanguage(language string) {
 	defer func() { w.applyingLocale = false }()
 
 	w.mw.SetTitle(msg.WindowTitle)
-	w.subtitle.SetText(msg.WindowSubtitle)
 	w.emptyTitle.SetText(msg.ManagedListEmpty)
 	w.emptyHint.SetText(msg.ManagedListEmptyHint)
 	w.globalTitle.SetText(msg.GlobalSettingsTitle)

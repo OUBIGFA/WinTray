@@ -15,7 +15,6 @@ const (
 
 type Messages struct {
 	WindowTitle                    string
-	WindowSubtitle                 string
 	GlobalSettingsTitle            string
 	RunAtLogon                     string
 	StartHidden                    string
@@ -99,7 +98,6 @@ type Messages struct {
 
 var zhCN = Messages{
 	WindowTitle:                    "WinTray",
-	WindowSubtitle:                 "开机有序，桌面清爽",
 	GlobalSettingsTitle:            "全局设置",
 	RunAtLogon:                     "WinTray 开机自启动",
 	StartHidden:                    "启动后最小化到托盘",
@@ -183,7 +181,6 @@ var zhCN = Messages{
 
 var enUS = Messages{
 	WindowTitle:                    "WinTray",
-	WindowSubtitle:                 "A quieter start. A cleaner desktop.",
 	GlobalSettingsTitle:            "Global Settings",
 	RunAtLogon:                     "Run WinTray at logon",
 	StartHidden:                    "Minimize to tray after launch",

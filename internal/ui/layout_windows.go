@@ -87,11 +87,7 @@ func (w *MainWindow) buildHeader() error {
 	if err != nil {
 		return err
 	}
-	titles, err := newColumn(row, 2)
-	if err != nil {
-		return err
-	}
-	title, err := walk.NewLabel(titles)
+	title, err := walk.NewLabel(row)
 	if err != nil {
 		return err
 	}
@@ -100,11 +96,6 @@ func (w *MainWindow) buildHeader() error {
 	if font, err := walk.NewFont("Segoe UI", 20, 0); err == nil {
 		title.SetFont(font)
 	}
-	w.subtitle, err = walk.NewLabel(titles)
-	if err != nil {
-		return err
-	}
-	w.subtitle.SetTextColor(secondaryColor)
 	if _, err = walk.NewHSpacer(row); err != nil {
 		return err
 	}
