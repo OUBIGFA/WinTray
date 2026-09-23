@@ -486,6 +486,13 @@ func (w *MainWindow) buildManagedEditor() error {
 	}
 	w.delayHint = delayHint
 
+	// A greedy trailing spacer absorbs this row's excess width. Without it
+	// the fixed-size label, editor and hint get centered in equal slots and
+	// drift apart (verified by TestCloseDelayRowGeometry).
+	if _, err = walk.NewHSpacer(delayRow); err != nil {
+		return err
+	}
+
 	optionsRow, err := newRow(editor, 18)
 	if err != nil {
 		return err

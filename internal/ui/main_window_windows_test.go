@@ -155,6 +155,65 @@ func TestMainWindowInteractions(t *testing.T) {
 	w.Run()
 }
 
+// TestCloseDelayRowGeometry verifies on a real window that the close-delay
+// label, editor and hint pack to the left of their row instead of drifting
+// apart when nothing in the row can absorb the excess width.
+func TestCloseDelayRowGeometry(t *testing.T) {
+	if os.Getenv("WINTRAY_UI_TEST") != "1" {
+		t.Skip("set WINTRAY_UI_TEST=1 on an interactive Windows desktop")
+	}
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	deactivate := activateTestManifest(t)
+	defer deactivate()
+
+	settings := config.DefaultSettings()
+	settings.ManagedApps = []config.ManagedAppEntry{
+		{ID: "1", Name: "Cloud Drive", ExePath: `C:\Apps\Cloud Drive\drive.exe`, RunOnStartup: true, TrayBehavior: config.TrayBehavior{AutoMinimizeAndHideOnLaunch: true, CloseDelaySeconds: 20}},
+	}
+	w, err := NewMainWindow(settings, Callbacks{OnSave: func(config.Settings) {}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.mw.Dispose()
+
+	step := func(f func()) {
+		done := make(chan struct{})
+		w.synchronize(func() { defer close(done); f() })
+		<-done
+		time.Sleep(200 * time.Millisecond)
+	}
+	w.mw.Starting().Attach(func() {
+		go func() {
+			time.Sleep(200 * time.Millisecond)
+			step(func() {
+				w.managedList.SetCurrentIndex(0)
+			})
+			step(func() {
+				lbl := w.delayLabel.Bounds()
+				edit := w.delayEdit.Bounds()
+				hint := w.delayHint.Bounds()
+				row := w.delayLabel.Parent().ClientBounds()
+				gap1 := edit.X - (lbl.X + lbl.Width)
+				gap2 := hint.X - (edit.X + edit.Width)
+				t.Logf("delayRow width=%d label=%+v edit=%+v hint=%+v gap1=%d gap2=%d", row.Width, lbl, edit, hint, gap1, gap2)
+				// Spacing is 10 at 96 DPI; allow generous DPI headroom but fail
+				// on the hundreds of pixels the default centering inserts.
+				if gap1 < -1 || gap1 > 60 {
+					t.Errorf("close-delay editor drifted from its label: gap=%d", gap1)
+				}
+				if gap2 < -1 || gap2 > 60 {
+					t.Errorf("close-delay hint drifted from its editor: gap=%d", gap2)
+				}
+				captureTestWindow(t, w, "delay-row")
+			})
+			w.RequestExplicitClose()
+		}()
+	})
+	w.ShowMainWindow()
+	w.Run()
+}
+
 func activateTestManifest(t *testing.T) func() {
 	t.Helper()
 	path, err := filepath.Abs("../../build/WinTray.exe.manifest")
