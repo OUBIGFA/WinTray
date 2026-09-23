@@ -82,9 +82,14 @@ func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retry
 			}
 		}
 		if opts.manageWindow {
+			// The program may have started itself (its own autorun entry) moments
+			// ago, so its close delay is honoured here as well.
+			if !s.waitQuietPeriod(ctx, entry, nil, expectedPath, expectedName) {
+				return Result{AppName: entry.Name, Managed: true, Code: ResultAlreadyRunningSkipped, Message: "already running skipped"}
+			}
 			managed, ok := s.manageFirstMatchingWindow(ctx, func(w ManagedWindowInfo) bool {
 				return matchesExecutableWithIdentityFallback(w, expectedPath, expectedName)
-			}, expectedPath, expectedName, nil, nil, retrySeconds, "close")
+			}, expectedPath, expectedName, nil, nil, retrySeconds, "close", closeDelay(entry))
 			if ok {
 				return managedResult(entry, managed, ResultAlreadyRunningManaged, "already running managed existing")
 			}
@@ -119,16 +124,79 @@ func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retry
 		return startedResult(entry, opts)
 	}
 
+	if !s.waitQuietPeriod(ctx, entry, &pid, expectedPath, expectedName) {
+		return windowNotManagedResult(entry, opts)
+	}
+
 	managed, ok := s.manageFirstMatchingWindow(ctx, func(w ManagedWindowInfo) bool {
 		return w.ProcessID == pid || matchesExecutableWithIdentityFallback(w, expectedPath, expectedName)
-	}, expectedPath, expectedName, &pid, baseline, retrySeconds, "close")
+	}, expectedPath, expectedName, &pid, baseline, retrySeconds, "close", closeDelay(entry))
 	if !ok {
-		if opts.windowOptional {
-			return startedResult(entry, opts)
-		}
-		return Result{AppName: entry.Name, Managed: false, Code: ResultNoWindowManaged, Message: "no window managed"}
+		return windowNotManagedResult(entry, opts)
 	}
 	return managedResult(entry, managed, ResultManaged, "managed")
+}
+
+// closeDelay is how long the program must have been running before its
+// window is looked up and acted on.
+func closeDelay(entry config.ManagedAppEntry) time.Duration {
+	return time.Duration(config.ClampCloseDelaySeconds(entry.TrayBehavior.CloseDelaySeconds)) * time.Second
+}
+
+// quietPeriodRemaining reports how much of the entry's close delay is still
+// ahead. Some programs (the NT-based QQ) show a login window first and quit
+// when it is closed, so the delay counts from the creation of the program's
+// process whoever started it: WinTray (launchedPID) or the program's own
+// autorun entry, in which case the oldest running process of the program is
+// the anchor (helpers spawned from the same image are younger). A program
+// that has been running longer than the delay is handled right away.
+func quietPeriodRemaining(entry config.ManagedAppEntry, launchedPID *uint32, expectedPath, expectedName string, now time.Time) time.Duration {
+	delay := closeDelay(entry)
+	if delay <= 0 {
+		return 0
+	}
+	var started time.Time
+	var known bool
+	if launchedPID != nil && *launchedPID != 0 {
+		started, known = processStartLookup(*launchedPID)
+		if !known {
+			// A launch that cannot be inspected any more is treated as brand new.
+			return delay
+		}
+	} else {
+		started, known = runningProcessStartLookup(expectedPath, expectedName)
+		if !known {
+			return 0
+		}
+	}
+	if remaining := delay - now.Sub(started); remaining > 0 {
+		return remaining
+	}
+	return 0
+}
+
+// waitQuietPeriod holds window handling until the program has been running
+// for its close delay. It reports false when the context ends first.
+func (s *Service) waitQuietPeriod(ctx context.Context, entry config.ManagedAppEntry, launchedPID *uint32, expectedPath, expectedName string) bool {
+	remaining := quietPeriodRemaining(entry, launchedPID, expectedPath, expectedName, time.Now())
+	if remaining <= 0 {
+		return true
+	}
+	s.logger.Info(fmt.Sprintf("window handling delayed: %s wait=%s (close delay %s from process start)", entry.Name, remaining.Round(time.Millisecond), closeDelay(entry)))
+	if !waitWithContext(ctx, remaining) {
+		s.logger.Info(fmt.Sprintf("window handling cancelled during delay: %s", entry.Name))
+		return false
+	}
+	return true
+}
+
+// windowNotManagedResult reports a launch whose window was not handled. When
+// window handling is best effort the launch itself still counts as a success.
+func windowNotManagedResult(entry config.ManagedAppEntry, opts startOptions) Result {
+	if opts.windowOptional {
+		return startedResult(entry, opts)
+	}
+	return Result{AppName: entry.Name, Managed: false, Code: ResultNoWindowManaged, Message: "no window managed"}
 }
 
 // hostLaunchedConsole locates the hidden console window of a console program
@@ -233,19 +301,27 @@ func (s *Service) HideExisting(ctx context.Context, entry config.ManagedAppEntry
 			return Result{AppName: entry.Name, Managed: false, Code: ResultNoExistingWindowManaged, Message: "no existing window managed"}
 		}
 	}
+	if !s.waitQuietPeriod(ctx, entry, nil, expectedPath, expectedName) {
+		return Result{AppName: entry.Name, Managed: false, Code: ResultNoExistingWindowManaged, Message: "no existing window managed"}
+	}
 	managed, ok := s.manageFirstMatchingWindow(ctx, func(w ManagedWindowInfo) bool {
 		return matchesExecutableWithIdentityFallback(w, expectedPath, expectedName)
-	}, expectedPath, expectedName, nil, nil, retrySeconds, "close")
+	}, expectedPath, expectedName, nil, nil, retrySeconds, "close", closeDelay(entry))
 	if !ok {
 		return Result{AppName: entry.Name, Managed: false, Code: ResultNoExistingWindowManaged, Message: "no existing window managed"}
 	}
 	return managedResult(entry, managed, ResultManagedExisting, "managed existing")
 }
 
-func (s *Service) manageFirstMatchingWindow(ctx context.Context, predicate func(ManagedWindowInfo) bool, expectedPath, expectedName string, launchedPID *uint32, baseline map[uintptr]struct{}, retrySeconds int, actionType string) (managedWindow, bool) {
+// manageFirstMatchingWindow acts on the best matching window. Windows of a
+// process that has been running for less than minProcessAge are skipped:
+// they are inside the program's close delay.
+func (s *Service) manageFirstMatchingWindow(ctx context.Context, predicate func(ManagedWindowInfo) bool, expectedPath, expectedName string, launchedPID *uint32, baseline map[uintptr]struct{}, retrySeconds int, actionType string, minProcessAge time.Duration) (managedWindow, bool) {
 	const delay = 500 * time.Millisecond
 	var last managedWindow
 	managedAny := false
+	processStarts := map[uint32]time.Time{}
+	insideDelayLogged := map[uint32]struct{}{}
 	singleRound := retrySeconds <= 0
 	timeout := 2 * time.Second
 	if actionType == "close" {
@@ -266,6 +342,7 @@ func (s *Service) manageFirstMatchingWindow(ctx context.Context, predicate func(
 
 		windows := s.enumerator.EnumerateTopLevelWindows()
 		bestByRoot := map[uintptr]MatchCandidate{}
+		now := time.Now()
 		for _, w := range windows {
 			if !predicate(w) || !hasTrustedWindowIdentity(w, expectedPath, launchedPID) {
 				continue
@@ -275,6 +352,18 @@ func (s *Service) manageFirstMatchingWindow(ctx context.Context, predicate func(
 			}
 			if actionType == "close" && w.IsToolWindow {
 				continue
+			}
+			// A window of a process still inside its close delay is left alone: it
+			// is likely a login or splash window whose close would end the program
+			// (a program that started itself while this loop was already running).
+			if minProcessAge > 0 {
+				if age, known := processAge(w.ProcessID, processStarts, now); known && age < minProcessAge {
+					if _, logged := insideDelayLogged[w.ProcessID]; !logged {
+						insideDelayLogged[w.ProcessID] = struct{}{}
+						s.logger.Info(fmt.Sprintf("skip window inside close delay: age=%s delay=%s %s", age.Round(time.Millisecond), minProcessAge, describeWindow(w)))
+					}
+					continue
+				}
 			}
 			score := computeCandidateScore(w, expectedPath, expectedName, launchedPID, baseline)
 			root := resolveActionTargetHandle(w)
@@ -478,6 +567,21 @@ func describeWindow(window ManagedWindowInfo) string {
 		process = "<empty>"
 	}
 	return fmt.Sprintf("hwnd=0x%X pid=%d process=%s title=%q class=%q min=%t fg=%t owner=0x%X tool=%t", window.Handle, window.ProcessID, process, title, className, window.IsMinimized, window.IsForeground, window.OwnerHandle, window.IsToolWindow)
+}
+
+// processAge reports how long the process has been running. Unknown creation
+// times report false so they never block an action; cache keeps one lookup
+// per process for a whole matching loop.
+func processAge(pid uint32, cache map[uint32]time.Time, now time.Time) (time.Duration, bool) {
+	started, ok := cache[pid]
+	if !ok {
+		var known bool
+		if started, known = processStartLookup(pid); !known {
+			return 0, false
+		}
+		cache[pid] = started
+	}
+	return now.Sub(started), true
 }
 
 func waitWithContext(ctx context.Context, delay time.Duration) bool {

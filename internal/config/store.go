@@ -140,6 +140,7 @@ func migrate(settings Settings) Settings {
 		if settings.ManagedApps[i].LaunchHiddenInBackground {
 			settings.ManagedApps[i].TrayBehavior.AutoMinimizeAndHideOnLaunch = false
 		}
+		settings.ManagedApps[i].TrayBehavior.CloseDelaySeconds = ClampCloseDelaySeconds(settings.ManagedApps[i].TrayBehavior.CloseDelaySeconds)
 	}
 	return settings
 }

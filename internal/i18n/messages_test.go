@@ -10,32 +10,36 @@ import (
 
 func TestFormatManagedRules(t *testing.T) {
 	languages := []struct {
-		language   string
-		launchOnly string
-		autoHide   string
-		hidden     string
-		paused     string
+		language        string
+		launchOnly      string
+		autoHide        string
+		autoHideDelayed string
+		hidden          string
+		paused          string
 	}{
 		{
-			language:   "zh-CN",
-			launchOnly: "仅启动",
-			autoHide:   "启动后关闭窗口",
-			hidden:     "后台静默启动",
-			paused:     "已暂停",
+			language:        "zh-CN",
+			launchOnly:      "仅启动",
+			autoHide:        "启动后关闭窗口",
+			autoHideDelayed: "启动后关闭窗口 (延迟 30 秒)",
+			hidden:          "后台静默启动",
+			paused:          "已暂停",
 		},
 		{
-			language:   "en-US",
-			launchOnly: "Launch only",
-			autoHide:   "Close window after launch",
-			hidden:     "Launch hidden in background",
-			paused:     "Paused",
+			language:        "en-US",
+			launchOnly:      "Launch only",
+			autoHide:        "Close window after launch",
+			autoHideDelayed: "Close window after launch (30 s delay)",
+			hidden:          "Launch hidden in background",
+			paused:          "Paused",
 		},
 		{
-			language:   "unknown",
-			launchOnly: "仅启动",
-			autoHide:   "启动后关闭窗口",
-			hidden:     "后台静默启动",
-			paused:     "已暂停",
+			language:        "unknown",
+			launchOnly:      "仅启动",
+			autoHide:        "启动后关闭窗口",
+			autoHideDelayed: "启动后关闭窗口 (延迟 30 秒)",
+			hidden:          "后台静默启动",
+			paused:          "已暂停",
 		},
 	}
 
@@ -46,10 +50,15 @@ func TestFormatManagedRules(t *testing.T) {
 				runOnStartup bool
 				launchHidden bool
 				autoHide     bool
+				closeDelay   int
 				want         string
 			}{
 				{name: "launch_only", runOnStartup: true, want: lang.launchOnly},
 				{name: "close_window", runOnStartup: true, autoHide: true, want: lang.autoHide},
+				{name: "close_window_delayed", runOnStartup: true, autoHide: true, closeDelay: 30, want: lang.autoHideDelayed},
+				{name: "delay_without_close_window", runOnStartup: true, closeDelay: 30, want: lang.launchOnly},
+				{name: "hidden_overrides_delayed_close", runOnStartup: true, launchHidden: true, autoHide: true, closeDelay: 30, want: lang.hidden},
+				{name: "paused_overrides_delayed_close", autoHide: true, closeDelay: 30, want: lang.paused},
 				{name: "hidden", runOnStartup: true, launchHidden: true, want: lang.hidden},
 				{name: "hidden_overrides_close", runOnStartup: true, launchHidden: true, autoHide: true, want: lang.hidden},
 				{name: "paused", want: lang.paused},
@@ -67,6 +76,7 @@ func TestFormatManagedRules(t *testing.T) {
 							LaunchHiddenInBackground: state.launchHidden,
 							TrayBehavior: config.TrayBehavior{
 								AutoMinimizeAndHideOnLaunch: state.autoHide,
+								CloseDelaySeconds:           state.closeDelay,
 							},
 						}
 						if got := FormatManagedParam(lang.language, app); got != state.want {

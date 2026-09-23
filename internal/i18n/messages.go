@@ -40,6 +40,10 @@ type Messages struct {
 	ManagedLaunchOnly              string
 	ManagedAutoHide                string
 	ManagedAutoHideHint            string
+	ManagedAutoHideDelayed         string
+	ManagedCloseDelay              string
+	ManagedCloseDelayHint          string
+	ManagedCloseDelayInvalid       string
 	ManagedLaunchHidden            string
 	ManagedLaunchHiddenHint        string
 	ManagedPauseTask               string
@@ -123,6 +127,10 @@ var zhCN = Messages{
 	ManagedLaunchOnly:              "仅启动",
 	ManagedAutoHide:                "启动后关闭窗口",
 	ManagedAutoHideHint:            "发送关闭消息（WM_CLOSE）：托盘应用通常会收起，其他应用可能退出；控制台窗口由 WinTray 隐藏并代管托盘图标。",
+	ManagedAutoHideDelayed:         "启动后关闭窗口 (延迟 %d 秒)",
+	ManagedCloseDelay:              "关闭延迟 (秒):",
+	ManagedCloseDelayHint:          "程序启动满这么多秒后才查找并关闭窗口（不论由谁启动），用于跳过登录等前置弹窗；0 表示不等待，最多 600 秒。",
+	ManagedCloseDelayInvalid:       "关闭延迟必须是 0 到 600 的数字。",
 	ManagedLaunchHidden:            "后台静默启动",
 	ManagedLaunchHiddenHint:        "适用于脚本或命令行程序；不能与“启动后关闭窗口”同时启用。",
 	ManagedPauseTask:               "暂停任务",
@@ -206,6 +214,10 @@ var enUS = Messages{
 	ManagedLaunchOnly:              "Launch only",
 	ManagedAutoHide:                "Close window after launch",
 	ManagedAutoHideHint:            "Sends WM_CLOSE: tray-aware apps usually stay in the tray; other apps may exit. WinTray hides console windows and provides their tray icons.",
+	ManagedAutoHideDelayed:         "Close window after launch (%d s delay)",
+	ManagedCloseDelay:              "Close delay (s):",
+	ManagedCloseDelayHint:          "Only look for and close the window once the program has been running this many seconds (however it was started), e.g. to let a login dialog finish; 0 = no wait, up to 600.",
+	ManagedCloseDelayInvalid:       "Close delay must be a number between 0 and 600.",
 	ManagedLaunchHidden:            "Launch hidden in background",
 	ManagedLaunchHiddenHint:        "For scripts or command-line programs. Cannot be combined with \"Close window after launch\".",
 	ManagedPauseTask:               "Pause task",
@@ -293,6 +305,9 @@ func FormatManagedParam(language string, app config.ManagedAppEntry) string {
 		return msg.ManagedLaunchHidden
 	}
 	if app.TrayBehavior.AutoMinimizeAndHideOnLaunch {
+		if delay := app.TrayBehavior.CloseDelaySeconds; delay > 0 {
+			return fmt.Sprintf(msg.ManagedAutoHideDelayed, delay)
+		}
 		return msg.ManagedAutoHide
 	}
 	return msg.ManagedLaunchOnly

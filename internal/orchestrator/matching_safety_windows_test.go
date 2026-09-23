@@ -78,7 +78,7 @@ func TestWindowActionsRequireProcessIdentity(t *testing.T) {
 			mgr := &testManager{}
 			svc := NewService(&testEnumerator{windows: []ManagedWindowInfo{tc.window}}, mgr, &testLogger{})
 			_, ok := svc.manageFirstMatchingWindow(context.Background(), func(ManagedWindowInfo) bool { return true },
-				normalizePath(expectedPath), "app", &pid, map[uintptr]struct{}{}, 0, "close")
+				normalizePath(expectedPath), "app", &pid, map[uintptr]struct{}{}, 0, "close", 0)
 			if ok != tc.want || (len(mgr.closeCalls)+len(mgr.hideCalls) > 0) != tc.want {
 				t.Fatalf("managed=%t close=%v hide=%v; want window acted on=%t", ok, mgr.closeCalls, mgr.hideCalls, tc.want)
 			}

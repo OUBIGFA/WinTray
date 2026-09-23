@@ -12,7 +12,7 @@ func TestStoreSaveLoadWithError_RoundTripAndAtomicTempCleanup(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "settings.json")
 	want := DefaultSettings()
 	want.Language = "en-US"
-	want.ManagedApps = []ManagedAppEntry{{Name: "Demo", ExePath: "C:\\\\Demo\\\\demo.exe", RunOnStartup: true}}
+	want.ManagedApps = []ManagedAppEntry{{Name: "Demo", ExePath: "C:\\\\Demo\\\\demo.exe", RunOnStartup: true, TrayBehavior: TrayBehavior{AutoMinimizeAndHideOnLaunch: true, CloseDelaySeconds: 45}}}
 
 	store := NewStore(path)
 	if err := store.Save(want); err != nil {
@@ -26,7 +26,7 @@ func TestStoreSaveLoadWithError_RoundTripAndAtomicTempCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadWithError() error = %v", err)
 	}
-	if got.Language != want.Language || len(got.ManagedApps) != 1 || got.ManagedApps[0].Name != "Demo" {
+	if got.Language != want.Language || len(got.ManagedApps) != 1 || got.ManagedApps[0].Name != "Demo" || got.ManagedApps[0].TrayBehavior.CloseDelaySeconds != 45 {
 		t.Fatalf("round-trip mismatch: got=%+v want=%+v", got, want)
 	}
 	if _, err := os.Stat(path); err != nil {
@@ -244,5 +244,50 @@ func TestMigrate_NormalizesLanguageAndRetryBounds(t *testing.T) {
 				t.Fatalf("closeWindowRetrySeconds = %d, want %d", got.CloseWindowRetrySeconds, tc.wantRetry)
 			}
 		})
+	}
+}
+
+func TestLoadWithError_ReadsCloseDelaySecondsFromTrayBehavior(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	data := `{"schemaVersion":3,"language":"zh-CN","managedApps":[` +
+		`{"name":"QQ","exePath":"C:\\QQ\\QQ.exe","runOnStartup":true,"trayBehavior":{"autoMinimizeAndHideOnLaunch":true,"closeDelaySeconds":30}},` +
+		`{"name":"Legacy","exePath":"C:\\Legacy\\app.exe","runOnStartup":true,"trayBehavior":{"autoMinimizeAndHideOnLaunch":true}}]}`
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	got, err := NewStore(path).LoadWithError()
+	if err != nil {
+		t.Fatalf("LoadWithError() error = %v", err)
+	}
+	if len(got.ManagedApps) != 2 {
+		t.Fatalf("managed apps = %d, want 2", len(got.ManagedApps))
+	}
+	if got.ManagedApps[0].TrayBehavior.CloseDelaySeconds != 30 {
+		t.Fatalf("QQ closeDelaySeconds = %d, want 30", got.ManagedApps[0].TrayBehavior.CloseDelaySeconds)
+	}
+	if got.ManagedApps[1].TrayBehavior.CloseDelaySeconds != 0 {
+		t.Fatalf("entry without closeDelaySeconds = %d, want 0", got.ManagedApps[1].TrayBehavior.CloseDelaySeconds)
+	}
+}
+
+func TestMigrate_ClampsCloseDelaySeconds(t *testing.T) {
+	input := Settings{
+		SchemaVersion: 3,
+		Language:      "zh-CN",
+		ManagedApps: []ManagedAppEntry{
+			{Name: "Negative", TrayBehavior: TrayBehavior{CloseDelaySeconds: -5}},
+			{Name: "Too long", TrayBehavior: TrayBehavior{CloseDelaySeconds: MaxCloseDelaySeconds + 1}},
+			{Name: "In range", TrayBehavior: TrayBehavior{CloseDelaySeconds: 30}},
+		},
+	}
+
+	got := migrate(input)
+
+	want := []int{0, MaxCloseDelaySeconds, 30}
+	for i, app := range got.ManagedApps {
+		if app.TrayBehavior.CloseDelaySeconds != want[i] {
+			t.Errorf("%s closeDelaySeconds = %d, want %d", app.Name, app.TrayBehavior.CloseDelaySeconds, want[i])
+		}
 	}
 }

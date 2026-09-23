@@ -52,6 +52,9 @@ type MainWindow struct {
 	pathEdit         *walk.LineEdit
 	argsLabel        *walk.Label
 	argsEdit         *walk.LineEdit
+	delayLabel       *walk.Label
+	delayEdit        *walk.LineEdit
+	delayHint        *walk.Label
 	browseBtn        *walk.PushButton
 	addProgramBtn    *walk.PushButton
 	appAutoHide      *walk.CheckBox
@@ -432,6 +435,57 @@ func (w *MainWindow) buildManagedEditor() error {
 	})
 	w.argsEdit = argsEdit
 
+	delayRow, err := newRow(editor, 10)
+	if err != nil {
+		return err
+	}
+
+	delayLabel, err := walk.NewLabel(delayRow)
+	if err != nil {
+		return err
+	}
+	w.delayLabel = delayLabel
+	delayLabel.SetMinMaxSize(walk.Size{Width: 124}, walk.Size{Width: 124})
+
+	delayEdit, err := walk.NewLineEdit(delayRow)
+	if err != nil {
+		return err
+	}
+	delayEdit.SetMinMaxSize(walk.Size{Width: 72, Height: 28}, walk.Size{Width: 72, Height: 28})
+	delayEdit.EditingFinished().Attach(func() {
+		if w.updatingEditor {
+			return
+		}
+		app, _, ok := w.selectedManagedApp()
+		if !ok {
+			return
+		}
+		v, convErr := strconv.Atoi(strings.TrimSpace(delayEdit.Text()))
+		if convErr != nil {
+			walk.MsgBox(w.mw, w.mw.Title(), i18n.For(w.settings.Language).ManagedCloseDelayInvalid, walk.MsgBoxIconWarning)
+			v = app.TrayBehavior.CloseDelaySeconds
+		}
+		v = config.ClampCloseDelaySeconds(v)
+		delayEdit.SetText(strconv.Itoa(v))
+		if v == app.TrayBehavior.CloseDelaySeconds {
+			return
+		}
+		app.TrayBehavior.CloseDelaySeconds = v
+		w.refreshManagedList()
+		w.save()
+	})
+	w.delayEdit = delayEdit
+
+	delayHint, err := walk.NewLabel(delayRow)
+	if err != nil {
+		return err
+	}
+	delayHint.SetTextColor(secondaryColor)
+	if err = delayHint.SetEllipsisMode(walk.EllipsisEnd); err != nil {
+		return err
+	}
+	w.delayHint = delayHint
+
 	optionsRow, err := newRow(editor, 18)
 	if err != nil {
 		return err
@@ -674,6 +728,9 @@ func (w *MainWindow) applyLanguage(language string) {
 	w.browseBtn.SetText(msg.BrowseProgram)
 	w.addProgramBtn.SetText(msg.AddProgram)
 	w.argsEdit.SetCueBanner(msg.ManagedArgsPlaceholder)
+	w.delayLabel.SetText(msg.ManagedCloseDelay)
+	w.delayHint.SetText(msg.ManagedCloseDelayHint)
+	w.delayHint.SetToolTipText(msg.ManagedCloseDelayHint)
 	w.appAutoHide.SetToolTipText(msg.ManagedAutoHideHint)
 	w.appLaunchHidden.SetToolTipText(msg.ManagedLaunchHiddenHint)
 	w.appPauseTask.SetToolTipText(msg.ManagedPauseTaskHint)
@@ -822,7 +879,7 @@ func (w *MainWindow) refreshManagedList() {
 }
 
 func (w *MainWindow) syncManagedEditor() {
-	if w.pathEdit == nil || w.argsEdit == nil || w.appAutoHide == nil || w.appLaunchHidden == nil || w.appPauseTask == nil || w.launchNowBtn == nil || w.addProgramBtn == nil {
+	if w.pathEdit == nil || w.argsEdit == nil || w.delayEdit == nil || w.appAutoHide == nil || w.appLaunchHidden == nil || w.appPauseTask == nil || w.launchNowBtn == nil || w.addProgramBtn == nil {
 		return
 	}
 	app, _, ok := w.selectedManagedApp()
@@ -851,6 +908,9 @@ func (w *MainWindow) syncManagedEditor() {
 		w.pathEdit.SetText("")
 		w.pathEdit.SetToolTipText("")
 		w.argsEdit.SetText("")
+		w.delayEdit.SetText("")
+		w.delayEdit.SetEnabled(false)
+		w.delayEdit.SetReadOnly(true)
 		w.appAutoHide.SetChecked(false)
 		w.appLaunchHidden.SetChecked(false)
 		w.appPauseTask.SetChecked(false)
@@ -860,6 +920,10 @@ func (w *MainWindow) syncManagedEditor() {
 	w.pathEdit.SetText(app.ExePath)
 	w.pathEdit.SetToolTipText(app.ExePath)
 	w.argsEdit.SetText(app.Args)
+	// The delay only matters when the window gets closed after launch.
+	w.delayEdit.SetText(strconv.Itoa(app.TrayBehavior.CloseDelaySeconds))
+	w.delayEdit.SetEnabled(app.TrayBehavior.AutoMinimizeAndHideOnLaunch)
+	w.delayEdit.SetReadOnly(!app.TrayBehavior.AutoMinimizeAndHideOnLaunch)
 	w.appAutoHide.SetChecked(app.TrayBehavior.AutoMinimizeAndHideOnLaunch)
 	w.appLaunchHidden.SetChecked(app.LaunchHiddenInBackground)
 	w.appPauseTask.SetChecked(!app.RunOnStartup)
@@ -923,8 +987,22 @@ func (w *MainWindow) ShowMainWindow() {
 		}
 		w.mw.Show()
 		w.mw.SetVisible(true)
-		w.mw.SetFocus()
+		w.focusDefaultControl()
 	})
+}
+
+// focusDefaultControl gives keyboard focus to the program list, or to the
+// primary action while the list is empty. Focus has to land on a child: walk
+// otherwise moves it to the first tab stop after a layout pass, which is the
+// language selector, whose text then shows up selected.
+func (w *MainWindow) focusDefaultControl() {
+	if w.managedList != nil && w.managedList.Visible() {
+		_ = w.managedList.SetFocus()
+		return
+	}
+	if w.addProgramBtn != nil {
+		_ = w.addProgramBtn.SetFocus()
+	}
 }
 
 func (w *MainWindow) HideMainWindow() {

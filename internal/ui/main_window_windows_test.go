@@ -69,6 +69,9 @@ func TestMainWindowInteractions(t *testing.T) {
 				if !w.addProgramBtn.Visible() || !w.addProgramBtn.Enabled() {
 					t.Error("Add Program must always be available")
 				}
+				if w.languageCombo.Focused() || !w.managedList.Focused() {
+					t.Error("opening the window must focus the program list, not the language selector")
+				}
 				w.managedList.SetCurrentIndex(0)
 			})
 			step(func() {
@@ -77,13 +80,21 @@ func TestMainWindowInteractions(t *testing.T) {
 				if !w.removeBtn.Enabled() || w.pathEdit.Text() != settings.ManagedApps[0].ExePath {
 					t.Error("selection did not populate the editor")
 				}
+				if !w.delayEdit.Enabled() || w.delayEdit.Text() != "0" {
+					t.Error("close delay must be editable for a close-window program")
+				}
+				w.delayEdit.SetText("30")
+				w.delayEdit.SendMessage(win.WM_KEYDOWN, win.VK_RETURN, 0)
+				if w.settings.ManagedApps[0].TrayBehavior.CloseDelaySeconds != 30 || w.managedListModel.Value(0, 2) != "启动后关闭窗口 (延迟 30 秒)" {
+					t.Error("close delay must be saved and shown in the row")
+				}
 				w.argsEdit.SetFocus()
 				if w.managedList.SelectionHiddenWithoutFocus() {
 					t.Error("selection must remain visible while editing")
 				}
 				w.appLaunchHidden.SetChecked(true)
-				if w.appAutoHide.Enabled() || w.appAutoHide.Checked() || !w.settings.ManagedApps[0].LaunchHiddenInBackground {
-					t.Error("hidden launch must disable and clear close-window behavior")
+				if w.appAutoHide.Enabled() || w.appAutoHide.Checked() || w.delayEdit.Enabled() || !w.settings.ManagedApps[0].LaunchHiddenInBackground {
+					t.Error("hidden launch must disable and clear close-window behavior and its delay")
 				}
 				w.appPauseTask.SetChecked(true)
 				if w.managedList.CurrentIndex() != 0 || w.managedListModel.Value(0, 2) != "已暂停" {
@@ -118,7 +129,7 @@ func TestMainWindowInteractions(t *testing.T) {
 				if len(w.settings.ManagedApps) != 0 || !w.emptyList.Visible() || w.managedList.Visible() {
 					t.Error("removing the final program must show the empty state")
 				}
-				if w.removeBtn.Enabled() || w.browseBtn.Enabled() || w.launchNowBtn.Enabled() || w.argsEdit.Enabled() {
+				if w.removeBtn.Enabled() || w.browseBtn.Enabled() || w.launchNowBtn.Enabled() || w.argsEdit.Enabled() || w.delayEdit.Enabled() {
 					t.Error("empty-state selection actions must be disabled")
 				}
 				if w.noSelectLabel.Text() != i18n.For("en-US").ManagedSelectionHint || saves == 0 {
@@ -126,15 +137,21 @@ func TestMainWindowInteractions(t *testing.T) {
 				}
 				w.languageCombo.SetCurrentIndex(0)
 				w.mw.SetSize(walk.Size{Width: 1040, Height: 780})
+				// Reopening from the tray goes through the same path as the first show.
+				w.HideMainWindow()
+				w.ShowMainWindow()
 			})
 			step(func() {
 				checkWindowLayout(t, w)
 				captureTestWindow(t, w, "empty-zh")
+				if w.languageCombo.Focused() || !w.addProgramBtn.Focused() {
+					t.Error("reopening with an empty list must focus Add Program, not the language selector")
+				}
 			})
 			w.RequestExplicitClose()
 		}()
 	})
-	w.mw.Show()
+	w.ShowMainWindow()
 	w.Run()
 }
 

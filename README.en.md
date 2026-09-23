@@ -36,6 +36,7 @@ Core use cases:
 - **Auto Start**: Writes to the current user's `Run` registry key for automatic launch at Windows logon
 - **Auto Hide Windows**: When configured in the program list, the `--autorun` flow automatically minimizes and hides target windows
 - **Retry on Window Handling**: Configurable 0–120 second retry window for slow-starting programs
+- **Close Delay**: Per-program running time a program must reach before its window is handled, to skip login dialogs and other pre-launch popups (such as the new QQ); also covers instances started by the program's own auto-start
 - **Cleanup & Restore Defaults**: One-click cleanup of local config/logs from the main window
 - **Bilingual UI**: Built-in Simplified Chinese / English, switchable instantly
 - **Single Instance Protection**: Prevents duplicate launches to avoid configuration conflicts
@@ -72,6 +73,7 @@ WinTray supports adding the following program types to the managed list, automat
 
 - **Launch Arguments**: Pass custom command-line arguments to the program
 - **Close Window After Launch**: Sends a close message (WM_CLOSE) after launch — most tray-aware apps minimize to tray rather than quitting; a destroyed or invisible window is considered successfully handled. Console programs without a tray icon of their own (such as `syncthing.exe` or `frpc.exe`) would be terminated by a close, so WinTray hides their console window instead and hosts a tray icon for them: left-click toggles the window, and the context menu can show, hide, stop hosting (the window comes back and the program keeps running) or quit the program. The icon is owned by a separate lightweight host process (an extra `WinTray.exe` in Task Manager), so it keeps working after the main WinTray process exits and goes away on its own once the program ends or hosting is stopped. Stop hosting or quit the hosted programs before deleting WinTray: while a host process runs, `WinTray.exe` is in use and cannot be deleted
+- **Close Delay**: Available with "Close window after launch". WinTray only looks for the window and closes it once the program's process has been running for the configured number of seconds (0–600). Use it for programs that show a login window first: the new NT-based QQ quits when its login window is closed, so set a delay that covers the whole login (auto-login usually takes 15–30 seconds) and WinTray only handles the main window that appears afterwards. The delay counts from the creation of the program's process, whether WinTray or the program's own auto-start launched it: an instance already auto-started at logon still has to reach the delay before it is handled, while an instance running for longer is handled right away, so the program's own auto-start can stay enabled
 - **Launch Hidden in Background**: Starts the program without any visible window, suitable for command-line and script programs
 - **Pause Task**: Temporarily skip this program's auto-start task; it will run again on the next boot
 
@@ -95,7 +97,8 @@ Scoring system (an action is only taken when the total score ≥ 500):
 
 | Scenario                                                     | Configuration                                            |
 | ------------------------------------------------------------ | -------------------------------------------------------- |
-| QQ / WeChat / DingTalk auto-start and minimize to tray       | Add `.exe`, enable "Close window after launch"           |
+| WeChat / DingTalk auto-start and minimize to tray            | Add `.exe`, enable "Close window after launch"           |
+| New QQ (NT-based) auto-start, minimize to tray after login   | Add `QQ.exe`, enable "Close window after launch", set a "Close delay" (e.g. 20–30 s) to skip the login window; QQ's own auto-start can stay enabled |
 | syncthing / frpc console programs running in the background, reachable from the tray | Add `.exe`, enable "Close window after launch"; WinTray hosts the tray icon |
 | Tunnel scripts (frpc / SSH) running in background at startup | Add `.bat` / `.ps1`, hidden background launch by default |
 | Python crawler/service starting silently in background       | Add `.py`, hidden background launch by default           |
@@ -158,6 +161,9 @@ A: Right-click the WinTray icon in the system tray and select "Open Settings".
 
 **Q: How do I disable auto-start after it's been enabled?**
 A: Uncheck "Run WinTray at logon" in the settings page; the corresponding registry entry will be cleaned up automatically.
+
+**Q: The new QQ doesn't minimize to the tray; instead the login fails or QQ quits.**
+A: The new QQ shows a login window first and quits when that window receives a close message. Set a "Close delay" for it that covers the whole login (auto-login usually takes 15–30 seconds; allow more for manual login). Whether WinTray or QQ's own auto-start launched it, WinTray waits until QQ has been running for the delay and its main window is up before closing it.
 
 **Q: A program in my list isn't being minimized automatically.**
 A: Make sure the program has "Close window after launch" enabled, and that WinTray was triggered with the `--autorun` flag (auto-start does this automatically). If the program starts slowly, try increasing the retry seconds setting.
