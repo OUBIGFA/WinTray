@@ -75,6 +75,19 @@ func TestMainWindowInteractions(t *testing.T) {
 				w.managedList.SetCurrentIndex(0)
 			})
 			step(func() {
+				if w.intervalEdit.Text() != "3" {
+					t.Errorf("default launch interval = %q, want 3", w.intervalEdit.Text())
+				}
+				for _, tc := range []struct {
+					text string
+					want int
+				}{{"7", 7}, {"0", 0}, {"999", 120}, {"-1", 0}} {
+					w.intervalEdit.SetText(tc.text)
+					w.intervalEdit.SendMessage(win.WM_KEYDOWN, win.VK_RETURN, 0)
+					if w.settings.StartupIntervalSeconds != tc.want {
+						t.Errorf("launch interval %q saved as %d, want %d", tc.text, w.settings.StartupIntervalSeconds, tc.want)
+					}
+				}
 				checkWindowLayout(t, w)
 				captureTestWindow(t, w, "programs-zh")
 				if !w.removeBtn.Enabled() || w.pathEdit.Text() != settings.ManagedApps[0].ExePath {
@@ -257,6 +270,19 @@ func checkWindowLayout(t *testing.T, w *MainWindow) {
 		if button.Bounds().Width < button.SizeHint().Width {
 			t.Errorf("button %q clipped: width=%d needs=%d", button.Text(), button.Bounds().Width, button.SizeHint().Width)
 		}
+	}
+	for _, label := range []*walk.Label{w.globalTitle, w.intervalLabel, w.retryLabel} {
+		if label.Bounds().Width < label.SizeHint().Width {
+			t.Errorf("settings label %q clipped: width=%d needs=%d", label.Text(), label.Bounds().Width, label.SizeHint().Width)
+		}
+	}
+	// Keep the destructive action next to the version on the left, separate
+	// from frequently used actions on the right, in both languages and sizes.
+	reset, version, logs := w.cleanupBtn.Bounds(), w.versionLabel.Bounds(), w.openLogsBtn.Bounds()
+	leftGap := version.X - (reset.X + reset.Width)
+	actionGap := logs.X - (version.X + version.Width)
+	if reset.X != 0 || leftGap < 0 || actionGap <= leftGap {
+		t.Errorf("footer must group reset then version on the left: reset=%+v version=%+v logs=%+v", reset, version, logs)
 	}
 	t.Logf("layout %s: window=%+v list=%+v", w.settings.Language, w.mw.Size(), w.managedList.Bounds())
 }

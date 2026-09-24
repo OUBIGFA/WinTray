@@ -3,6 +3,7 @@
 package ipc
 
 import (
+	"errors"
 	"sync"
 	"sync/atomic"
 
@@ -23,7 +24,9 @@ func NewActivationListener(name string) (*ActivationListener, error) {
 		return nil, err
 	}
 	h, err := windows.CreateEvent(nil, 0, 0, namePtr)
-	if err != nil {
+	// CreateEvent returns a valid handle together with ERROR_ALREADY_EXISTS
+	// while a previous sender still holds the named event open.
+	if err != nil && !errors.Is(err, windows.ERROR_ALREADY_EXISTS) {
 		return nil, err
 	}
 	return &ActivationListener{

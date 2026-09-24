@@ -4,6 +4,17 @@ package config
 // and the first action on its window.
 const MaxCloseDelaySeconds = 600
 
+const (
+	DefaultStartupIntervalSeconds = 3
+	MaxStartupIntervalSeconds     = 120
+)
+
+// ClampStartupIntervalSeconds bounds spacing between launches. Zero disables
+// the wait, but entries are still started in list order.
+func ClampStartupIntervalSeconds(seconds int) int {
+	return min(max(seconds, 0), MaxStartupIntervalSeconds)
+}
+
 type TrayBehavior struct {
 	AutoMinimizeAndHideOnLaunch bool `json:"autoMinimizeAndHideOnLaunch"`
 	// CloseDelaySeconds keeps the program's windows untouched until its process
@@ -34,6 +45,7 @@ type Settings struct {
 	StartMinimizedToTray          bool              `json:"startMinimizedToTray"`
 	ExitAfterManagedAppsCompleted bool              `json:"exitAfterManagedAppsCompleted"`
 	CloseWindowRetrySeconds       int               `json:"closeWindowRetrySeconds"`
+	StartupIntervalSeconds        int               `json:"startupIntervalSeconds"`
 	ManagedApps                   []ManagedAppEntry `json:"managedApps"`
 }
 
@@ -60,6 +72,7 @@ func DefaultSettings() Settings {
 		StartMinimizedToTray:          true,
 		ExitAfterManagedAppsCompleted: true,
 		CloseWindowRetrySeconds:       10,
+		StartupIntervalSeconds:        DefaultStartupIntervalSeconds,
 		ManagedApps:                   make([]ManagedAppEntry, 0),
 	}
 }

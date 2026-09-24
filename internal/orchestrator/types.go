@@ -1,5 +1,11 @@
 package orchestrator
 
+import (
+	"time"
+
+	"wintray/internal/startup"
+)
+
 type ManagedWindowInfo struct {
 	Handle       uintptr
 	ProcessID    uint32
@@ -35,6 +41,9 @@ const (
 	ResultEmptyExePath            ResultCode = "empty_exe_path"
 	ResultInvalidExePath          ResultCode = "invalid_exe_path"
 	ResultProcessStartFailed      ResultCode = "process_start_failed"
+	ResultStartupCheckFailed      ResultCode = "startup_check_failed"
+	ResultExternalStartupTimeout  ResultCode = "external_startup_timeout"
+	ResultCancelled               ResultCode = "cancelled"
 	ResultAlreadyRunningManaged   ResultCode = "already_running_managed"
 	ResultAlreadyRunningSkipped   ResultCode = "already_running_skipped"
 	ResultNoWindowManaged         ResultCode = "no_window_managed"
@@ -51,10 +60,17 @@ type Service struct {
 	enumerator WindowEnumerator
 	manager    WindowManager
 	logger     Logger
+	// Instance-local probes keep tests isolated from the user's startup setup.
+	externalStartupLookup func(string) (string, error)
+	externalStartupWait   time.Duration
 }
 
 func NewService(enumerator WindowEnumerator, manager WindowManager, logger Logger) *Service {
-	return &Service{enumerator: enumerator, manager: manager, logger: logger}
+	return &Service{
+		enumerator: enumerator, manager: manager, logger: logger,
+		externalStartupLookup: startup.FindEnabledRunEntry,
+		externalStartupWait:   120 * time.Second,
+	}
 }
 
 type Result struct {

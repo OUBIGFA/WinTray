@@ -37,6 +37,7 @@ Core use cases:
 - **Auto Hide Windows**: When configured in the program list, the `--autorun` flow automatically minimizes and hides target windows
 - **Retry on Window Handling**: Configurable 0–120 second retry window for slow-starting programs
 - **Close Delay**: Per-program running time a program must reach before its window is handled, to skip login dialogs and other pre-launch popups (such as the new QQ); also covers instances started by the program's own auto-start
+- **Staggered Startup**: Launch programs in list order, 3 seconds apart by default; adjust the interval from 0–120 seconds in Global Settings to reduce competing startup workloads
 - **Cleanup & Restore Defaults**: One-click cleanup of local config/logs from the main window
 - **Bilingual UI**: Built-in Simplified Chinese / English, switchable instantly
 - **Single Instance Protection**: Prevents duplicate launches to avoid configuration conflicts
@@ -72,10 +73,19 @@ WinTray supports adding the following program types to the managed list, automat
 ### Per-Program Configuration Options
 
 - **Launch Arguments**: Pass custom command-line arguments to the program
-- **Close Window After Launch**: Sends a close message (WM_CLOSE) after launch — most tray-aware apps minimize to tray rather than quitting; a destroyed or invisible window is considered successfully handled. Console programs without a tray icon of their own (such as `syncthing.exe` or `frpc.exe`) would be terminated by a close, so WinTray hides their console window instead and hosts a tray icon for them: left-click toggles the window, and the context menu can show, hide, stop hosting (the window comes back and the program keeps running) or quit the program. The icon is owned by a separate lightweight host process (an extra `WinTray.exe` in Task Manager), so it keeps working after the main WinTray process exits and goes away on its own once the program ends or hosting is stopped. Stop hosting or quit the hosted programs before deleting WinTray: while a host process runs, `WinTray.exe` is in use and cannot be deleted
+- **Close Window After Launch**: Sends a close message (WM_CLOSE) after launch — most tray-aware apps minimize to tray rather than quitting; a destroyed or invisible window is considered successfully handled. Console programs without a tray icon of their own (such as `syncthing.exe` or `frpc.exe`) would be terminated by a close, so WinTray hides their console window instead and hosts a tray icon for them: left-click toggles the window, and the context menu can show, hide, stop hosting (the window comes back and the program keeps running) or quit the program. All hosted icons are owned by **the main WinTray process**, without an extra WinTray process per program. With automatic exit enabled, WinTray hides its settings and its own icon while any hosted icons remain, then exits when the last hosting session ends. Manually choosing "Exit WinTray" restores hidden windows before exiting. Exit WinTray before deleting it: `WinTray.exe` remains in use while running
 - **Close Delay**: Available with "Close window after launch". WinTray only looks for the window and closes it once the program's process has been running for the configured number of seconds (0–600). Use it for programs that show a login window first: the new NT-based QQ quits when its login window is closed, so set a delay that covers the whole login (auto-login usually takes 15–30 seconds) and WinTray only handles the main window that appears afterwards. The delay counts from the creation of the program's process, whether WinTray or the program's own auto-start launched it: an instance already auto-started at logon still has to reach the delay before it is handled, while an instance running for longer is handled right away, so the program's own auto-start can stay enabled
 - **Launch Hidden in Background**: Starts the program without any visible window, suitable for command-line and script programs
-- **Pause Task**: Temporarily skip this program's auto-start task; it will run again on the next boot
+- **Pause Task**: Skip this program on every logon until unpaused; "Launch Now" remains available
+
+### Staggered Startup
+
+The global **Launch interval** sets the minimum gap between actual process launches by WinTray: **3 seconds** by default, configurable from **0–120 seconds** (`startupIntervalSeconds` in settings). Older settings without this field use 3 seconds. Setting it to 0 removes the wait, while launches still begin in list order. There is no extra wait before the first launch or after the last one.
+
+- Paused, already-running, invalid and failed entries do not add an interval.
+- Close delays, window detection and waiting for an external autorun run concurrently, without holding up later launches. Hidden console programs are handed to their tray hosts as soon as their tasks finish, not at the end of the batch.
+- "Launch Now" is unaffected. This is fixed-interval staggering, not CPU/memory-adaptive throttling; increase the interval for heavier programs.
+- **Only launches performed by WinTray are paced.** Enabled Windows `Run` entries remain scheduled by Windows; WinTray waits for those programs and handles their windows, without rescheduling them or modifying other programs' startup settings.
 
 ### Window Matching
 
@@ -134,11 +144,15 @@ The source and release package support Windows only; cross-platform builds are n
 | `--background`      | Start without showing the main window (for auto-start scenarios) |
 | `--autorun`         | Execute managed program tasks automatically (used by auto-start) |
 | `--cleanup-restore` | Only perform cleanup: clear `%LOCALAPPDATA%\WinTray\` and exit   |
-| `--host`            | Internal: hold the tray icon for one console program whose window is hidden; started by WinTray, exits when the program ends or hosting is stopped |
+| `--host`            | Compatibility with older standalone hosts only; new launches do not create additional host processes |
 
-For auto-start, “Exit automatically after all tasks complete” controls whether
-WinTray exits after the task set finishes. When disabled, it remains in the tray;
-“Minimize to tray after launch” controls whether the main window is initially shown.
+At logon, **Exit after tasks (keep hosting)** works as follows:
+- No hosted icons: exit once the tasks finish.
+- Hosted icons remain: hide settings and WinTray's own icon, leaving only the programs' icons; exit after the last hosted program ends or is released.
+- Open WinTray again to access the existing instance's settings. It will not auto-exit while settings are open or a manual launch is in progress.
+- Manually choose "Exit WinTray" to cancel pending tasks, restore hidden program windows, and exit.
+
+With this option disabled, WinTray keeps its own tray icon. "Minimize to tray after launch" controls whether settings are initially shown in that resident mode.
 
 ---
 
@@ -157,13 +171,16 @@ WinTray exits after the task set finishes. When disabled, it remains in the tray
 ## FAQ
 
 **Q: I don't see a main window after launch — how do I access settings?**
-A: Right-click the WinTray icon in the system tray and select "Open Settings".
+A: Right-click WinTray's tray icon and select "Open Settings". If automatic-exit mode leaves only the hosted programs' icons, run `WinTray.exe` again to open settings in the existing process.
 
 **Q: How do I disable auto-start after it's been enabled?**
 A: Uncheck "Run WinTray at logon" in the settings page; the corresponding registry entry will be cleaned up automatically.
 
 **Q: The new QQ doesn't minimize to the tray; instead the login fails or QQ quits.**
 A: The new QQ shows a login window first and quits when that window receives a close message. Set a "Close delay" for it that covers the whole login (auto-login usually takes 15–30 seconds; allow more for manual login). Whether WinTray or QQ's own auto-start launched it, WinTray waits until QQ has been running for the delay and its main window is up before closing it.
+
+**Q: Can QQ's own auto-start and WinTray launch two instances?**
+A: WinTray checks enabled `HKCU/HKLM Run` entries (including 32-bit entries) that directly launch the configured executable, respecting Task Manager's disabled state. If one exists, WinTray only waits for Windows to start the program, for up to 120 seconds, then applies the configured close delay before handling its window. A timeout is logged explicitly, with **no fallback launch**, so a later Windows launch does not create a duplicate. "Launch now" can still start an absent program manually. Detection does not cover scheduled tasks, Startup-folder items, or indirect launches through third-party launchers, and does not change other programs' startup settings.
 
 **Q: A program in my list isn't being minimized automatically.**
 A: Make sure the program has "Close window after launch" enabled, and that WinTray was triggered with the `--autorun` flag (auto-start does this automatically). If the program starts slowly, try increasing the retry seconds setting.

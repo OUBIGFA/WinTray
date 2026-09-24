@@ -9,10 +9,11 @@ import (
 )
 
 type Controller struct {
-	notifyIcon *walk.NotifyIcon
-	openAction *walk.Action
-	exitAction *walk.Action
-	language   string
+	notifyIcon    *walk.NotifyIcon
+	openAction    *walk.Action
+	exitAction    *walk.Action
+	language      string
+	exitRequested bool
 }
 
 func New(
@@ -20,6 +21,7 @@ func New(
 	showMainWindow func(),
 	exitApp func(),
 	language string,
+	visible bool,
 ) (*Controller, error) {
 	ni, err := walk.NewNotifyIcon(window)
 	if err != nil {
@@ -40,6 +42,9 @@ func New(
 
 	openAction := walk.NewAction()
 	openAction.Triggered().Attach(func() {
+		if c.exitRequested {
+			return
+		}
 		showMainWindow()
 	})
 	c.openAction = openAction
@@ -47,19 +52,26 @@ func New(
 
 	exitAction := walk.NewAction()
 	exitAction.Triggered().Attach(func() {
+		if c.exitRequested {
+			return
+		}
+		// Mark the controller before invoking the application callback. The
+		// callback closes the main window asynchronously, so queued tray
+		// activation messages must not reopen it during that interval.
+		c.exitRequested = true
 		exitApp()
 	})
 	c.exitAction = exitAction
 	ni.ContextMenu().Actions().Add(exitAction)
 
 	ni.MouseDown().Attach(func(x, y int, button walk.MouseButton) {
-		if button == walk.LeftButton {
+		if button == walk.LeftButton && !c.exitRequested {
 			showMainWindow()
 		}
 	})
 
 	c.SetLanguage(language)
-	if err = ni.SetVisible(true); err != nil {
+	if err = ni.SetVisible(visible); err != nil {
 		disposeNotifyIcon(ni)
 		return nil, err
 	}
@@ -80,6 +92,13 @@ func (c *Controller) SetLanguage(language string) {
 	if c.exitAction != nil {
 		c.exitAction.SetText(msg.TrayExit)
 	}
+}
+
+func (c *Controller) SetVisible(visible bool) error {
+	if c == nil || c.notifyIcon == nil {
+		return nil
+	}
+	return c.notifyIcon.SetVisible(visible)
 }
 
 func (c *Controller) Dispose() {

@@ -33,7 +33,10 @@ func (s *Store) LoadWithError() (Settings, error) {
 	if err != nil {
 		return DefaultSettings(), err
 	}
-	var settings Settings
+	// Only the new field gets a decoding default. Seeding all defaults would
+	// change legacy migration; a missing interval should become 3, while an
+	// explicitly configured zero must survive loading and saving.
+	settings := Settings{StartupIntervalSeconds: DefaultStartupIntervalSeconds}
 	if err = json.Unmarshal(data, &settings); err != nil {
 		_ = backupInvalidSettingsFile(s.path, data)
 		return DefaultSettings(), fmt.Errorf("invalid settings: %w", err)
@@ -121,6 +124,7 @@ func migrate(settings Settings) Settings {
 		}
 		settings.SchemaVersion = 3
 	}
+	settings.StartupIntervalSeconds = ClampStartupIntervalSeconds(settings.StartupIntervalSeconds)
 	if settings.CloseWindowRetrySeconds < 0 {
 		settings.CloseWindowRetrySeconds = 0
 	}

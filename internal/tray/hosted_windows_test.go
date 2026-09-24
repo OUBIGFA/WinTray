@@ -5,9 +5,12 @@ package tray
 import (
 	"errors"
 	"os"
+	"runtime"
 	"testing"
+	"time"
 
 	"github.com/lxn/walk"
+	"github.com/lxn/win"
 	"golang.org/x/sys/windows"
 )
 
@@ -80,7 +83,7 @@ func TestHostedWindowRejectsMissingIdentity(t *testing.T) {
 	}
 }
 
-func TestReleaseHostingShowsWindowAndDropsIconWithoutQuittingProgram(t *testing.T) {
+func TestReleaseHostingKeepsIconWhenWindowCannotBeRestored(t *testing.T) {
 	oldDefer := deferOnUIThread
 	t.Cleanup(func() { deferOnUIThread = oldDefer })
 	deferOnUIThread = func(_ *hostedItem, f func()) { f() }
@@ -106,15 +109,58 @@ func TestReleaseHostingShowsWindowAndDropsIconWithoutQuittingProgram(t *testing.
 	if lookups != 1 {
 		t.Fatalf("window lookups = %d, want 1 (the window is shown once)", lookups)
 	}
-	if host.Count() != 0 || emptied != 1 {
-		t.Fatalf("count=%d onEmpty calls=%d; want 0 and 1", host.Count(), emptied)
+	if host.Count() != 1 || emptied != 0 || item.closed {
+		t.Fatalf("failed restoration dropped recovery entry: count=%d empty=%d closed=%t", host.Count(), emptied, item.closed)
 	}
 	select {
 	case <-item.stop:
+		t.Fatal("failed restoration stopped the process watcher")
 	default:
-		t.Fatal("process watcher was not stopped")
 	}
-	if !item.closed {
-		t.Fatal("item not marked closed")
+}
+
+func TestReleaseHostingShowsWindowBeforeDroppingIcon(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	class, err := windows.UTF16PtrFromString("STATIC")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A disposable off-screen native window: no manifest, taskbar entry,
+	// settings, tray icon or other program is touched by this test.
+	hwnd := win.CreateWindowEx(win.WS_EX_TOOLWINDOW|win.WS_EX_NOACTIVATE, class, nil, win.WS_POPUP, -10000, -10000, 10, 10, 0, 0, 0, nil)
+	if hwnd == 0 {
+		t.Fatal("could not create test window")
+	}
+	defer win.DestroyWindow(hwnd)
+	pid := uint32(os.Getpid())
+	host := NewHost("en-US", testLogger{}, func(uint32) uintptr { return uintptr(hwnd) })
+	item := &hostedItem{host: host, info: HostedWindow{ProcessID: pid, Name: "test"}, stop: make(chan struct{})}
+	host.items[pid] = item
+	done := make(chan struct{})
+	oldDefer := deferOnUIThread
+	t.Cleanup(func() { deferOnUIThread = oldDefer })
+	deferOnUIThread = func(_ *hostedItem, f func()) { f(); close(done) }
+	item.releaseHosting()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		select {
+		case <-done:
+			if !win.IsWindowVisible(hwnd) || host.Count() != 0 || !item.closed {
+				t.Fatalf("window must be visible before removal: visible=%t count=%d closed=%t", win.IsWindowVisible(hwnd), host.Count(), item.closed)
+			}
+			return
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("restored window did not release hosting")
+		}
+		// ShowWindowAsync intentionally needs the target UI thread to pump.
+		var message win.MSG
+		for win.PeekMessage(&message, 0, 0, 0, win.PM_REMOVE) {
+			win.TranslateMessage(&message)
+			win.DispatchMessage(&message)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

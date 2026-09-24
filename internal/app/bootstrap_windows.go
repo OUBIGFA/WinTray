@@ -4,6 +4,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -84,43 +85,128 @@ func Run(args []string) int {
 		logger.Warn(fmt.Sprintf("load settings failed; defaults kept in memory: %v", settingsErr))
 	}
 
+	registrar := startup.NewRegistrar()
+	return runMainSession(args, settings, sessionServices{
+		store: store, logger: logger, activationName: activationEvent,
+		setRunAtLogon: func(s config.Settings) { ensureRunAtLogon(registrar, s, logger) },
+	})
+}
+
+type sessionServices struct {
+	store          *config.Store
+	logger         *logging.Logger
+	activationName string
+	setRunAtLogon  func(config.Settings)
+}
+
+// runMainSession owns UI, startup workers and hosted icons for one instance.
+// Registry registration and data paths are supplied by the composition root.
+func runMainSession(args []string, settings config.Settings, services sessionServices) int {
+	store, logger := services.store, services.logger
 	enumerator := orchestrator.NewWin32WindowEnumerator()
 	manager := orchestrator.NewWin32WindowManager()
 	orch := orchestrator.NewService(enumerator, manager, logger)
-	registrar := startup.NewRegistrar()
 	launchCtx, cancelLaunches := context.WithCancel(context.Background())
 	var launchWG sync.WaitGroup
-	defer func() {
-		// Launches still in flight finish, and hand their program to a host
-		// process, before this process goes away.
-		cancelLaunches()
-		launchWG.Wait()
-	}()
-	// A program whose window WinTray hid gets its tray icon from a detached
-	// host process, so the icon outlives this process. A failed hand-off shows
-	// the window again instead of leaving the program unreachable.
-	handOffToHost := func(hw tray.HostedWindow, language string) {
-		if spawnErr := spawnHostProcess(hw, language); spawnErr != nil {
-			logger.Warn(fmt.Sprintf("tray host spawn failed: %s pid=%d %v", hw.Name, hw.ProcessID, spawnErr))
-			tray.RestoreWindow(hw, orchestrator.FindConsoleWindow, logger)
-			return
-		}
-		logger.Info(fmt.Sprintf("tray host spawned: %s pid=%d hwnd=0x%X", hw.Name, hw.ProcessID, hw.Handle))
-	}
-
-	if isAutorunLaunch(args) {
-		logger.Info(fmt.Sprintf("autorun mode: run managed apps (exitAfterCompleted=%t)", settings.ExitAfterManagedAppsCompleted))
-		for _, hw := range runManagedApps(launchCtx, orch, settings, logger) {
-			handOffToHost(hw, settings.Language)
-		}
-		if settings.ExitAfterManagedAppsCompleted {
-			return 0
-		}
-	}
-
 	var trayController *tray.Controller
 	var mainWindow *ui.MainWindow
-	activation, activationErr := ipc.NewActivationListener(activationEvent)
+	host := tray.NewHost(settings.Language, logger, orchestrator.FindConsoleWindow)
+	state := residencyState{autorun: isAutorunLaunch(args), startupPending: isAutorunLaunch(args)}
+	state.settingsOpen = shouldShowMainWindowForSettings(args, settings)
+	quitting := false
+	defer func() {
+		cancelLaunches()
+		launchWG.Wait()
+		host.RestoreAll()
+	}()
+
+	// Keep pumping UI messages while outstanding work is cancelled and hidden
+	// windows are recovered. Closing the message loop first loses hand-offs.
+	requestExit := func() {
+		if quitting {
+			return
+		}
+		quitting = true
+		logger.Info("shutdown requested: cancelling pending tasks")
+		cancelLaunches()
+		mainWindow.Native().SetEnabled(false)
+		// Dispose the icon before closing the window so an open shell menu is
+		// dismissed immediately instead of being left behind while workers stop.
+		if trayController != nil {
+			trayController.Dispose()
+		}
+		mainWindow.RequestExplicitClose()
+	}
+	applyResidency := func() {
+		if quitting || mainWindow == nil {
+			return
+		}
+		exitAfter := mainWindow.Settings().ExitAfterManagedAppsCompleted
+		if trayController != nil {
+			if err := trayController.SetVisible(!state.hideMainIcon(exitAfter)); err != nil {
+				logger.Warn(fmt.Sprintf("update main tray visibility failed: %v", err))
+			}
+		}
+		if state.shouldExit(exitAfter, host.Count()) {
+			requestExit()
+		}
+	}
+	host.SetOnEmpty(applyResidency)
+	openSettings := func() {
+		if quitting {
+			return
+		}
+		state.settingsOpen = true
+		applyResidency()
+		mainWindow.ShowMainWindow()
+	}
+
+	// Called by launch workers. Host icons belong to this process and are
+	// created on its UI thread, not in additional WinTray processes.
+	handOffToHost := func(hw tray.HostedWindow) {
+		restore := func() { tray.RestoreWindow(hw, orchestrator.FindConsoleWindow, logger) }
+		for attempt := 1; attempt <= hostAddAttempts; attempt++ {
+			done := make(chan struct{})
+			var handled sync.Once
+			var hostErr error
+			mainWindow.Synchronize(func() {
+				defer close(done)
+				handled.Do(func() {
+					if hostErr = launchCtx.Err(); hostErr == nil {
+						hostErr = host.TryAdd(hw)
+					}
+				})
+			})
+			select {
+			case <-done:
+				if hostErr == nil {
+					return
+				}
+			case <-launchCtx.Done():
+				// Prevent a late callback from adopting a restored window.
+				handled.Do(func() {})
+				restore()
+				return
+			}
+			logger.Warn(fmt.Sprintf("tray hosting attempt %d failed: %s pid=%d %v", attempt, hw.Name, hw.ProcessID, hostErr))
+			if errors.Is(hostErr, tray.ErrHostedProcessUnavailable) || attempt == hostAddAttempts {
+				break
+			}
+			// Explorer may not accept icons yet at logon. Retry off the UI
+			// thread so other launches, activation and exit remain responsive.
+			timer := time.NewTimer(hostAddDelay)
+			select {
+			case <-timer.C:
+			case <-launchCtx.Done():
+				timer.Stop()
+				restore()
+				return
+			}
+		}
+		restore()
+	}
+
+	activation, activationErr := ipc.NewActivationListener(services.activationName)
 	if activationErr != nil {
 		logger.Warn(fmt.Sprintf("activation listener unavailable: %v", activationErr))
 	}
@@ -146,25 +232,28 @@ func Run(args []string) int {
 			return
 		}
 
-		ensureRunAtLogon(registrar, defaults, logger)
+		services.setRunAtLogon(defaults)
 		if scheduleErr := scheduleAppDataCleanupOnExit(); scheduleErr != nil {
 			mainWindow.ShowError(m.CleanupFailedTitle, fmt.Sprintf(m.CleanupFailedBody, scheduleErr))
 			return
 		}
 
 		mainWindow.ShowInfo(m.CleanupDoneTitle, m.CleanupDoneBody)
-		mainWindow.RequestExplicitClose()
+		requestExit()
 	}
 
+	var err error
 	mainWindow, err = ui.NewMainWindow(settings, ui.Callbacks{
 		OnSave: func(s config.Settings) {
 			if saveErr := store.Save(s); saveErr != nil {
 				logger.Warn(fmt.Sprintf("save settings failed: %v", saveErr))
 			}
-			ensureRunAtLogon(registrar, s, logger)
+			services.setRunAtLogon(s)
 			if trayController != nil {
 				trayController.SetLanguage(s.Language)
 			}
+			host.SetLanguage(s.Language)
+			applyResidency()
 		},
 		OnOpenLogs: func() {
 			if openErr := openLogLocation(); openErr != nil {
@@ -175,6 +264,10 @@ func Run(args []string) int {
 		},
 		OnCleanupRestore: cleanupAndRestore,
 		OnLaunchNow: func(entry config.ManagedAppEntry) {
+			if quitting || state.startupPending {
+				return
+			}
+			state.manualLaunches++
 			current := mainWindow.Settings()
 			retrySeconds := current.CloseWindowRetrySeconds
 			language := current.Language
@@ -183,8 +276,12 @@ func Run(args []string) int {
 				defer launchWG.Done()
 				result := orch.StartNow(launchCtx, entry, retrySeconds)
 				if hw, ok := hostedFromResult(entry, result); ok {
-					handOffToHost(hw, language)
+					handOffToHost(hw)
 				}
+				mainWindow.Synchronize(func() {
+					state.manualLaunches--
+					applyResidency()
+				})
 				if launchCtx.Err() != nil {
 					return
 				}
@@ -206,9 +303,17 @@ func Run(args []string) int {
 			}()
 		},
 		OnCheckUpdate: func() {
+			if quitting {
+				return
+			}
 			language := safeLanguage(mainWindow)
+			launchWG.Add(1)
 			go func() {
-				result, checkErr := update.Check(context.Background(), version.Number)
+				defer launchWG.Done()
+				result, checkErr := update.Check(launchCtx, version.Number)
+				if launchCtx.Err() != nil {
+					return
+				}
 				m := i18n.For(language)
 				mainWindow.SetCheckUpdateBusy(false)
 				if checkErr != nil {
@@ -221,7 +326,7 @@ func Run(args []string) int {
 					mainWindow.ShowInfo(m.UpdateTitle, fmt.Sprintf(m.UpdateLatestBody, result.Latest))
 					return
 				}
-				if mainWindow.Confirm(m.UpdateTitle, fmt.Sprintf(m.UpdateAvailableBody, result.Latest, result.Current)) {
+				if mainWindow.ConfirmContext(launchCtx, m.UpdateTitle, fmt.Sprintf(m.UpdateAvailableBody, result.Latest, result.Current)) {
 					openRepository(result.PageURL, logger)
 				}
 			}()
@@ -229,8 +334,10 @@ func Run(args []string) int {
 		OnOpenRepository: func() {
 			openRepository(version.RepositoryURL, logger)
 		},
-		OnExit: func() {
-			mainWindow.RequestExplicitClose()
+		OnExit: requestExit,
+		OnHideToTray: func() {
+			state.settingsOpen = false
+			applyResidency()
 		},
 	})
 	if err != nil {
@@ -240,17 +347,18 @@ func Run(args []string) int {
 	}
 	if activation != nil {
 		activation.Start(func() {
-			mainWindow.ShowMainWindow()
+			mainWindow.Synchronize(openSettings)
 		})
 	}
 
-	ensureRunAtLogon(registrar, settings, logger)
+	services.setRunAtLogon(settings)
 
 	trayController, err = tray.New(
 		mainWindow.Native(),
-		mainWindow.ShowMainWindow,
-		func() { mainWindow.RequestExplicitClose() },
+		openSettings,
+		requestExit,
 		settings.Language,
+		!state.hideMainIcon(settings.ExitAfterManagedAppsCompleted),
 	)
 	if err != nil {
 		logger.Error(fmt.Sprintf("create tray failed: %v", err))
@@ -259,65 +367,59 @@ func Run(args []string) int {
 	}
 	defer trayController.Dispose()
 
-	showMainWindow := shouldShowMainWindowForSettings(args, settings)
-	if showMainWindow {
+	if state.settingsOpen {
 		mainWindow.ShowMainWindow()
 	} else {
 		mainWindow.HideMainWindow()
 	}
 
-	exitCode := mainWindow.Run()
+	if state.autorun {
+		// The message loop must exist before tasks can hand it hidden windows.
+		mainWindow.SetLaunchNowBusy(true)
+		mainWindow.Native().Starting().Attach(func() {
+			logger.Info(fmt.Sprintf("autorun mode: run managed apps (exitAfterCompleted=%t)", settings.ExitAfterManagedAppsCompleted))
+			launchWG.Add(1)
+			go func() {
+				defer launchWG.Done()
+				runManagedApps(launchCtx, orch, settings, logger, handOffToHost)
+				mainWindow.Synchronize(func() {
+					state.startupPending = false
+					mainWindow.SetLaunchNowBusy(false)
+					applyResidency()
+				})
+			}()
+		})
+	}
 
-	return exitCode
+	return mainWindow.Run()
 }
 
-// runManagedApps runs the logon task set and returns the programs whose
-// windows WinTray hid itself; those need a host process for their tray icon.
-func runManagedApps(ctx context.Context, orch *orchestrator.Service, settings config.Settings, logger *logging.Logger) []tray.HostedWindow {
+// runManagedApps hands hidden windows to their hosts as soon as each task
+// finishes. Waiting for the whole batch would leave early programs unreachable
+// behind long close delays or a missing external startup later in the list.
+func runManagedApps(ctx context.Context, orch *orchestrator.Service, settings config.Settings, logger *logging.Logger, onHosted func(tray.HostedWindow)) {
 	msg := i18n.For(settings.Language)
-	managedEntries := make([]config.ManagedAppEntry, 0, len(settings.ManagedApps))
-	for _, entry := range settings.ManagedApps {
-		if config.ShouldLaunchViaWinTray(entry) {
-			managedEntries = append(managedEntries, entry)
+	results := orch.StartManagedApps(ctx, settings, func(entry config.ManagedAppEntry, result orchestrator.Result) {
+		if !result.Managed {
+			logger.Warn(fmt.Sprintf("managed startup app failed: %s %s", result.AppName, result.Message))
 		}
+		if hw, ok := hostedFromResult(entry, result); ok {
+			onHosted(hw)
+		}
+	})
+	if len(results) == 0 {
+		logger.Info(fmt.Sprintf("managed summary: %s", msg.RunSummaryNone))
 	}
-
-	summaries := make([]string, len(managedEntries))
-	var hosted []tray.HostedWindow
-	var hostedMu sync.Mutex
-	var wg sync.WaitGroup
-	for i, entry := range managedEntries {
-		i := i
-		entry := entry
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			result := processManagedEntry(ctx, orch, settings, entry, logger)
-			if hw, ok := hostedFromResult(entry, result); ok {
-				hostedMu.Lock()
-				hosted = append(hosted, hw)
-				hostedMu.Unlock()
-			}
-
-			detail := i18n.TranslateResultCode(settings.Language, string(result.Code))
-			if detail == "" {
-				detail = i18n.TranslateResultMessage(settings.Language, result.Message)
-			}
-			if !result.Managed && (i18n.IsLikelyPermissionCode(string(result.Code)) || i18n.IsLikelyPermissionIssue(result.Message)) {
-				detail += " " + msg.StatusPermissionHint
-			}
-			summaries[i] = fmt.Sprintf(msg.RunSummaryLine, result.AppName, detail)
-		}()
+	for _, result := range results {
+		detail := i18n.TranslateResultCode(settings.Language, string(result.Code))
+		if detail == "" {
+			detail = i18n.TranslateResultMessage(settings.Language, result.Message)
+		}
+		if !result.Managed && (i18n.IsLikelyPermissionCode(string(result.Code)) || i18n.IsLikelyPermissionIssue(result.Message)) {
+			detail += " " + msg.StatusPermissionHint
+		}
+		logger.Info(fmt.Sprintf("managed summary: "+msg.RunSummaryLine, result.AppName, detail))
 	}
-	wg.Wait()
-
-	if len(managedEntries) == 0 {
-		summaries = append(summaries, msg.RunSummaryNone)
-	}
-	for _, line := range summaries {
-		logger.Info(fmt.Sprintf("managed summary: %s", line))
-	}
-	return hosted
 }
 
 // hostedFromResult converts a result whose window WinTray hid itself into a
@@ -332,21 +434,6 @@ func hostedFromResult(entry config.ManagedAppEntry, result orchestrator.Result) 
 		Handle:    result.Hidden.Handle,
 		ProcessID: result.Hidden.ProcessID,
 	}, true
-}
-
-func processManagedEntry(ctx context.Context, orch *orchestrator.Service, settings config.Settings, entry config.ManagedAppEntry, logger *logging.Logger) orchestrator.Result {
-	if entry.TrayBehavior.AutoMinimizeAndHideOnLaunch {
-		existing := orch.HideExisting(ctx, entry, settings.CloseWindowRetrySeconds)
-		if existing.Managed {
-			return existing
-		}
-	}
-
-	result := orch.StartAndManage(ctx, entry, settings.CloseWindowRetrySeconds)
-	if !result.Managed {
-		logger.Warn(fmt.Sprintf("managed startup app failed: %s %s", result.AppName, result.Message))
-	}
-	return result
 }
 
 func ensureRunAtLogon(registrar *startup.Registrar, settings config.Settings, logger *logging.Logger) {

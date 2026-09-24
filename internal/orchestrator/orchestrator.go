@@ -21,10 +21,12 @@ import (
 // windowOptional treats window handling as best effort: a program that never
 // opens a window (background scripts) still counts as a successful launch.
 type startOptions struct {
-	hideProcessWindow bool
-	hideConsoleWindow bool
-	manageWindow      bool
-	windowOptional    bool
+	hideProcessWindow      bool
+	hideConsoleWindow      bool
+	manageWindow           bool
+	windowOptional         bool
+	respectExternalStartup bool
+	turn                   *startupTurn
 }
 
 func (o startOptions) launchMode() launchMode {
@@ -38,11 +40,16 @@ func (o startOptions) launchMode() launchMode {
 	}
 }
 
+func managedStartOptions(entry config.ManagedAppEntry) startOptions {
+	return startOptions{
+		respectExternalStartup: true,
+		hideProcessWindow:      entry.LaunchHiddenInBackground,
+		manageWindow:           !entry.LaunchHiddenInBackground && entry.TrayBehavior.AutoMinimizeAndHideOnLaunch,
+	}
+}
+
 func (s *Service) StartAndManage(ctx context.Context, entry config.ManagedAppEntry, retrySeconds int) Result {
-	return s.start(ctx, entry, retrySeconds, startOptions{
-		hideProcessWindow: entry.LaunchHiddenInBackground,
-		manageWindow:      !entry.LaunchHiddenInBackground && entry.TrayBehavior.AutoMinimizeAndHideOnLaunch,
-	})
+	return s.start(ctx, entry, retrySeconds, managedStartOptions(entry))
 }
 
 // StartNow launches the entry on demand using the very same behavior configured
@@ -58,6 +65,11 @@ func (s *Service) StartNow(ctx context.Context, entry config.ManagedAppEntry, re
 }
 
 func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retrySeconds int, opts startOptions) Result {
+	// Every validation/error path must let the next queued entry proceed.
+	defer opts.turn.finish(false)
+	if ctx.Err() != nil {
+		return cancelledResult(entry)
+	}
 	if entry.ExePath == "" {
 		return Result{AppName: entry.Name, Managed: false, Code: ResultEmptyExePath, Message: "empty exe path"}
 	}
@@ -74,40 +86,55 @@ func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retry
 	// window hidden and reachable from a tray icon" for these programs.
 	consoleProgram := opts.manageWindow && consoleExecutableCheck(entry.ExePath)
 
-	if s.hasExistingManagedProcess(expectedPath, expectedName) || s.hasExistingManagedWindow(expectedPath, expectedName) {
-		s.logger.Info(fmt.Sprintf("skip start: already running %s", entry.Name))
-		if consoleProgram {
-			if hidden, ok := s.adoptRunningConsole(ctx, entry, expectedPath, expectedName); ok {
-				return hiddenToTrayResult(entry, hidden)
+	running := s.hasExistingManagedProcess(expectedPath, expectedName) || s.hasExistingManagedWindow(expectedPath, expectedName)
+	if !running && opts.respectExternalStartup {
+		source, err := s.externalStartupLookup(entry.ExePath)
+		if err != nil {
+			s.logger.Error(fmt.Sprintf("startup check failed: %s err=%v (not launching to avoid a duplicate)", entry.Name, err))
+			return Result{AppName: entry.Name, Code: ResultStartupCheckFailed, Message: "startup check failed"}
+		}
+		if source != "" {
+			opts.turn.finish(false)
+			s.logger.Info(fmt.Sprintf("external startup owns launch: %s source=%s wait=%s", entry.Name, source, s.externalStartupWait))
+			running = s.waitForExternalStartup(ctx, expectedPath, expectedName)
+			if ctx.Err() != nil {
+				return cancelledResult(entry)
+			}
+			if !running {
+				s.logger.Warn(fmt.Sprintf("external startup timed out: %s source=%s (no fallback launch to avoid a duplicate)", entry.Name, source))
+				return Result{AppName: entry.Name, Code: ResultExternalStartupTimeout, Message: "external startup timeout"}
 			}
 		}
-		if opts.manageWindow {
-			// The program may have started itself (its own autorun entry) moments
-			// ago, so its close delay is honoured here as well.
-			if !s.waitQuietPeriod(ctx, entry, nil, expectedPath, expectedName) {
-				return Result{AppName: entry.Name, Managed: true, Code: ResultAlreadyRunningSkipped, Message: "already running skipped"}
-			}
-			managed, ok := s.manageFirstMatchingWindow(ctx, func(w ManagedWindowInfo) bool {
-				return matchesExecutableWithIdentityFallback(w, expectedPath, expectedName)
-			}, expectedPath, expectedName, nil, nil, retrySeconds, "close", closeDelay(entry))
-			if ok {
-				return managedResult(entry, managed, ResultAlreadyRunningManaged, "already running managed existing")
-			}
-		}
-		return Result{AppName: entry.Name, Managed: true, Code: ResultAlreadyRunningSkipped, Message: "already running skipped"}
+	}
+	if running {
+		return s.manageRunning(ctx, entry, retrySeconds, opts, consoleProgram, expectedPath, expectedName)
 	}
 
+	if !opts.turn.wait(ctx) {
+		return cancelledResult(entry)
+	}
+	baseline := s.captureBaseline(func(w ManagedWindowInfo) bool {
+		return matchesExecutableWithIdentityFallback(w, expectedPath, expectedName)
+	})
+	// Window enumeration takes time; an externally started process may have
+	// appeared since the first check. Recheck before creating a new process.
+	if ctx.Err() != nil {
+		return cancelledResult(entry)
+	}
+	if s.hasExistingManagedProcess(expectedPath, expectedName) || s.hasExistingManagedWindow(expectedPath, expectedName) {
+		return s.manageRunning(ctx, entry, retrySeconds, opts, consoleProgram, expectedPath, expectedName)
+	}
 	if consoleProgram {
 		s.logger.Info(fmt.Sprintf("console executable detected, launching with hidden console for tray hosting: %s", entry.Name))
 		opts.hideConsoleWindow = true
 		opts.manageWindow = false
 	}
 
-	baseline := s.captureBaseline(func(w ManagedWindowInfo) bool {
-		return matchesExecutableWithIdentityFallback(w, expectedPath, expectedName)
-	})
-
+	if ctx.Err() != nil {
+		return cancelledResult(entry)
+	}
 	cmd, err := startProcess(entry.ExePath, entry.Args, opts.launchMode())
+	opts.turn.finish(err == nil)
 	if err != nil {
 		s.logger.Error(fmt.Sprintf("start failed: %s err=%v", entry.Name, err))
 		return Result{AppName: entry.Name, Managed: false, Code: ResultProcessStartFailed, Message: "process start failed"}
@@ -135,6 +162,56 @@ func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retry
 		return windowNotManagedResult(entry, opts)
 	}
 	return managedResult(entry, managed, ResultManaged, "managed")
+}
+
+// waitForExternalStartup observes a registered launch; it must never fall back
+// to launching itself, even after timeout. Windows may defer Run entries longer
+// than any fixed grace period, and QQ permits more than one main instance.
+func (s *Service) waitForExternalStartup(ctx context.Context, expectedPath, expectedName string) bool {
+	waitCtx, cancel := context.WithTimeout(ctx, s.externalStartupWait)
+	defer cancel()
+	for waitCtx.Err() == nil {
+		if s.hasExistingManagedProcess(expectedPath, expectedName) || s.hasExistingManagedWindow(expectedPath, expectedName) {
+			return true
+		}
+		if !waitWithContext(waitCtx, 250*time.Millisecond) {
+			break
+		}
+	}
+	return false
+}
+
+func cancelledResult(entry config.ManagedAppEntry) Result {
+	return Result{AppName: entry.Name, Code: ResultCancelled, Message: "cancelled"}
+}
+
+func (s *Service) manageRunning(ctx context.Context, entry config.ManagedAppEntry, retrySeconds int, opts startOptions, consoleProgram bool, expectedPath, expectedName string) Result {
+	opts.turn.finish(false)
+	if ctx.Err() != nil {
+		return cancelledResult(entry)
+	}
+	s.logger.Info(fmt.Sprintf("skip start: already running %s", entry.Name))
+	if consoleProgram {
+		if hidden, ok := s.adoptRunningConsole(ctx, entry, expectedPath, expectedName); ok {
+			return hiddenToTrayResult(entry, hidden)
+		}
+	}
+	if opts.manageWindow {
+		// A self-started process gets the same login-window protection.
+		if !s.waitQuietPeriod(ctx, entry, nil, expectedPath, expectedName) {
+			return cancelledResult(entry)
+		}
+		managed, ok := s.manageFirstMatchingWindow(ctx, func(w ManagedWindowInfo) bool {
+			return matchesExecutableWithIdentityFallback(w, expectedPath, expectedName)
+		}, expectedPath, expectedName, nil, nil, retrySeconds, "close", closeDelay(entry))
+		if ok {
+			return managedResult(entry, managed, ResultAlreadyRunningManaged, "already running managed existing")
+		}
+		if ctx.Err() != nil {
+			return cancelledResult(entry)
+		}
+	}
+	return Result{AppName: entry.Name, Managed: true, Code: ResultAlreadyRunningSkipped, Message: "already running skipped"}
 }
 
 // closeDelay is how long the program must have been running before its

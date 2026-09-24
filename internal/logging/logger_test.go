@@ -1,7 +1,9 @@
 package logging
 
 import (
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -60,6 +62,94 @@ func TestLoggerConcurrentRotationAndClose(t *testing.T) {
 	}()
 	close(start)
 	wg.Wait()
+}
+
+func TestLoggersShareRotationWithoutHoldingFilesOpen(t *testing.T) {
+	dir := t.TempDir()
+	first, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	second, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	first.Info(strings.Repeat("x", maxLogSize))
+	second.Info("written after another logger rotated")
+	first.Info("first logger also follows the current file")
+	current, err := os.ReadFile(filepath.Join(dir, "wintray.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(current) >= maxLogSize || !strings.Contains(string(current), "written after") || !strings.Contains(string(current), "first logger") {
+		t.Fatalf("loggers did not follow rotation: current size %d", len(current))
+	}
+	old, err := os.Stat(filepath.Join(dir, "wintray.log.old"))
+	if err != nil || old.Size() < maxLogSize {
+		t.Fatalf("shared log did not rotate: info=%v err=%v", old, err)
+	}
+	// A live detached host's logger must not hold the data directory hostage.
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("live loggers blocked cleanup: %v", err)
+	}
+}
+
+func TestLoggerConcurrentProcesses(t *testing.T) {
+	dir := t.TempDir()
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	commands := make([]*exec.Cmd, 2)
+	for i := range commands {
+		cmd := exec.Command(self, "-test.run=^TestLoggerProcessHelper$")
+		cmd.Env = append(os.Environ(), "WINTRAY_LOG_HELPER_DIR="+dir, fmt.Sprintf("WINTRAY_LOG_HELPER_ID=%d", i))
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = cmd.Process.Kill() })
+		commands[i] = cmd
+	}
+	for _, cmd := range commands {
+		if err := cmd.Wait(); err != nil {
+			t.Fatalf("log helper failed: %v", err)
+		}
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "wintray.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 200 {
+		t.Fatalf("concurrent log lines = %d, want 200", len(lines))
+	}
+	for writer := range commands {
+		for line := 0; line < 100; line++ {
+			marker := fmt.Sprintf("[INFO] writer-%d-line-%d\n", writer, line)
+			if strings.Count(string(data), marker) != 1 {
+				t.Fatalf("missing/duplicated concurrent log line %q", marker)
+			}
+		}
+	}
+}
+
+func TestLoggerProcessHelper(t *testing.T) {
+	dir := os.Getenv("WINTRAY_LOG_HELPER_DIR")
+	if dir == "" {
+		return
+	}
+	logger, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 100; i++ {
+		logger.Info(fmt.Sprintf("writer-%s-line-%d", os.Getenv("WINTRAY_LOG_HELPER_ID"), i))
+	}
+	if err := logger.Close(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestLoggerRotatesOversizedFile(t *testing.T) {

@@ -41,7 +41,7 @@ func shouldShowMainWindowForSettings(args []string, settings config.Settings) bo
 	if !shouldShowMainWindow(args) {
 		return false
 	}
-	return !isAutorunLaunch(args) || !settings.StartMinimizedToTray
+	return !isAutorunLaunch(args) || (!settings.StartMinimizedToTray && !settings.ExitAfterManagedAppsCompleted)
 }
 
 func shouldSignalRunningInstance(args []string) bool {

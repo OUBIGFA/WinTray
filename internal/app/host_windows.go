@@ -5,9 +5,6 @@ package app
 import (
 	"errors"
 	"fmt"
-	"os"
-	"os/exec"
-	"syscall"
 	"time"
 
 	"github.com/lxn/walk"
@@ -29,25 +26,9 @@ func hostMutexName(pid uint32) string {
 	return fmt.Sprintf("WinTray_Host_%d", pid)
 }
 
-// spawnHostProcess starts a detached "wintray.exe --host" that owns the
-// program's tray icon independently of this process, so the icon stays usable
-// after WinTray exits. When the spawn fails nobody can bring the hidden window
-// back, so the caller must restore it.
-func spawnHostProcess(hw tray.HostedWindow, language string) error {
-	exe, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	spec := hostSpec{PID: hw.ProcessID, Handle: hw.Handle, Name: hw.Name, ExePath: hw.ExePath, Language: language}
-	cmd := exec.Command(exe, hostArgs(spec)...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	return cmd.Process.Release()
-}
-
-// runHostMode is the detached host process. It owns exactly one hosted tray
+// runHostMode retains compatibility with older --host invocations. New
+// launches are hosted together inside the primary WinTray process.
+// It owns exactly one hosted tray
 // icon and ends when the hosted program does. It touches neither the settings,
 // the single-instance lock nor the main tray icon, so the main WinTray process
 // may exit, restart or never run while the icon keeps working.
@@ -74,6 +55,9 @@ func runHostMode(args []string) int {
 
 	hw := tray.HostedWindow{Name: spec.Name, ExePath: spec.ExePath, Handle: spec.Handle, ProcessID: spec.PID}
 	host := tray.NewHost(spec.Language, logger, orchestrator.FindConsoleWindow)
+	// Also restore if the message-loop window cannot be created after adding
+	// the icon, or the loop returns while a program is still hosted.
+	defer host.RestoreAll()
 	host.SetOnEmpty(func() {
 		logger.Info(fmt.Sprintf("host mode: %s pid=%d ended, exiting", spec.Name, spec.PID))
 		walk.App().Exit(0)

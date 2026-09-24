@@ -34,4 +34,7 @@ func TestStartupPolicy_AutorunHonorsStartMinimizedSetting(t *testing.T) {
 	if !shouldShowMainWindowForSettings(args, config.Settings{StartMinimizedToTray: false}) {
 		t.Fatal("autorun should show when start-minimized is disabled")
 	}
+	if shouldShowMainWindowForSettings(args, config.Settings{ExitAfterManagedAppsCompleted: true}) {
+		t.Fatal("automatic-exit mode should not flash settings while retaining hosted icons")
+	}
 }

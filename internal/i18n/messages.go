@@ -19,8 +19,12 @@ type Messages struct {
 	RunAtLogon                     string
 	StartHidden                    string
 	ExitOnDone                     string
+	ExitOnDoneHint                 string
 	RetrySeconds                   string
 	RetrySecondsInvalid            string
+	StartupInterval                string
+	StartupIntervalInvalid         string
+	StartupIntervalHint            string
 	LanguageLabel                  string
 	ManagedListTitle               string
 	ManagedListCount               string
@@ -105,9 +109,13 @@ var zhCN = Messages{
 	GlobalSettingsTitle:            "全局设置",
 	RunAtLogon:                     "WinTray 开机自启动",
 	StartHidden:                    "启动后最小化到托盘",
-	ExitOnDone:                     "完成所有任务后自动退出",
+	ExitOnDone:                     "任务完成后自动退出（托管时留后台）",
+	ExitOnDoneHint:                 "开机任务完成后，没有托管图标则退出；仍有托管程序时仅隐藏 WinTray 窗口和自身图标，最后一个托管结束后退出。再次打开 WinTray 可进入设置。",
 	RetrySeconds:                   "窗口检测超时 (0–120 秒)",
 	RetrySecondsInvalid:            "超时秒数必须是 0 到 120 的数字。",
+	StartupInterval:                "启动间隔 (0–120 秒)",
+	StartupIntervalInvalid:         "启动间隔必须是 0 到 120 的数字。",
+	StartupIntervalHint:            "按列表顺序错峰启动，默认 3 秒，0 为不等待。只间隔 WinTray 实际拉起的程序；不控制程序自带自启，不影响立即启动或窗口处理。",
 	LanguageLabel:                  "语言:",
 	ManagedListTitle:               "程序列表",
 	ManagedListCount:               "%d 个程序 · %d 个已启用",
@@ -192,9 +200,13 @@ var enUS = Messages{
 	GlobalSettingsTitle:            "Global Settings",
 	RunAtLogon:                     "Run WinTray at logon",
 	StartHidden:                    "Minimize to tray after launch",
-	ExitOnDone:                     "Exit after all tasks complete",
+	ExitOnDone:                     "Exit after tasks (keep hosting)",
+	ExitOnDoneHint:                 "After logon tasks, exit if no hosted icons remain. Otherwise hide WinTray's window and own icon, and exit when the last hosted program ends. Open WinTray again for settings.",
 	RetrySeconds:                   "Window timeout (0–120 s)",
 	RetrySecondsInvalid:            "Retry seconds must be a number between 0 and 120.",
+	StartupInterval:                "Launch interval (0–120 s)",
+	StartupIntervalInvalid:         "Launch interval must be a number between 0 and 120.",
+	StartupIntervalHint:            "Start in list order, 3 seconds apart by default; 0 = no wait. Only spaces processes launched by WinTray, not external autoruns, Launch Now or window handling.",
 	LanguageLabel:                  "Language:",
 	ManagedListTitle:               "Program List",
 	ManagedListCount:               "%d programs · %d enabled",
@@ -326,6 +338,9 @@ func TranslateResultCode(language, code string) string {
 		"empty_exe_path":             "empty exe path",
 		"invalid_exe_path":           "invalid exe path",
 		"process_start_failed":       "process start failed",
+		"startup_check_failed":       "startup check failed",
+		"external_startup_timeout":   "external startup timeout",
+		"cancelled":                  "cancelled",
 		"started_only":               "started only",
 		"started_hidden":             "started hidden",
 		"already_running_skipped":    "already running skipped",
@@ -362,6 +377,21 @@ func TranslateResultMessage(language, message string) string {
 			return "process start failed"
 		}
 		return "启动进程失败"
+	case "startup check failed":
+		if Resolve(language) == LangEnUS {
+			return "could not check Windows startup; skipped launch to avoid a duplicate"
+		}
+		return "无法检查系统自启项，为避免重复启动已跳过"
+	case "external startup timeout":
+		if Resolve(language) == LangEnUS {
+			return "timed out waiting for Windows startup; no duplicate launch attempted"
+		}
+		return "等待程序自启动超时，未重复拉起程序"
+	case "cancelled":
+		if Resolve(language) == LangEnUS {
+			return "cancelled before launch"
+		}
+		return "已取消启动"
 	case "started only":
 		if Resolve(language) == LangEnUS {
 			return "started only"

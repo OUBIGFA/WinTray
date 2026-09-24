@@ -3,6 +3,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"strconv"
@@ -26,6 +27,7 @@ type Callbacks struct {
 	OnCheckUpdate    func()
 	OnOpenRepository func()
 	OnExit           func()
+	OnHideToTray     func()
 }
 
 type MainWindow struct {
@@ -62,6 +64,8 @@ type MainWindow struct {
 	appPauseTask     *walk.CheckBox
 	launchNowBtn     *walk.PushButton
 	retryEdit        *walk.LineEdit
+	intervalEdit     *walk.LineEdit
+	intervalLabel    *walk.Label
 	runAtLogon       *walk.CheckBox
 	startHidden      *walk.CheckBox
 	exitOnDone       *walk.CheckBox
@@ -137,6 +141,9 @@ func NewMainWindow(initial config.Settings, callbacks Callbacks) (*MainWindow, e
 			*canceled = true
 			w.mw.Hide()
 			w.mw.SetVisible(false)
+			if w.callbacks.OnHideToTray != nil {
+				w.callbacks.OnHideToTray()
+			}
 		}
 	})
 
@@ -202,6 +209,28 @@ func (w *MainWindow) buildTopOptions() error {
 	if _, err = walk.NewHSpacer(optionsRow); err != nil {
 		return err
 	}
+
+	w.intervalLabel, err = walk.NewLabel(settingsRow)
+	if err != nil {
+		return err
+	}
+	w.intervalEdit, err = walk.NewLineEdit(settingsRow)
+	if err != nil {
+		return err
+	}
+	w.intervalEdit.SetMinMaxSize(walk.Size{Width: 64}, walk.Size{Width: 64})
+	w.intervalEdit.SetText(strconv.Itoa(w.settings.StartupIntervalSeconds))
+	w.intervalEdit.EditingFinished().Attach(func() {
+		v, convErr := strconv.Atoi(strings.TrimSpace(w.intervalEdit.Text()))
+		if convErr != nil {
+			walk.MsgBox(w.mw, w.mw.Title(), i18n.For(w.settings.Language).StartupIntervalInvalid, walk.MsgBoxIconWarning)
+			v = w.settings.StartupIntervalSeconds
+		}
+		v = config.ClampStartupIntervalSeconds(v)
+		w.settings.StartupIntervalSeconds = v
+		w.intervalEdit.SetText(strconv.Itoa(v))
+		w.save()
+	})
 
 	retryLabel, err := walk.NewLabel(settingsRow)
 	if err != nil {
@@ -610,6 +639,16 @@ func (w *MainWindow) buildFooter() error {
 	if err != nil {
 		return err
 	}
+	cleanupBtn, err := newActionButton(row, func() {
+		if w.callbacks.OnCleanupRestore != nil {
+			w.callbacks.OnCleanupRestore()
+		}
+	})
+	if err != nil {
+		return err
+	}
+	w.cleanupBtn = cleanupBtn
+
 	versionLabel, err := walk.NewLabel(row)
 	if err != nil {
 		return err
@@ -630,16 +669,6 @@ func (w *MainWindow) buildFooter() error {
 		return err
 	}
 	w.openLogsBtn = openLogsBtn
-
-	cleanupBtn, err := newActionButton(row, func() {
-		if w.callbacks.OnCleanupRestore != nil {
-			w.callbacks.OnCleanupRestore()
-		}
-	})
-	if err != nil {
-		return err
-	}
-	w.cleanupBtn = cleanupBtn
 
 	checkUpdateBtn, err := newActionButton(row, w.onCheckUpdate)
 	if err != nil {
@@ -727,7 +756,11 @@ func (w *MainWindow) applyLanguage(language string) {
 	w.runAtLogon.SetText(msg.RunAtLogon)
 	w.startHidden.SetText(msg.StartHidden)
 	w.exitOnDone.SetText(msg.ExitOnDone)
+	w.exitOnDone.SetToolTipText(msg.ExitOnDoneHint)
 	w.retryLabel.SetText(msg.RetrySeconds)
+	w.intervalLabel.SetText(msg.StartupInterval)
+	w.intervalLabel.SetToolTipText(msg.StartupIntervalHint)
+	w.intervalEdit.SetToolTipText(msg.StartupIntervalHint)
 	w.managedTitle.SetText(msg.ManagedListTitle)
 	w.editorTitle.SetText(msg.ManagedEditorTitle)
 	w.pathLabel.SetText(msg.ManagedAppPath)
@@ -956,20 +989,30 @@ func (w *MainWindow) synchronize(f func()) {
 	}
 }
 
+// Synchronize schedules application-owned state changes on the UI thread.
+func (w *MainWindow) Synchronize(f func()) { w.synchronize(f) }
+
 func (w *MainWindow) ShowInfo(title, body string) {
 	w.synchronize(func() {
 		walk.MsgBox(w.mw, title, body, walk.MsgBoxIconInformation)
 	})
 }
 
-// Confirm asks a yes/no question on the UI thread and blocks until answered,
-// so background workers can prompt the user.
-func (w *MainWindow) Confirm(title, body string) bool {
+// ConfirmContext asks on the UI thread without trapping a worker if shutdown
+// ends the message loop before the question is displayed.
+func (w *MainWindow) ConfirmContext(ctx context.Context, title, body string) bool {
 	answer := make(chan bool, 1)
 	w.synchronize(func() {
-		answer <- walk.MsgBox(w.mw, title, body, walk.MsgBoxYesNo|walk.MsgBoxIconQuestion) == walk.DlgCmdYes
+		if ctx.Err() == nil {
+			answer <- walk.MsgBox(w.mw, title, body, walk.MsgBoxYesNo|walk.MsgBoxIconQuestion) == walk.DlgCmdYes
+		}
 	})
-	return <-answer
+	select {
+	case yes := <-answer:
+		return yes
+	case <-ctx.Done():
+		return false
+	}
 }
 
 func (w *MainWindow) ShowError(title, body string) {

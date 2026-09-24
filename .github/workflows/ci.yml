@@ -23,11 +23,13 @@ jobs:
         run: |
           gofmt -l . | ForEach-Object { throw "gofmt required for: $_" }
 
-      - name: Run vet and tests
+      - name: Run vet
         shell: pwsh
-        run: |
-          go vet ./...
-          go test ./... -cover
+        run: go vet ./...
+
+      - name: Run tests
+        shell: pwsh
+        run: go test ./... -cover
 
       - name: Build
         shell: pwsh

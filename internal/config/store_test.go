@@ -118,6 +118,42 @@ func TestShouldLaunchViaWinTray_RunOnStartupIsMasterSwitch(t *testing.T) {
 	}
 }
 
+func TestStartupIntervalDefaultsBoundsAndRoundTrip(t *testing.T) {
+	if got := DefaultSettings().StartupIntervalSeconds; got != 3 {
+		t.Fatalf("default startup interval = %d, want 3 seconds", got)
+	}
+	for _, tc := range []struct {
+		name  string
+		field string
+		want  int
+	}{
+		{name: "legacy missing field", want: 3},
+		{name: "zero disables wait", field: `,"startupIntervalSeconds":0`, want: 0},
+		{name: "custom interval", field: `,"startupIntervalSeconds":15`, want: 15},
+		{name: "negative clamped", field: `,"startupIntervalSeconds":-1`, want: 0},
+		{name: "too large clamped", field: `,"startupIntervalSeconds":999`, want: 120},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "settings.json")
+			if err := os.WriteFile(path, []byte(`{"schemaVersion":3,"language":"en-US"`+tc.field+`}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			store := NewStore(path)
+			settings, err := store.LoadWithError()
+			if err != nil || settings.StartupIntervalSeconds != tc.want {
+				t.Fatalf("loaded interval = %d, err=%v, want %d", settings.StartupIntervalSeconds, err, tc.want)
+			}
+			if err := store.Save(settings); err != nil {
+				t.Fatal(err)
+			}
+			again, err := store.LoadWithError()
+			if err != nil || again.StartupIntervalSeconds != tc.want {
+				t.Fatalf("round-trip interval = %d, err=%v, want %d", again.StartupIntervalSeconds, err, tc.want)
+			}
+		})
+	}
+}
+
 func TestMigrate_LegacySchemaEnablesRunOnStartup(t *testing.T) {
 	input := Settings{
 		SchemaVersion: 1,

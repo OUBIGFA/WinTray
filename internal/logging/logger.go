@@ -1,6 +1,7 @@
 package logging
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,9 +14,9 @@ const maxLogSize = 5 * 1024 * 1024
 
 type Logger struct {
 	mu      sync.Mutex
-	file    *os.File
-	appDir  string
-	written int64
+	lock    *logFileLock
+	path    string
+	lastErr error
 }
 
 func New(appDir string) (*Logger, error) {
@@ -23,16 +24,21 @@ func New(appDir string) (*Logger, error) {
 		return nil, err
 	}
 	path := filepath.Join(appDir, "wintray.log")
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	lock, err := newLogFileLock(path)
 	if err != nil {
 		return nil, err
 	}
-	info, _ := f.Stat()
-	var size int64
-	if info != nil {
-		size = info.Size()
+	if err := lock.withLock(func() error {
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if err != nil {
+			return err
+		}
+		return f.Close()
+	}); err != nil {
+		_ = lock.close()
+		return nil, err
 	}
-	return &Logger{file: f, appDir: appDir, written: size}, nil
+	return &Logger{lock: lock, path: path}, nil
 }
 
 func (l *Logger) Close() error {
@@ -41,12 +47,12 @@ func (l *Logger) Close() error {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.file == nil {
-		return nil
+	if l.lock == nil {
+		return l.lastErr
 	}
-	err := l.file.Close()
-	l.file = nil
-	return err
+	err := l.lock.close()
+	l.lock = nil
+	return errors.Join(l.lastErr, err)
 }
 
 func (l *Logger) Info(msg string)  { l.write("INFO", msg) }
@@ -59,29 +65,43 @@ func (l *Logger) write(level, msg string) {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.file == nil {
+	if l.lock == nil {
 		return
 	}
-	n, _ := fmt.Fprintf(l.file, "%s [%s] %s\n", time.Now().Format(time.RFC3339), level, msg)
-	l.written += int64(n)
-	if l.written >= maxLogSize {
-		l.rotateUnlocked()
+	if err := l.lock.withLock(func() error { return l.appendAndRotate(level, msg) }); err != nil {
+		// Keep the last failure observable through Close without recursive
+		// logging or an unbounded collection of errors on an unavailable disk.
+		l.lastErr = err
+		_, _ = fmt.Fprintf(os.Stderr, "WinTray log write failed: %v\n", err)
 	}
 }
 
-// rotateUnlocked renames the current log to wintray.log.old and opens a new file.
-// Must be called with l.mu held.
-func (l *Logger) rotateUnlocked() {
-	_ = l.file.Close()
-	logPath := filepath.Join(l.appDir, "wintray.log")
-	oldPath := filepath.Join(l.appDir, "wintray.log.old")
-	_ = os.Remove(oldPath)
-	_ = os.Rename(logPath, oldPath)
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+// No process holds the file open between writes: detached hosts must not block
+// another logger's rotation, nor deletion of the app data directory on reset.
+// The named lock covers opening, writing AND rotation across all processes.
+func (l *Logger) appendAndRotate(level, msg string) error {
+	f, err := os.OpenFile(l.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
-		l.file = nil
-		return
+		return err
 	}
-	l.file = f
-	l.written = 0
+	_, writeErr := fmt.Fprintf(f, "%s [%s] %s\n", time.Now().Format(time.RFC3339), level, msg)
+	info, statErr := f.Stat()
+	if err := errors.Join(writeErr, statErr, f.Close()); err != nil {
+		return err
+	}
+	if info.Size() < maxLogSize {
+		return nil
+	}
+	oldPath := l.path + ".old"
+	if err := os.Remove(oldPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := os.Rename(l.path, oldPath); err != nil {
+		return err
+	}
+	f, err = os.OpenFile(l.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	return f.Close()
 }

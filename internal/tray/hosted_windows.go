@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/lxn/walk"
 	"github.com/lxn/win"
@@ -286,24 +287,36 @@ func hostedWindowMatchesProcess(hwnd uintptr, pid uint32) bool {
 	return err == nil && owner == pid
 }
 
-func (item *hostedItem) showWindow(activate bool) {
+var procShowHostedWindowAsync = windows.NewLazySystemDLL("user32.dll").NewProc("ShowWindowAsync")
+
+func showHostedWindowAsync(hwnd win.HWND, command int32) bool {
+	ok, _, _ := procShowHostedWindowAsync.Call(uintptr(hwnd), uintptr(command))
+	return ok != 0
+}
+
+func (item *hostedItem) showWindow(activate bool) bool {
 	hwnd := item.window()
 	if hwnd == 0 {
 		item.host.logger.Warn(fmt.Sprintf("tray host: no window to show for %s pid=%d", item.info.Name, item.info.ProcessID))
-		return
+		return false
 	}
-	win.ShowWindow(hwnd, win.SW_SHOW)
-	if win.IsIconic(hwnd) {
-		win.ShowWindow(hwnd, win.SW_RESTORE)
+	command := int32(win.SW_SHOWNOACTIVATE)
+	if activate {
+		command = win.SW_RESTORE
+	}
+	if !showHostedWindowAsync(hwnd, command) {
+		item.host.logger.Warn(fmt.Sprintf("tray host: show request failed for %s pid=%d", item.info.Name, item.info.ProcessID))
+		return false
 	}
 	if activate {
 		win.SetForegroundWindow(hwnd)
 	}
+	return true
 }
 
 func (item *hostedItem) hideWindow() {
-	if hwnd := item.window(); hwnd != 0 {
-		win.ShowWindow(hwnd, win.SW_HIDE)
+	if hwnd := item.window(); hwnd != 0 && !showHostedWindowAsync(hwnd, win.SW_HIDE) {
+		item.host.logger.Warn(fmt.Sprintf("tray host: hide request failed for %s pid=%d", item.info.Name, item.info.ProcessID))
 	}
 }
 
@@ -313,7 +326,7 @@ func (item *hostedItem) toggleWindow() {
 		return
 	}
 	if win.IsWindowVisible(hwnd) && !win.IsIconic(hwnd) {
-		win.ShowWindow(hwnd, win.SW_HIDE)
+		item.hideWindow()
 		return
 	}
 	item.showWindow(true)
@@ -325,8 +338,37 @@ func (item *hostedItem) toggleWindow() {
 // killing the host process, which would leave the window hidden for good.
 func (item *hostedItem) releaseHosting() {
 	item.host.logger.Info(fmt.Sprintf("tray host: releasing %s pid=%d", item.info.Name, item.info.ProcessID))
-	item.showWindow(true)
-	deferOnUIThread(item, func() { item.host.remove(item, true) })
+	if !item.showWindow(true) {
+		return // keep the only recovery/quit entry when restoration fails
+	}
+	// ShowWindowAsync only confirms delivery. Keep the icon until the target
+	// actually shows its window, without blocking the tray's message loop if
+	// the application is hung. The final decision/removal is on the UI thread.
+	hwnd, pid, stop := item.info.Handle, item.info.ProcessID, item.stop
+	go func() {
+		deadline := time.NewTimer(2 * time.Second)
+		defer deadline.Stop()
+		ticker := time.NewTicker(50 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			if hostedWindowMatchesProcess(hwnd, pid) && win.IsWindowVisible(win.HWND(hwnd)) && !win.IsIconic(win.HWND(hwnd)) {
+				break
+			}
+			select {
+			case <-stop:
+				return
+			case <-deadline.C:
+				item.host.logger.Warn(fmt.Sprintf("tray host: window restore timed out for pid=%d; keeping icon", pid))
+				return
+			case <-ticker.C:
+			}
+		}
+		deferOnUIThread(item, func() {
+			if !item.closed && hostedWindowMatchesProcess(hwnd, pid) && win.IsWindowVisible(win.HWND(hwnd)) && !win.IsIconic(win.HWND(hwnd)) {
+				item.host.remove(item, true)
+			}
+		})
+	}()
 }
 
 // deferOnUIThread queues f behind the message being handled: removing an item

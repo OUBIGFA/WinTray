@@ -136,6 +136,16 @@ func TestTranslateResultCode_UsesTypedCode(t *testing.T) {
 	if got := TranslateResultCode("zh-CN", "no_window_managed"); got != "等待超时，未检测到程序窗口" {
 		t.Fatalf("TranslateResultCode(zh-CN, no_window_managed) = %q", got)
 	}
+	for _, code := range []string{"startup_check_failed", "external_startup_timeout", "cancelled"} {
+		for _, lang := range []string{"zh-CN", "en-US"} {
+			if got := TranslateResultCode(lang, code); got == "" || got == code {
+				t.Errorf("TranslateResultCode(%s, %s) = %q, want localized result", lang, code, got)
+			}
+		}
+		if IsLikelyPermissionCode(code) {
+			t.Errorf("%s must not suggest window permissions", code)
+		}
+	}
 	if got := TranslateResultCode("en-US", "unknown"); got != "" {
 		t.Fatalf("TranslateResultCode(unknown) = %q, want empty", got)
 	}
