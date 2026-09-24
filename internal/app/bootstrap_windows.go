@@ -156,9 +156,25 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 		if quitting {
 			return
 		}
+		// Reopening settings ends background mode; hiding the window again
+		// then keeps WinTray's own icon unless the logon exit option applies.
+		state.silent = false
 		state.settingsOpen = true
 		applyResidency()
 		mainWindow.ShowMainWindow()
+	}
+	// runSilently hides settings and WinTray's own icon but keeps hosted
+	// program icons. Unlike exit, hidden windows stay hidden; the process ends
+	// once nothing is hosted or still being launched.
+	runSilently := func() {
+		if quitting {
+			return
+		}
+		logger.Info(fmt.Sprintf("silent background mode requested: hosted=%d", host.Count()))
+		state.silent = true
+		state.settingsOpen = false
+		mainWindow.HideMainWindow()
+		applyResidency()
 	}
 
 	// Called by launch workers. Host icons belong to this process and are
@@ -334,7 +350,8 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 		OnOpenRepository: func() {
 			openRepository(version.RepositoryURL, logger)
 		},
-		OnExit: requestExit,
+		OnExit:        requestExit,
+		OnRunSilently: runSilently,
 		OnHideToTray: func() {
 			state.settingsOpen = false
 			applyResidency()
@@ -356,6 +373,7 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 	trayController, err = tray.New(
 		mainWindow.Native(),
 		openSettings,
+		runSilently,
 		requestExit,
 		settings.Language,
 		!state.hideMainIcon(settings.ExitAfterManagedAppsCompleted),

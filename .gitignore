@@ -14,7 +14,9 @@ build/package.local.ps1
 # 例外：CI / Release 工作流需要随仓库提交
 !/.github/
 
-# Local IDE/editor
+# Project-local Agent instructions
+/agent.md
+
 .idea/
 .vscode/
 *.swp

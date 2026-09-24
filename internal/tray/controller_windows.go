@@ -3,15 +3,27 @@
 package tray
 
 import (
+	"syscall"
+	"unsafe"
+
 	"github.com/lxn/walk"
+	"github.com/lxn/win"
 	"wintray/internal/branding"
 	"wintray/internal/i18n"
 )
 
+const (
+	trayActionOpenSettings = 1
+	trayActionRunSilently  = 2
+	trayActionExit         = 3
+)
+
 type Controller struct {
 	notifyIcon    *walk.NotifyIcon
-	openAction    *walk.Action
-	exitAction    *walk.Action
+	window        *walk.MainWindow
+	showMain      func()
+	runSilently   func()
+	exitApp       func()
 	language      string
 	exitRequested bool
 }
@@ -19,6 +31,7 @@ type Controller struct {
 func New(
 	window *walk.MainWindow,
 	showMainWindow func(),
+	runSilently func(),
 	exitApp func(),
 	language string,
 	visible bool,
@@ -29,8 +42,12 @@ func New(
 	}
 
 	c := &Controller{
-		notifyIcon: ni,
-		language:   language,
+		notifyIcon:  ni,
+		window:      window,
+		showMain:    showMainWindow,
+		runSilently: runSilently,
+		exitApp:     exitApp,
+		language:    language,
 	}
 
 	if appIcon, iconErr := branding.AppIcon(); iconErr == nil && appIcon != nil {
@@ -40,33 +57,17 @@ func New(
 		}
 	}
 
-	openAction := walk.NewAction()
-	openAction.Triggered().Attach(func() {
-		if c.exitRequested {
-			return
+	// Keep Walk's built-in context menu empty. Its notify-icon handler opens
+	// that menu from WM_CONTEXTMENU after MouseUp; the native menu below is
+	// shown from MouseUp instead, so there is exactly one menu lifecycle.
+	ni.MouseUp().Attach(func(_, _ int, button walk.MouseButton) {
+		if button == walk.RightButton {
+			c.showContextMenu()
 		}
-		showMainWindow()
 	})
-	c.openAction = openAction
-	ni.ContextMenu().Actions().Add(openAction)
-
-	exitAction := walk.NewAction()
-	exitAction.Triggered().Attach(func() {
-		if c.exitRequested {
-			return
-		}
-		// Mark the controller before invoking the application callback. The
-		// callback closes the main window asynchronously, so queued tray
-		// activation messages must not reopen it during that interval.
-		c.exitRequested = true
-		exitApp()
-	})
-	c.exitAction = exitAction
-	ni.ContextMenu().Actions().Add(exitAction)
-
-	ni.MouseDown().Attach(func(x, y int, button walk.MouseButton) {
-		if button == walk.LeftButton && !c.exitRequested {
-			showMainWindow()
+	ni.MouseDown().Attach(func(_, _ int, button walk.MouseButton) {
+		if button == walk.LeftButton && !c.exitRequested && c.showMain != nil {
+			c.showMain()
 		}
 	})
 
@@ -75,8 +76,80 @@ func New(
 		disposeNotifyIcon(ni)
 		return nil, err
 	}
-
 	return c, nil
+}
+
+func (c *Controller) showContextMenu() {
+	if c == nil || c.window == nil || c.exitRequested {
+		return
+	}
+
+	hMenu := win.CreatePopupMenu()
+	if hMenu == 0 {
+		return
+	}
+	defer win.DestroyMenu(hMenu)
+
+	msg := i18n.For(c.language)
+	if !appendTrayMenuItem(hMenu, trayActionOpenSettings, msg.TrayOpenSettings) ||
+		!appendTrayMenuItem(hMenu, trayActionRunSilently, msg.RunSilently) ||
+		!appendTrayMenuItem(hMenu, trayActionExit, msg.TrayExit) {
+		return
+	}
+
+	hwnd := c.window.Handle()
+	win.SetForegroundWindow(hwnd)
+	var point win.POINT
+	if !win.GetCursorPos(&point) {
+		return
+	}
+
+	flags := uint32(win.TPM_NOANIMATION | win.TPM_RETURNCMD | win.TPM_RIGHTBUTTON)
+	actionID := win.TrackPopupMenuEx(
+		hMenu,
+		flags,
+		point.X,
+		point.Y,
+		hwnd,
+		nil,
+	)
+	// Required by the Windows tray-menu contract after TrackPopupMenuEx.
+	win.PostMessage(hwnd, win.WM_NULL, 0, 0)
+
+	switch uint32(actionID) {
+	case trayActionOpenSettings:
+		if c.showMain != nil && !c.exitRequested {
+			c.showMain()
+		}
+	case trayActionRunSilently:
+		if c.runSilently != nil && !c.exitRequested {
+			c.runSilently()
+		}
+	case trayActionExit:
+		if c.exitApp != nil && !c.exitRequested {
+			c.exitRequested = true
+			c.exitApp()
+		}
+	}
+}
+
+func appendTrayMenuItem(hMenu win.HMENU, id uint32, text string) bool {
+	label, err := syscall.UTF16PtrFromString(text)
+	if err != nil {
+		return false
+	}
+	position := win.GetMenuItemCount(hMenu)
+	if position < 0 {
+		return false
+	}
+	item := win.MENUITEMINFO{
+		CbSize:     uint32(unsafe.Sizeof(win.MENUITEMINFO{})),
+		FMask:      win.MIIM_FTYPE | win.MIIM_ID | win.MIIM_STRING,
+		FType:      win.MFT_STRING,
+		WID:        id,
+		DwTypeData: label,
+	}
+	return win.InsertMenuItem(hMenu, uint32(position), true, &item)
 }
 
 func (c *Controller) SetLanguage(language string) {
@@ -84,14 +157,7 @@ func (c *Controller) SetLanguage(language string) {
 		return
 	}
 	c.language = language
-	msg := i18n.For(language)
-	_ = c.notifyIcon.SetToolTip(msg.TrayToolTip)
-	if c.openAction != nil {
-		c.openAction.SetText(msg.TrayOpenSettings)
-	}
-	if c.exitAction != nil {
-		c.exitAction.SetText(msg.TrayExit)
-	}
+	_ = c.notifyIcon.SetToolTip(i18n.For(language).TrayToolTip)
 }
 
 func (c *Controller) SetVisible(visible bool) error {

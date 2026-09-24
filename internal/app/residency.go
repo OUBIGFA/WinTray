@@ -7,10 +7,13 @@ type residencyState struct {
 	startupPending bool
 	settingsOpen   bool
 	manualLaunches int
+	// silent is set when the user chooses background mode explicitly. It
+	// keeps hosted icons alive like the logon exit option, in any launch mode.
+	silent bool
 }
 
 func (s residencyState) hideMainIcon(exitAfterCompleted bool) bool {
-	return s.autorun && exitAfterCompleted && !s.settingsOpen
+	return (s.silent || s.autorun && exitAfterCompleted) && !s.settingsOpen
 }
 
 func (s residencyState) shouldExit(exitAfterCompleted bool, hostedCount int) bool {

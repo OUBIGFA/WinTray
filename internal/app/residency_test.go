@@ -43,3 +43,19 @@ func TestResidencyNormalResidentModeKeepsMainIconAndDoesNotExit(t *testing.T) {
 		t.Fatal("ordinary manual invocation must not auto-exit because the logon option is checked")
 	}
 }
+
+func TestResidencySilentModeKeepsHostedIconsInAnyLaunchMode(t *testing.T) {
+	for _, exitAfter := range []bool{false, true} {
+		state := residencyState{silent: true}
+		if !state.hideMainIcon(exitAfter) || state.shouldExit(exitAfter, 1) {
+			t.Fatalf("silent mode must hide the main icon and keep hosted programs (exitAfter=%t)", exitAfter)
+		}
+		if !state.shouldExit(exitAfter, 0) {
+			t.Fatalf("silent mode must exit once nothing is hosted (exitAfter=%t)", exitAfter)
+		}
+	}
+	pending := residencyState{silent: true, autorun: true, startupPending: true, manualLaunches: 1}
+	if pending.shouldExit(false, 0) {
+		t.Fatal("silent mode must wait for startup and manual launches to hand off")
+	}
+}

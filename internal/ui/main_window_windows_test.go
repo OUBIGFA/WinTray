@@ -266,7 +266,7 @@ func checkWindowLayout(t *testing.T, w *MainWindow) {
 		}
 		return true
 	})
-	for _, button := range []*walk.PushButton{w.addProgramBtn, w.removeBtn, w.browseBtn, w.launchNowBtn, w.openLogsBtn, w.cleanupBtn, w.checkUpdateBtn, w.exitBtn} {
+	for _, button := range []*walk.PushButton{w.addProgramBtn, w.removeBtn, w.browseBtn, w.launchNowBtn, w.openLogsBtn, w.cleanupBtn, w.checkUpdateBtn, w.silentBtn, w.exitBtn} {
 		if button.Bounds().Width < button.SizeHint().Width {
 			t.Errorf("button %q clipped: width=%d needs=%d", button.Text(), button.Bounds().Width, button.SizeHint().Width)
 		}

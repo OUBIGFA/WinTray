@@ -68,6 +68,8 @@ type Messages struct {
 	UpdateLatestBody               string
 	UpdateFailedBody               string
 	ExitApp                        string
+	RunSilently                    string
+	RunSilentlyHint                string
 	TrayOpenSettings               string
 	TrayExit                       string
 	TrayToolTip                    string
@@ -159,6 +161,8 @@ var zhCN = Messages{
 	UpdateLatestBody:               "当前已是最新版本 %s。",
 	UpdateFailedBody:               "检查更新失败: %s",
 	ExitApp:                        "退出 WinTray",
+	RunSilently:                    "后台静默运行",
+	RunSilentlyHint:                "隐藏设置窗口和 WinTray 自身图标，保留 syncthing、frpc 等控制台程序的托管图标；最后一个托管结束后自动退出。再次打开 WinTray 可恢复设置和图标。",
 	TrayOpenSettings:               "打开设置",
 	TrayExit:                       "退出 WinTray",
 	TrayToolTip:                    "WinTray",
@@ -250,6 +254,8 @@ var enUS = Messages{
 	UpdateLatestBody:               "You are on the latest version %s.",
 	UpdateFailedBody:               "Update check failed: %s",
 	ExitApp:                        "Exit WinTray",
+	RunSilently:                    "Run silently",
+	RunSilentlyHint:                "Hide the settings window and WinTray's own icon while keeping hosted icons for console programs such as syncthing and frpc. WinTray exits when the last hosted program ends. Open WinTray again to restore settings and its icon.",
 	TrayOpenSettings:               "Open Settings",
 	TrayExit:                       "Exit WinTray",
 	TrayToolTip:                    "WinTray",

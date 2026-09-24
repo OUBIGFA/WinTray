@@ -27,6 +27,7 @@ type Callbacks struct {
 	OnCheckUpdate    func()
 	OnOpenRepository func()
 	OnExit           func()
+	OnRunSilently    func()
 	OnHideToTray     func()
 }
 
@@ -76,6 +77,7 @@ type MainWindow struct {
 	removeBtn        *walk.PushButton
 	openLogsBtn      *walk.PushButton
 	cleanupBtn       *walk.PushButton
+	silentBtn        *walk.PushButton
 	exitBtn          *walk.PushButton
 	versionLabel     *walk.Label
 	checkUpdateBtn   *walk.PushButton
@@ -676,6 +678,16 @@ func (w *MainWindow) buildFooter() error {
 	}
 	w.checkUpdateBtn = checkUpdateBtn
 
+	silentBtn, err := newActionButton(row, func() {
+		if w.callbacks.OnRunSilently != nil {
+			w.callbacks.OnRunSilently()
+		}
+	})
+	if err != nil {
+		return err
+	}
+	w.silentBtn = silentBtn
+
 	exitBtn, err := newActionButton(row, func() {
 		if w.callbacks.OnExit != nil {
 			w.callbacks.OnExit()
@@ -782,6 +794,8 @@ func (w *MainWindow) applyLanguage(language string) {
 	w.removeBtn.SetText(msg.RemoveSelected)
 	w.openLogsBtn.SetText(msg.OpenLogs)
 	w.cleanupBtn.SetText(msg.CleanupRestore)
+	w.silentBtn.SetText(msg.RunSilently)
+	w.silentBtn.SetToolTipText(msg.RunSilentlyHint)
 	w.exitBtn.SetText(msg.ExitApp)
 	w.versionLabel.SetText(fmt.Sprintf(msg.VersionLabel, version.Number))
 	w.githubLink.SetToolTipText(msg.GitHubTooltip)

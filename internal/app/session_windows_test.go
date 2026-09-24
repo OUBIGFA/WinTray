@@ -30,7 +30,7 @@ func TestMainSessionHostingLifecycle(t *testing.T) {
 	if os.Getenv("WINTRAY_UI_TEST") != "1" {
 		t.Skip("set WINTRAY_UI_TEST=1 on an interactive Windows desktop")
 	}
-	for _, mode := range []string{"last program exits", "manual exit restores", "exit during startup", "settings remain open", "no hosted programs"} {
+	for _, mode := range []string{"last program exits", "manual exit restores", "exit during startup", "settings remain open", "silent keeps hosting", "no hosted programs"} {
 		t.Run(mode, func(t *testing.T) {
 			dir := t.TempDir()
 			t.Cleanup(func() {
@@ -55,6 +55,10 @@ func TestMainSessionHostingLifecycle(t *testing.T) {
 			settings.StartupIntervalSeconds = 0
 			if mode == "exit during startup" {
 				settings.StartupIntervalSeconds = 120
+			}
+			if mode == "silent keeps hosting" {
+				// Resident mode never exits by itself; only silent mode may.
+				settings.ExitAfterManagedAppsCompleted = false
 			}
 			var releases []string
 			if mode != "no hosted programs" {
@@ -182,14 +186,26 @@ func TestMainSessionHostingLifecycle(t *testing.T) {
 					awaitExit()
 					return
 				}
-				button := findSessionExitButton(hwnd)
-				if button == 0 {
-					t.Fatal("Exit WinTray button not found")
+				if mode == "silent keeps hosting" {
+					clickSessionButton(t, hwnd, "后台静默运行")
+					waitSessionCondition(t, "hidden settings", func() bool { return !win.IsWindowVisible(hwnd) })
+					for i, release := range releases {
+						if win.IsWindowVisible(consoleWindows[i]) {
+							t.Fatal("silent mode restored a hosted console")
+						}
+						select {
+						case <-done:
+							t.Fatal("silent mode exited while programs remained hosted")
+						default:
+						}
+						if err := os.WriteFile(release, nil, 0o600); err != nil {
+							t.Fatal(err)
+						}
+					}
+					awaitExit()
+					return
 				}
-				// Send the native button notification. BM_CLICK is unreliable
-				// across processes when Windows refuses foreground activation.
-				controlID, _, _ := windows.NewLazySystemDLL("user32.dll").NewProc("GetDlgCtrlID").Call(uintptr(button))
-				win.SendMessage(win.GetParent(button), win.WM_COMMAND, controlID, uintptr(button))
+				clickSessionButton(t, hwnd, "退出 WinTray")
 				awaitExit()
 				if mode == "exit during startup" {
 					if _, err := os.Stat(releases[1] + ".pid"); !os.IsNotExist(err) {
@@ -244,15 +260,27 @@ func visibleSessionWindow(pid uint32) win.HWND {
 	return 0
 }
 
-func findSessionExitButton(parent win.HWND) win.HWND {
+// clickSessionButton sends the native button notification. BM_CLICK is
+// unreliable across processes when Windows refuses foreground activation.
+func clickSessionButton(t *testing.T, parent win.HWND, text string) {
+	t.Helper()
+	button := findSessionButton(parent, text)
+	if button == 0 {
+		t.Fatalf("%s button not found", text)
+	}
+	controlID, _, _ := windows.NewLazySystemDLL("user32.dll").NewProc("GetDlgCtrlID").Call(uintptr(button))
+	win.SendMessage(win.GetParent(button), win.WM_COMMAND, controlID, uintptr(button))
+}
+
+func findSessionButton(parent win.HWND, text string) win.HWND {
 	getText := windows.NewLazySystemDLL("user32.dll").NewProc("GetWindowTextW")
 	for child := win.GetWindow(parent, win.GW_CHILD); child != 0; child = win.GetWindow(child, win.GW_HWNDNEXT) {
-		var text [128]uint16
-		getText.Call(uintptr(child), uintptr(unsafe.Pointer(&text[0])), uintptr(len(text)))
-		if windows.UTF16ToString(text[:]) == "退出 WinTray" {
+		var buf [128]uint16
+		getText.Call(uintptr(child), uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
+		if windows.UTF16ToString(buf[:]) == text {
 			return child
 		}
-		if found := findSessionExitButton(child); found != 0 {
+		if found := findSessionButton(child, text); found != 0 {
 			return found
 		}
 	}
