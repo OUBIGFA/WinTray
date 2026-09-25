@@ -82,6 +82,7 @@ type MainWindow struct {
 	versionLabel     *walk.Label
 	checkUpdateBtn   *walk.PushButton
 	githubLink       *walk.ImageView
+	blankSurfaces    map[win.HWND]walk.Widget
 }
 
 func NewMainWindow(initial config.Settings, callbacks Callbacks) (*MainWindow, error) {
@@ -132,6 +133,9 @@ func NewMainWindow(initial config.Settings, callbacks Callbacks) (*MainWindow, e
 		return nil, err
 	}
 	if err = w.buildFooter(); err != nil {
+		return nil, err
+	}
+	if err = w.installBlankClickReset(); err != nil {
 		return nil, err
 	}
 
@@ -339,15 +343,6 @@ func (w *MainWindow) buildManagedList() error {
 	w.managedListModel = model
 	list.CurrentIndexChanged().Attach(func() {
 		w.syncManagedEditor()
-	})
-	list.MouseUp().Attach(func(x, y int, button walk.MouseButton) {
-		if button != walk.LeftButton {
-			return
-		}
-		if w.tableViewHitOnItem(x, y) {
-			return
-		}
-		w.clearManagedSelection()
 	})
 	w.managedList = list
 	list.SizeChanged().Attach(w.resizeManagedColumns)
@@ -1108,11 +1103,4 @@ func (w *MainWindow) clearManagedSelection() {
 	_ = w.managedList.SetSelectedIndexes([]int{})
 	_ = w.managedList.SetCurrentIndex(-1)
 	w.syncManagedEditor()
-}
-
-func (w *MainWindow) tableViewHitOnItem(x, y int) bool {
-	if w.managedList == nil {
-		return false
-	}
-	return w.managedList.IndexAt(x, y) >= 0
 }

@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/lxn/walk"
 	"github.com/lxn/win"
@@ -225,6 +226,142 @@ func TestCloseDelayRowGeometry(t *testing.T) {
 	})
 	w.ShowMainWindow()
 	w.Run()
+}
+
+// TestBlankAreaClickLeavesEditor posts clicks to the windows the system would
+// deliver them to: a label's text, the window margin, the list rows and the
+// space below them, the slot of a disabled field and an enabled field. Only
+// blank areas may leave the program editor, and only after committing the text
+// still being typed.
+func TestBlankAreaClickLeavesEditor(t *testing.T) {
+	if os.Getenv("WINTRAY_UI_TEST") != "1" {
+		t.Skip("set WINTRAY_UI_TEST=1 on an interactive Windows desktop")
+	}
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	// The UI tests take turns on pooled OS threads.
+	discardStaleMessages()
+	defer discardStaleMessages()
+	deactivate := activateTestManifest(t)
+	defer deactivate()
+
+	settings := config.DefaultSettings()
+	settings.ManagedApps = []config.ManagedAppEntry{
+		{ID: "1", Name: "Cloud Drive", ExePath: `C:\Apps\Cloud Drive\drive.exe`, RunOnStartup: true, TrayBehavior: config.TrayBehavior{AutoMinimizeAndHideOnLaunch: true}},
+		{ID: "2", Name: "Local service", ExePath: `C:\Tools\service.exe`, RunOnStartup: true},
+	}
+	w, err := NewMainWindow(settings, Callbacks{OnSave: func(config.Settings) {}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.mw.Dispose()
+
+	step := func(f func()) {
+		done := make(chan struct{})
+		w.synchronize(func() { defer close(done); f() })
+		<-done
+		time.Sleep(200 * time.Millisecond)
+	}
+	click := func(hwnd win.HWND, x, y int) {
+		pos := uintptr(win.MAKELONG(uint16(x), uint16(y)))
+		win.PostMessage(hwnd, win.WM_LBUTTONDOWN, win.MK_LBUTTON, pos)
+		win.PostMessage(hwnd, win.WM_LBUTTONUP, 0, pos)
+	}
+	editorIsEmpty := func() bool {
+		return w.managedList.CurrentIndex() < 0 && w.pathEdit.Text() == "" && w.argsEdit.Text() == "" &&
+			w.delayEdit.Text() == "" && !w.appAutoHide.Checked() && !w.launchNowBtn.Enabled()
+	}
+	// Walk draws the list rows in a native listview beside a zero-width one
+	// kept for frozen columns.
+	rowView := func() win.HWND {
+		for child := win.GetWindow(w.managedList.Handle(), win.GW_CHILD); child != 0; child = win.GetWindow(child, win.GW_HWNDNEXT) {
+			var r win.RECT
+			if win.GetClientRect(child, &r) && r.Right > 0 {
+				return child
+			}
+		}
+		t.Error("test setup: the list's row view was not found")
+		return 0
+	}
+	w.mw.Starting().Attach(func() {
+		go func() {
+			time.Sleep(200 * time.Millisecond)
+			step(func() {
+				w.managedList.SetCurrentIndex(0)
+				w.argsEdit.SetFocus()
+				w.argsEdit.SetText("--minimized")
+				click(win.GetWindow(w.delayHint.Handle(), win.GW_CHILD), 2, 2)
+			})
+			step(func() {
+				if got := w.settings.ManagedApps[0].Args; got != "--minimized" {
+					t.Errorf("arguments being typed = %q after a blank click, want them committed", got)
+				}
+				if !editorIsEmpty() {
+					t.Error("clicking a label must return the program editor to its empty state")
+				}
+				if w.argsEdit.Focused() {
+					t.Error("a blank click must take focus out of the field being edited")
+				}
+				// Program 2 keeps its window, so its close delay field is disabled.
+				w.managedList.SetCurrentIndex(1)
+			})
+			step(func() {
+				if w.delayEdit.Enabled() {
+					t.Error("test setup: the close delay field should be disabled")
+				}
+				delay := w.delayEdit.BoundsPixels()
+				click(w.delayEdit.Parent().Handle(), delay.X+delay.Width/2, delay.Y+delay.Height/2)
+				click(w.pathEdit.Handle(), 4, 4)
+			})
+			step(func() {
+				if w.managedList.CurrentIndex() != 1 || w.pathEdit.Text() != settings.ManagedApps[1].ExePath {
+					t.Error("clicking a disabled or enabled field must keep the program selected")
+				}
+				// The layout margin belongs to the client area behind every row.
+				click(win.GetParent(w.languageLabel.Parent().Handle()), 2, 2)
+			})
+			step(func() {
+				if !editorIsEmpty() {
+					t.Error("clicking the window margin must return the program editor to its empty state")
+				}
+				w.managedList.SetCurrentIndex(0)
+			})
+			step(func() {
+				rows := rowView()
+				var bounds win.RECT
+				win.GetClientRect(rows, &bounds)
+				click(rows, 40, int(bounds.Bottom)-8)
+			})
+			step(func() {
+				if !editorIsEmpty() {
+					t.Error("clicking the list below its rows must return the program editor to its empty state")
+				}
+				rows := rowView()
+				item := win.RECT{Left: win.LVIR_BOUNDS}
+				win.SendMessage(rows, win.LVM_GETITEMRECT, 1, uintptr(unsafe.Pointer(&item)))
+				click(rows, int(item.Left+item.Right)/2, int(item.Top+item.Bottom)/2)
+			})
+			step(func() {
+				if w.managedList.CurrentIndex() != 1 || w.pathEdit.Text() != settings.ManagedApps[1].ExePath {
+					t.Error("clicking a program row must select it and fill the editor")
+				}
+			})
+			w.RequestExplicitClose()
+		}()
+	})
+	w.ShowMainWindow()
+	w.Run()
+}
+
+// discardStaleMessages empties what RequestExplicitClose leaves on a pooled OS
+// thread: messages for the destroyed window and the WM_QUIT that only surfaces
+// behind them. The next window on the thread would otherwise end its loop
+// early, and its test would pass without checking anything, or hang. Peeking
+// cannot remove WM_PAINT, which only comes after any pending WM_QUIT.
+func discardStaleMessages() {
+	var msg win.MSG
+	for win.PeekMessage(&msg, 0, 0, 0, win.PM_REMOVE) && msg.Message != win.WM_QUIT && msg.Message != win.WM_PAINT {
+	}
 }
 
 func activateTestManifest(t *testing.T) func() {
