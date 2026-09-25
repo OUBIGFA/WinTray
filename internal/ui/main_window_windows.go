@@ -4,19 +4,12 @@ package ui
 
 import (
 	"context"
-	"fmt"
-	"path/filepath"
-	"strconv"
-	"strings"
-	"time"
 
 	"github.com/lxn/walk"
 	"github.com/lxn/win"
 	"wintray/internal/branding"
 	"wintray/internal/config"
 	"wintray/internal/i18n"
-	"wintray/internal/stringutil"
-	"wintray/internal/version"
 )
 
 type Callbacks struct {
@@ -31,6 +24,10 @@ type Callbacks struct {
 	OnHideToTray     func()
 }
 
+// MainWindow has two pages: the program list, which is what people open
+// WinTray for, with the language, version and update check at hand; and a
+// settings page for options that are set once, such as running at sign-in,
+// timing and troubleshooting.
 type MainWindow struct {
 	mw             *walk.MainWindow
 	allowClose     bool
@@ -40,49 +37,83 @@ type MainWindow struct {
 	updatingEditor bool
 	launchNowBusy  bool
 	checkingUpdate bool
+	// onSettingsPage tracks the current page itself: while the window is
+	// hidden, all of its children report themselves as invisible.
+	onSettingsPage     bool
+	settingsFitPending bool
 
-	globalTitle *walk.Label
+	headerRow     *walk.Composite
+	backBtn       *walk.PushButton
+	pageTitle     *walk.Label
+	settingsTitle *walk.Label
+	languageCombo *walk.ComboBox
+	settingsBtn   *walk.PushButton
 
-	managedCount     *walk.Label
-	emptyList        *walk.Composite
-	emptyTitle       *walk.Label
-	emptyHint        *walk.Label
+	programsView     *walk.Composite
+	logonNotice      *walk.Composite
+	logonNoticeText  *walk.Label
+	enableLogonBtn   *walk.PushButton
+	programsBody     *walk.Composite
+	managedTitle     *walk.Label
+	managedHint      *walk.Label
+	addProgramBtn    *walk.PushButton
 	managedList      *walk.TableView
 	managedListModel *managedListTableModel
-	editorTitle      *walk.Label
-	noSelectLabel    *walk.Label
-	pathLabel        *walk.Label
-	pathEdit         *walk.LineEdit
-	argsLabel        *walk.Label
-	argsEdit         *walk.LineEdit
+	emptyList        *walk.Composite
+	emptyTitle       *walk.Label
+	emptyHint        *walk.TextLabel
+	emptyAddBtn      *walk.PushButton
+	detailPane       *walk.Composite
+	editor           *walk.Composite
+	appName          *walk.Label
+	appPath          *walk.Label
+	browseLink       *walk.LinkLabel
+	launchNowBtn     *walk.PushButton
+	appEnabledLabel  *walk.Label
+	appEnabled       *walk.CheckBox
+	appEnabledHint   *walk.TextLabel
+	modeLabel        *walk.Label
+	modeTray         *walk.RadioButton
+	modeNormal       *walk.RadioButton
+	modeHidden       *walk.RadioButton
+	modeHint         *walk.TextLabel
+	delayBlock       *walk.Composite
 	delayLabel       *walk.Label
 	delayEdit        *walk.LineEdit
-	delayHint        *walk.Label
-	browseBtn        *walk.PushButton
-	addProgramBtn    *walk.PushButton
-	appAutoHide      *walk.CheckBox
-	appLaunchHidden  *walk.CheckBox
-	appPauseTask     *walk.CheckBox
-	launchNowBtn     *walk.PushButton
-	retryEdit        *walk.LineEdit
-	intervalEdit     *walk.LineEdit
-	intervalLabel    *walk.Label
-	runAtLogon       *walk.CheckBox
-	startHidden      *walk.CheckBox
-	exitOnDone       *walk.CheckBox
-	retryLabel       *walk.Label
-	managedTitle     *walk.Label
-	languageLabel    *walk.Label
-	languageCombo    *walk.ComboBox
+	delayUnit        *walk.Label
+	delayHint        *walk.TextLabel
+	argsLabel        *walk.Label
+	argsEdit         *walk.LineEdit
+	argsHint         *walk.TextLabel
 	removeBtn        *walk.PushButton
-	openLogsBtn      *walk.PushButton
-	cleanupBtn       *walk.PushButton
+	versionLabel     *walk.Label
+	githubLink       *walk.LinkLabel
+	checkUpdateBtn   *walk.PushButton
 	silentBtn        *walk.PushButton
 	exitBtn          *walk.PushButton
-	versionLabel     *walk.Label
-	checkUpdateBtn   *walk.PushButton
-	githubLink       *walk.ImageView
-	blankSurfaces    map[win.HWND]walk.Widget
+
+	settingsView      *walk.ScrollView
+	startupTitle      *walk.Label
+	logonRow          *settingRow
+	runAtLogon        *walk.CheckBox
+	hideAtLogonRow    *settingRow
+	hideAtLogon       *walk.CheckBox
+	exitOnDoneRow     *settingRow
+	exitOnDone        *walk.CheckBox
+	timingTitle       *walk.Label
+	intervalRow       *settingRow
+	intervalEdit      *walk.LineEdit
+	intervalUnit      *walk.Label
+	retryRow          *settingRow
+	retryEdit         *walk.LineEdit
+	retryUnit         *walk.Label
+	troubleshootTitle *walk.Label
+	logsRow           *settingRow
+	openLogsBtn       *walk.PushButton
+	cleanupRow        *settingRow
+	cleanupBtn        *walk.PushButton
+
+	blankSurfaces map[win.HWND]walk.Window
 }
 
 func NewMainWindow(initial config.Settings, callbacks Callbacks) (*MainWindow, error) {
@@ -100,16 +131,16 @@ func NewMainWindow(initial config.Settings, callbacks Callbacks) (*MainWindow, e
 	defer mw.SetSuspended(false)
 
 	mw.SetSize(walk.Size{Width: 1040, Height: 780})
-	mw.SetMinMaxSize(walk.Size{Width: 980, Height: 720}, walk.Size{})
-	if font, fontErr := walk.NewFont("Segoe UI", 10, 0); fontErr == nil {
+	mw.SetMinMaxSize(walk.Size{Width: 1040, Height: 720}, walk.Size{})
+	if font, fontErr := walk.NewFont(uiFontFamily, bodyTextSize, 0); fontErr == nil {
 		mw.SetFont(font)
 	}
 	if bg, bgErr := walk.NewSolidColorBrush(walk.RGB(248, 249, 251)); bgErr == nil {
 		mw.SetBackground(bg)
 	}
 	layout := walk.NewVBoxLayout()
-	layout.SetMargins(walk.Margins{HNear: 24, VNear: 18, HFar: 24, VFar: 18})
-	layout.SetSpacing(14)
+	layout.SetMargins(walk.Margins{HNear: 24, VNear: 16, HFar: 24, VFar: 18})
+	layout.SetSpacing(16)
 	if err = mw.SetLayout(layout); err != nil {
 		return nil, err
 	}
@@ -117,28 +148,18 @@ func NewMainWindow(initial config.Settings, callbacks Callbacks) (*MainWindow, e
 	if err = w.buildHeader(); err != nil {
 		return nil, err
 	}
-	if err = w.buildManagedList(); err != nil {
+	if err = w.buildProgramsView(); err != nil {
 		return nil, err
 	}
-	if err = w.buildManagedEditor(); err != nil {
-		return nil, err
-	}
-	if _, err = newDivider(mw); err != nil {
-		return nil, err
-	}
-	if err = w.buildTopOptions(); err != nil {
-		return nil, err
-	}
-	if _, err = newDivider(mw); err != nil {
-		return nil, err
-	}
-	if err = w.buildFooter(); err != nil {
+	if err = w.buildSettingsView(); err != nil {
 		return nil, err
 	}
 	if err = w.installBlankClickReset(); err != nil {
 		return nil, err
 	}
 
+	w.showSettings(false)
+	w.syncLogonState()
 	w.applyLanguage(w.settings.Language)
 	w.refreshManagedList()
 
@@ -156,595 +177,64 @@ func NewMainWindow(initial config.Settings, callbacks Callbacks) (*MainWindow, e
 	return w, nil
 }
 
-func (w *MainWindow) buildTopOptions() error {
-	options, err := newColumn(w.mw, 10)
+// buildHeader holds the program page title, language and settings button.
+func (w *MainWindow) buildHeader() error {
+	row, err := newRow(w.mw, 12)
 	if err != nil {
 		return err
 	}
-	settingsRow, err := newRow(options, 10)
-	if err != nil {
+	w.headerRow = row
+	if w.pageTitle, err = newTitleLabel(row, pageTitleSize); err != nil {
 		return err
 	}
-	globalTitle, err := newSectionTitle(settingsRow)
-	if err != nil {
-		return err
-	}
-	w.globalTitle = globalTitle
-	if _, err = walk.NewHSpacer(settingsRow); err != nil {
-		return err
-	}
-
-	optionsRow, err := newRow(options, 20)
-	if err != nil {
-		return err
-	}
-
-	runAtLogon, err := walk.NewCheckBox(optionsRow)
-	if err != nil {
-		return err
-	}
-	runAtLogon.SetChecked(w.settings.RunAtLogon)
-	runAtLogon.CheckedChanged().Attach(func() {
-		w.settings.RunAtLogon = runAtLogon.Checked()
-		w.save()
-	})
-	w.runAtLogon = runAtLogon
-
-	startHidden, err := walk.NewCheckBox(optionsRow)
-	if err != nil {
-		return err
-	}
-	startHidden.SetChecked(w.settings.StartMinimizedToTray)
-	startHidden.CheckedChanged().Attach(func() {
-		w.settings.StartMinimizedToTray = startHidden.Checked()
-		w.save()
-	})
-	w.startHidden = startHidden
-
-	exitOnDone, err := walk.NewCheckBox(optionsRow)
-	if err != nil {
-		return err
-	}
-	exitOnDone.SetChecked(w.settings.ExitAfterManagedAppsCompleted)
-	exitOnDone.CheckedChanged().Attach(func() {
-		w.settings.ExitAfterManagedAppsCompleted = exitOnDone.Checked()
-		w.save()
-	})
-	w.exitOnDone = exitOnDone
-
-	if _, err = walk.NewHSpacer(optionsRow); err != nil {
-		return err
-	}
-
-	w.intervalLabel, err = walk.NewLabel(settingsRow)
-	if err != nil {
-		return err
-	}
-	w.intervalEdit, err = walk.NewLineEdit(settingsRow)
-	if err != nil {
-		return err
-	}
-	w.intervalEdit.SetMinMaxSize(walk.Size{Width: 64}, walk.Size{Width: 64})
-	w.intervalEdit.SetText(strconv.Itoa(w.settings.StartupIntervalSeconds))
-	w.intervalEdit.EditingFinished().Attach(func() {
-		v, convErr := strconv.Atoi(strings.TrimSpace(w.intervalEdit.Text()))
-		if convErr != nil {
-			walk.MsgBox(w.mw, w.mw.Title(), i18n.For(w.settings.Language).StartupIntervalInvalid, walk.MsgBoxIconWarning)
-			v = w.settings.StartupIntervalSeconds
-		}
-		v = config.ClampStartupIntervalSeconds(v)
-		w.settings.StartupIntervalSeconds = v
-		w.intervalEdit.SetText(strconv.Itoa(v))
-		w.save()
-	})
-
-	retryLabel, err := walk.NewLabel(settingsRow)
-	if err != nil {
-		return err
-	}
-	w.retryLabel = retryLabel
-
-	retryEdit, err := walk.NewLineEdit(settingsRow)
-	if err != nil {
-		return err
-	}
-	retryEdit.SetMinMaxSize(walk.Size{Width: 72, Height: 0}, walk.Size{Width: 72, Height: 0})
-	retryEdit.SetText(strconv.Itoa(w.settings.CloseWindowRetrySeconds))
-	retryEdit.EditingFinished().Attach(func() {
-		v, convErr := strconv.Atoi(retryEdit.Text())
-		if convErr != nil {
-			walk.MsgBox(w.mw, w.mw.Title(), i18n.For(w.settings.Language).RetrySecondsInvalid, walk.MsgBoxIconWarning)
-			v = w.settings.CloseWindowRetrySeconds
-		}
-		if v < 0 {
-			v = 0
-		}
-		if v > 120 {
-			v = 120
-		}
-		w.settings.CloseWindowRetrySeconds = v
-		retryEdit.SetText(strconv.Itoa(v))
-		w.save()
-	})
-	w.retryEdit = retryEdit
-
-	return nil
-}
-
-func (w *MainWindow) buildManagedList() error {
-	section, err := newColumn(w.mw, 10)
-	if err != nil {
-		return err
-	}
-	header, err := newRow(section, 12)
-	if err != nil {
-		return err
-	}
-	title, err := newSectionTitle(header)
-	if err != nil {
-		return err
-	}
-	w.managedTitle = title
-	w.managedCount, err = walk.NewLabel(header)
-	if err != nil {
-		return err
-	}
-	w.managedCount.SetTextColor(secondaryColor)
-	if _, err = walk.NewHSpacer(header); err != nil {
-		return err
-	}
-	w.removeBtn, err = newActionButton(header, w.onRemoveSelected)
-	if err != nil {
-		return err
-	}
-	w.addProgramBtn, err = newActionButton(header, w.onAddProgram)
-	if err != nil {
-		return err
-	}
-
-	list, err := walk.NewTableView(section)
-	if err != nil {
-		return err
-	}
-	list.SetMinMaxSize(walk.Size{Height: 160}, walk.Size{})
-	list.SetAlwaysConsumeSpace(false)
-	list.SetColumnsOrderable(false)
-	list.SetHeaderHidden(false)
-	list.SetGridlines(false)
-	list.SetLastColumnStretched(true)
-	list.SetSelectionHiddenWithoutFocus(false)
-
-	nameCol := walk.NewTableViewColumn()
-	nameCol.SetTitle("name")
-	nameCol.SetWidth(180)
-	_ = nameCol.SetAlignment(walk.AlignNear)
-	if err = list.Columns().Add(nameCol); err != nil {
-		return err
-	}
-	pathCol := walk.NewTableViewColumn()
-	pathCol.SetTitle("path")
-	pathCol.SetWidth(540)
-	_ = pathCol.SetAlignment(walk.AlignNear)
-	if err = list.Columns().Add(pathCol); err != nil {
-		return err
-	}
-	paramCol := walk.NewTableViewColumn()
-	paramCol.SetTitle("param")
-	paramCol.SetWidth(220)
-	_ = paramCol.SetAlignment(walk.AlignNear)
-	if err = list.Columns().Add(paramCol); err != nil {
-		return err
-	}
-
-	model := newManagedListTableModel()
-	if err = list.SetModel(model); err != nil {
-		return err
-	}
-	w.managedListModel = model
-	list.CurrentIndexChanged().Attach(func() {
-		w.syncManagedEditor()
-	})
-	w.managedList = list
-	list.SizeChanged().Attach(w.resizeManagedColumns)
-
-	w.emptyList, err = newColumn(section, 8)
-	if err != nil {
-		return err
-	}
-	w.emptyList.SetMinMaxSize(walk.Size{Height: 160}, walk.Size{})
-	w.emptyList.SetAlwaysConsumeSpace(false)
-	if _, err = walk.NewVSpacer(w.emptyList); err != nil {
-		return err
-	}
-	w.emptyTitle, err = newSectionTitle(w.emptyList)
-	if err != nil {
-		return err
-	}
-	w.emptyTitle.SetTextAlignment(walk.AlignCenter)
-	w.emptyHint, err = walk.NewLabel(w.emptyList)
-	if err != nil {
-		return err
-	}
-	w.emptyHint.SetTextAlignment(walk.AlignCenter)
-	w.emptyHint.SetTextColor(secondaryColor)
-	if _, err = walk.NewVSpacer(w.emptyList); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (w *MainWindow) resizeManagedColumns() {
-	// TableView column widths use logical pixels, as does ClientBounds.
-	// Leave room for a vertical scrollbar; the final column fills any remainder.
-	width := w.managedList.ClientBounds().Width
-	w.managedList.Columns().At(1).SetWidth(max(240, width-180-220-24))
-}
-
-func (w *MainWindow) buildManagedEditor() error {
-	editor, err := newColumn(w.mw, 10)
-	if err != nil {
-		return err
-	}
-	header, err := newRow(editor, 12)
-	if err != nil {
-		return err
-	}
-	editorTitle, err := newSectionTitle(header)
-	if err != nil {
-		return err
-	}
-	editorTitle.SetEllipsisMode(walk.EllipsisEnd)
-	w.editorTitle = editorTitle
-
-	noSelectLabel, err := walk.NewLabel(header)
-	if err != nil {
-		return err
-	}
-	noSelectLabel.SetTextColor(secondaryColor)
-	noSelectLabel.SetTextAlignment(walk.AlignFar)
-	w.noSelectLabel = noSelectLabel
-
-	pathRow, err := newRow(editor, 10)
-	if err != nil {
-		return err
-	}
-
-	pathLabel, err := walk.NewLabel(pathRow)
-	if err != nil {
-		return err
-	}
-	w.pathLabel = pathLabel
-	pathLabel.SetMinMaxSize(walk.Size{Width: 124}, walk.Size{Width: 124})
-
-	pathEdit, err := walk.NewLineEdit(pathRow)
-	if err != nil {
-		return err
-	}
-	pathEdit.SetReadOnly(true)
-	pathEdit.SetMinMaxSize(walk.Size{Height: 28}, walk.Size{Height: 28})
-	w.pathEdit = pathEdit
-
-	browseBtn, err := newActionButton(pathRow, w.onSelectProgramForSelected)
-	if err != nil {
-		return err
-	}
-	w.browseBtn = browseBtn
-
-	argsRow, err := newRow(editor, 10)
-	if err != nil {
-		return err
-	}
-
-	argsLabel, err := walk.NewLabel(argsRow)
-	if err != nil {
-		return err
-	}
-	w.argsLabel = argsLabel
-	argsLabel.SetMinMaxSize(walk.Size{Width: 124}, walk.Size{Width: 124})
-
-	argsEdit, err := walk.NewLineEdit(argsRow)
-	if err != nil {
-		return err
-	}
-	argsEdit.SetMinMaxSize(walk.Size{Height: 28}, walk.Size{Height: 28})
-	argsEdit.EditingFinished().Attach(func() {
-		if w.updatingEditor {
-			return
-		}
-		app, _, ok := w.selectedManagedApp()
-		if !ok {
-			return
-		}
-		app.Args = argsEdit.Text()
-		w.save()
-	})
-	w.argsEdit = argsEdit
-
-	delayRow, err := newRow(editor, 10)
-	if err != nil {
-		return err
-	}
-
-	delayLabel, err := walk.NewLabel(delayRow)
-	if err != nil {
-		return err
-	}
-	w.delayLabel = delayLabel
-	delayLabel.SetMinMaxSize(walk.Size{Width: 124}, walk.Size{Width: 124})
-
-	delayEdit, err := walk.NewLineEdit(delayRow)
-	if err != nil {
-		return err
-	}
-	delayEdit.SetMinMaxSize(walk.Size{Width: 72, Height: 28}, walk.Size{Width: 72, Height: 28})
-	delayEdit.EditingFinished().Attach(func() {
-		if w.updatingEditor {
-			return
-		}
-		app, _, ok := w.selectedManagedApp()
-		if !ok {
-			return
-		}
-		v, convErr := strconv.Atoi(strings.TrimSpace(delayEdit.Text()))
-		if convErr != nil {
-			walk.MsgBox(w.mw, w.mw.Title(), i18n.For(w.settings.Language).ManagedCloseDelayInvalid, walk.MsgBoxIconWarning)
-			v = app.TrayBehavior.CloseDelaySeconds
-		}
-		v = config.ClampCloseDelaySeconds(v)
-		delayEdit.SetText(strconv.Itoa(v))
-		if v == app.TrayBehavior.CloseDelaySeconds {
-			return
-		}
-		app.TrayBehavior.CloseDelaySeconds = v
-		w.refreshManagedList()
-		w.save()
-	})
-	w.delayEdit = delayEdit
-
-	delayHint, err := walk.NewLabel(delayRow)
-	if err != nil {
-		return err
-	}
-	delayHint.SetTextColor(secondaryColor)
-	if err = delayHint.SetEllipsisMode(walk.EllipsisEnd); err != nil {
-		return err
-	}
-	w.delayHint = delayHint
-
-	// A greedy trailing spacer absorbs this row's excess width. Without it
-	// the fixed-size label, editor and hint get centered in equal slots and
-	// drift apart (verified by TestCloseDelayRowGeometry).
-	if _, err = walk.NewHSpacer(delayRow); err != nil {
-		return err
-	}
-
-	optionsRow, err := newRow(editor, 18)
-	if err != nil {
-		return err
-	}
-
-	appAutoHide, err := walk.NewCheckBox(optionsRow)
-	if err != nil {
-		return err
-	}
-	appAutoHide.CheckedChanged().Attach(func() {
-		if w.updatingEditor {
-			return
-		}
-		app, _, ok := w.selectedManagedApp()
-		if !ok {
-			return
-		}
-		if app.LaunchHiddenInBackground {
-			appAutoHide.SetChecked(false)
-		}
-		app.TrayBehavior.AutoMinimizeAndHideOnLaunch = appAutoHide.Checked()
-		w.refreshManagedList()
-		w.save()
-	})
-	w.appAutoHide = appAutoHide
-
-	appLaunchHidden, err := walk.NewCheckBox(optionsRow)
-	if err != nil {
-		return err
-	}
-	appLaunchHidden.CheckedChanged().Attach(func() {
-		if w.updatingEditor {
-			return
-		}
-		app, _, ok := w.selectedManagedApp()
-		if !ok {
-			return
-		}
-		checked := appLaunchHidden.Checked()
-		app.LaunchHiddenInBackground = checked
-		if checked {
-			app.TrayBehavior.AutoMinimizeAndHideOnLaunch = false
-			w.appAutoHide.SetChecked(false)
-			w.appAutoHide.SetEnabled(false)
-		} else {
-			w.appAutoHide.SetEnabled(true)
-		}
-		w.refreshManagedList()
-		w.save()
-	})
-	w.appLaunchHidden = appLaunchHidden
-
-	appPauseTask, err := walk.NewCheckBox(optionsRow)
-	if err != nil {
-		return err
-	}
-	appPauseTask.CheckedChanged().Attach(func() {
-		if w.updatingEditor {
-			return
-		}
-		app, _, ok := w.selectedManagedApp()
-		if !ok {
-			return
-		}
-		app.RunOnStartup = !appPauseTask.Checked()
-		w.refreshManagedList()
-		w.save()
-	})
-	w.appPauseTask = appPauseTask
-
-	if _, err = walk.NewHSpacer(optionsRow); err != nil {
-		return err
-	}
-	launchNowBtn, err := newActionButton(optionsRow, w.onLaunchNow)
-	if err != nil {
-		return err
-	}
-	w.launchNowBtn = launchNowBtn
-
-	return nil
-}
-
-func (w *MainWindow) onLaunchNow() {
-	app, _, ok := w.selectedManagedApp()
-	if !ok || w.launchNowBusy || w.callbacks.OnLaunchNow == nil {
-		return
-	}
-	w.setLaunchNowBusy(true)
-	w.callbacks.OnLaunchNow(*app)
-}
-
-// SetLaunchNowBusy reflects an in-flight launch on the button so the user can
-// tell the click was accepted and does not keep clicking it.
-func (w *MainWindow) SetLaunchNowBusy(busy bool) {
-	w.synchronize(func() { w.setLaunchNowBusy(busy) })
-}
-
-func (w *MainWindow) setLaunchNowBusy(busy bool) {
-	if w.launchNowBtn == nil || w.managedList == nil {
-		return
-	}
-	w.launchNowBusy = busy
-	msg := i18n.For(w.settings.Language)
-	if busy {
-		w.launchNowBtn.SetText(msg.ManagedLaunchNowBusy)
-	} else {
-		w.launchNowBtn.SetText(msg.ManagedLaunchNow)
-	}
-	_, _, ok := w.selectedManagedApp()
-	w.launchNowBtn.SetEnabled(ok && !busy)
-}
-
-func (w *MainWindow) buildFooter() error {
-	row, err := newRow(w.mw, 8)
-	if err != nil {
-		return err
-	}
-	cleanupBtn, err := newActionButton(row, func() {
-		if w.callbacks.OnCleanupRestore != nil {
-			w.callbacks.OnCleanupRestore()
-		}
-	})
-	if err != nil {
-		return err
-	}
-	w.cleanupBtn = cleanupBtn
-
-	versionLabel, err := walk.NewLabel(row)
-	if err != nil {
-		return err
-	}
-	versionLabel.SetTextColor(secondaryColor)
-	w.versionLabel = versionLabel
-
 	if _, err = walk.NewHSpacer(row); err != nil {
 		return err
 	}
-
-	openLogsBtn, err := newActionButton(row, func() {
-		if w.callbacks.OnOpenLogs != nil {
-			w.callbacks.OnOpenLogs()
-		}
-	})
-	if err != nil {
+	if w.languageCombo, err = walk.NewComboBox(row); err != nil {
 		return err
 	}
-	w.openLogsBtn = openLogsBtn
-
-	checkUpdateBtn, err := newActionButton(row, w.onCheckUpdate)
-	if err != nil {
-		return err
-	}
-	w.checkUpdateBtn = checkUpdateBtn
-
-	silentBtn, err := newActionButton(row, func() {
-		if w.callbacks.OnRunSilently != nil {
-			w.callbacks.OnRunSilently()
-		}
-	})
-	if err != nil {
-		return err
-	}
-	w.silentBtn = silentBtn
-
-	exitBtn, err := newActionButton(row, func() {
-		if w.callbacks.OnExit != nil {
-			w.callbacks.OnExit()
-		}
-	})
-	if err != nil {
-		return err
-	}
-	w.exitBtn = exitBtn
-
-	githubLink, err := walk.NewImageView(row)
-	if err != nil {
-		return err
-	}
-	githubIcon, err := branding.GitHubIcon()
-	if err != nil {
-		return err
-	}
-	githubLink.SetMode(walk.ImageViewModeIdeal)
-	if err = githubLink.SetImage(githubIcon); err != nil {
-		return err
-	}
-	githubLink.SetCursor(walk.CursorHand())
-	githubLink.MouseUp().Attach(func(_, _ int, button walk.MouseButton) {
-		if button != walk.LeftButton {
+	w.languageCombo.SetMinMaxSize(walk.Size{Width: 110}, walk.Size{Width: 110})
+	w.languageCombo.CurrentIndexChanged().Attach(func() {
+		if w.applyingLocale {
 			return
 		}
-		if w.callbacks.OnOpenRepository != nil {
-			w.callbacks.OnOpenRepository()
+		language := "zh-CN"
+		if w.languageCombo.CurrentIndex() == 1 {
+			language = "en-US"
 		}
+		w.applyLanguage(language)
+		w.refreshManagedList()
+		w.save()
 	})
-	githubLink.SetMinMaxSize(walk.Size{Width: 24, Height: 24}, walk.Size{Width: 24, Height: 24})
-	w.githubLink = githubLink
-
-	return nil
+	w.settingsBtn, err = newActionButton(row, func() { w.showSettings(true) })
+	return err
 }
 
-func (w *MainWindow) onCheckUpdate() {
-	if w.checkingUpdate || w.callbacks.OnCheckUpdate == nil {
-		return
+// showSettings switches between the program list and the settings page. The
+// program selection is kept, so going back returns to the same program.
+func (w *MainWindow) showSettings(show bool) {
+	wasSuspended := w.mw.Suspended()
+	w.mw.SetSuspended(true)
+	defer w.mw.SetSuspended(wasSuspended)
+	w.onSettingsPage = show
+	w.headerRow.SetVisible(!show)
+	w.programsView.SetVisible(!show)
+	w.settingsView.SetVisible(show)
+	w.applyPageTitle()
+	if show && w.mw.Visible() {
+		w.settingsFitPending = true
+		// Let Walk finish laying out the newly visible page before measuring it.
+		w.synchronize(w.fitSettingsToScreen)
 	}
-	w.setCheckUpdateBusy(true)
-	w.callbacks.OnCheckUpdate()
-}
-
-// SetCheckUpdateBusy reflects an in-flight update check on the button.
-func (w *MainWindow) SetCheckUpdateBusy(busy bool) {
-	w.synchronize(func() { w.setCheckUpdateBusy(busy) })
-}
-
-func (w *MainWindow) setCheckUpdateBusy(busy bool) {
-	if w.checkUpdateBtn == nil {
-		return
+	if w.mw.Visible() {
+		w.focusDefaultControl()
 	}
-	w.checkingUpdate = busy
+}
+
+func (w *MainWindow) applyPageTitle() {
 	msg := i18n.For(w.settings.Language)
-	if busy {
-		w.checkUpdateBtn.SetText(msg.CheckUpdateBusy)
-	} else {
-		w.checkUpdateBtn.SetText(msg.CheckUpdate)
-	}
-	w.checkUpdateBtn.SetEnabled(!busy)
+	w.pageTitle.SetText(msg.WindowTitle)
+	w.settingsTitle.SetText(msg.SettingsTitle)
 }
 
 func (w *MainWindow) applyLanguage(language string) {
@@ -757,55 +247,19 @@ func (w *MainWindow) applyLanguage(language string) {
 	defer func() { w.applyingLocale = false }()
 
 	w.mw.SetTitle(msg.WindowTitle)
-	w.emptyTitle.SetText(msg.ManagedListEmpty)
-	w.emptyHint.SetText(msg.ManagedListEmptyHint)
-	w.globalTitle.SetText(msg.GlobalSettingsTitle)
-	w.runAtLogon.SetText(msg.RunAtLogon)
-	w.startHidden.SetText(msg.StartHidden)
-	w.exitOnDone.SetText(msg.ExitOnDone)
-	w.exitOnDone.SetToolTipText(msg.ExitOnDoneHint)
-	w.retryLabel.SetText(msg.RetrySeconds)
-	w.intervalLabel.SetText(msg.StartupInterval)
-	w.intervalLabel.SetToolTipText(msg.StartupIntervalHint)
-	w.intervalEdit.SetToolTipText(msg.StartupIntervalHint)
-	w.managedTitle.SetText(msg.ManagedListTitle)
-	w.editorTitle.SetText(msg.ManagedEditorTitle)
-	w.pathLabel.SetText(msg.ManagedAppPath)
-	w.argsLabel.SetText(msg.ManagedAppArgs)
-	w.browseBtn.SetText(msg.BrowseProgram)
-	w.addProgramBtn.SetText(msg.AddProgram)
-	w.argsEdit.SetCueBanner(msg.ManagedArgsPlaceholder)
-	w.delayLabel.SetText(msg.ManagedCloseDelay)
-	w.delayHint.SetText(msg.ManagedCloseDelayHint)
-	w.delayHint.SetToolTipText(msg.ManagedCloseDelayHint)
-	w.appAutoHide.SetToolTipText(msg.ManagedAutoHideHint)
-	w.appLaunchHidden.SetToolTipText(msg.ManagedLaunchHiddenHint)
-	w.appPauseTask.SetToolTipText(msg.ManagedPauseTaskHint)
-	w.appAutoHide.SetText(msg.ManagedAutoHide)
-	w.appLaunchHidden.SetText(msg.ManagedLaunchHidden)
-	w.appPauseTask.SetText(msg.ManagedPauseTask)
-	w.setLaunchNowBusy(w.launchNowBusy)
-	w.languageLabel.SetText(msg.LanguageLabel)
-	w.removeBtn.SetText(msg.RemoveSelected)
-	w.openLogsBtn.SetText(msg.OpenLogs)
-	w.cleanupBtn.SetText(msg.CleanupRestore)
-	w.silentBtn.SetText(msg.RunSilently)
-	w.silentBtn.SetToolTipText(msg.RunSilentlyHint)
-	w.exitBtn.SetText(msg.ExitApp)
-	w.versionLabel.SetText(fmt.Sprintf(msg.VersionLabel, version.Number))
-	w.githubLink.SetToolTipText(msg.GitHubTooltip)
-	w.setCheckUpdateBusy(w.checkingUpdate)
+	w.applyPageTitle()
+	w.backBtn.SetText(msg.BackToPrograms)
+	w.settingsBtn.SetText(msg.OpenSettings)
 	_ = w.languageCombo.SetModel([]string{msg.LanguageZhLabel, msg.LanguageEnLabel})
 	if w.settings.Language == string(i18n.LangEnUS) {
 		w.languageCombo.SetCurrentIndex(1)
 	} else {
 		w.languageCombo.SetCurrentIndex(0)
 	}
-	if w.managedList != nil {
-		w.managedList.Columns().At(0).SetTitle(msg.ManagedColumnName)
-		w.managedList.Columns().At(1).SetTitle(msg.ManagedColumnPath)
-		w.managedList.Columns().At(2).SetTitle(msg.ManagedColumnRule)
-	}
+	w.languageCombo.SetToolTipText(msg.LanguageLabel)
+	_ = w.languageCombo.Accessibility().SetName(msg.LanguageLabel)
+	w.applyProgramsLanguage(msg)
+	w.applySettingsLanguage(msg)
 	w.syncManagedEditor()
 }
 
@@ -814,177 +268,6 @@ func (w *MainWindow) SetLanguage(language string) {
 		w.applyLanguage(language)
 		w.refreshManagedList()
 	})
-}
-
-func (w *MainWindow) onAddProgram() {
-	msg := i18n.For(w.settings.Language)
-	dlg := new(walk.FileDialog)
-	dlg.Title = msg.SelectManagedExe
-	dlg.Filter = fmt.Sprintf("%s|%s", msg.ExeFilter, msg.AllFilesFilter)
-	ok, err := dlg.ShowOpen(w.mw)
-	if err != nil || !ok {
-		return
-	}
-	name := stringutil.TrimExt(filepath.Base(dlg.FilePath))
-	if name == "" {
-		name = msg.NewAppName
-	}
-	id := strconv.FormatInt(time.Now().UnixNano(), 10)
-	launchHiddenByDefault := shouldDefaultLaunchHidden(dlg.FilePath)
-	w.settings.ManagedApps = append(w.settings.ManagedApps, config.ManagedAppEntry{
-		ID:                       id,
-		Name:                     name,
-		ExePath:                  dlg.FilePath,
-		Args:                     "",
-		RunOnStartup:             true,
-		LaunchHiddenInBackground: launchHiddenByDefault,
-		TrayBehavior:             config.TrayBehavior{AutoMinimizeAndHideOnLaunch: !launchHiddenByDefault},
-	})
-	w.refreshManagedList()
-	w.managedList.SetCurrentIndex(len(w.settings.ManagedApps) - 1)
-	w.syncManagedEditor()
-	w.save()
-}
-
-func (w *MainWindow) onSelectProgramForSelected() {
-	app, idx, ok := w.selectedManagedApp()
-	if !ok {
-		// No item selected; fall back to adding a new entry.
-		w.onAddProgram()
-		return
-	}
-	msg := i18n.For(w.settings.Language)
-	dlg := new(walk.FileDialog)
-	dlg.Title = msg.SelectManagedExe
-	dlg.Filter = fmt.Sprintf("%s|%s", msg.ExeFilter, msg.AllFilesFilter)
-	result, err := dlg.ShowOpen(w.mw)
-	if err != nil || !result {
-		return
-	}
-	app.ExePath = dlg.FilePath
-	name := stringutil.TrimExt(filepath.Base(dlg.FilePath))
-	if name != "" {
-		app.Name = name
-	}
-	if shouldDefaultLaunchHidden(dlg.FilePath) {
-		app.LaunchHiddenInBackground = true
-		app.TrayBehavior.AutoMinimizeAndHideOnLaunch = false
-	}
-	w.refreshManagedList()
-	w.managedList.SetCurrentIndex(idx)
-	w.syncManagedEditor()
-	w.save()
-}
-
-func shouldDefaultLaunchHidden(path string) bool {
-	return strings.ToLower(filepath.Ext(path)) != ".exe"
-}
-
-func (w *MainWindow) onRemoveSelected() {
-	idx := w.managedList.CurrentIndex()
-	if idx < 0 || idx >= len(w.settings.ManagedApps) {
-		return
-	}
-	w.settings.ManagedApps = append(w.settings.ManagedApps[:idx], w.settings.ManagedApps[idx+1:]...)
-	w.refreshManagedList()
-	w.syncManagedEditor()
-	w.save()
-}
-
-func (w *MainWindow) refreshManagedList() {
-	if w.managedList == nil || w.managedListModel == nil {
-		return
-	}
-	wasSuspended := w.mw.Suspended()
-	w.mw.SetSuspended(true)
-	defer w.mw.SetSuspended(wasSuspended)
-	selected := w.managedList.CurrentIndex()
-	enabled := 0
-	rows := make([]managedListRow, 0, len(w.settings.ManagedApps))
-	for _, app := range w.settings.ManagedApps {
-		if app.RunOnStartup {
-			enabled++
-		}
-		rows = append(rows, managedListRow{
-			Name:  app.Name,
-			Path:  app.ExePath,
-			Param: i18n.FormatManagedParam(w.settings.Language, app),
-		})
-	}
-	w.managedListModel.SetRows(rows)
-	w.managedCount.SetText(fmt.Sprintf(i18n.For(w.settings.Language).ManagedListCount, len(rows), enabled))
-	w.managedList.SetVisible(len(rows) > 0)
-	w.emptyList.SetVisible(len(rows) == 0)
-	if len(rows) == 0 {
-		w.managedList.SetCurrentIndex(-1)
-		w.syncManagedEditor()
-		return
-	}
-	if selected >= len(rows) {
-		selected = len(rows) - 1
-	}
-	w.managedList.SetCurrentIndex(selected)
-	w.syncManagedEditor()
-}
-
-func (w *MainWindow) syncManagedEditor() {
-	if w.pathEdit == nil || w.argsEdit == nil || w.delayEdit == nil || w.appAutoHide == nil || w.appLaunchHidden == nil || w.appPauseTask == nil || w.launchNowBtn == nil || w.addProgramBtn == nil {
-		return
-	}
-	app, _, ok := w.selectedManagedApp()
-	w.updatingEditor = true
-	defer func() { w.updatingEditor = false }()
-
-	msg := i18n.For(w.settings.Language)
-	w.pathEdit.SetEnabled(ok)
-	w.argsEdit.SetEnabled(ok)
-	w.argsEdit.SetReadOnly(!ok)
-	w.browseBtn.SetEnabled(ok)
-	w.removeBtn.SetEnabled(ok)
-	w.addProgramBtn.SetEnabled(true)
-	w.appAutoHide.SetEnabled(ok)
-	w.appLaunchHidden.SetEnabled(ok)
-	w.appPauseTask.SetEnabled(ok)
-	w.launchNowBtn.SetEnabled(ok && !w.launchNowBusy)
-	w.editorTitle.SetText(msg.ManagedEditorTitle)
-	w.noSelectLabel.SetText(msg.ManagedSelectionHint)
-	if ok {
-		w.editorTitle.SetText(fmt.Sprintf(msg.ManagedSelectedTitle, app.Name))
-		w.noSelectLabel.SetText(msg.ManagedEditorHint)
-	}
-
-	if !ok {
-		w.pathEdit.SetText("")
-		w.pathEdit.SetToolTipText("")
-		w.argsEdit.SetText("")
-		w.delayEdit.SetText("")
-		w.delayEdit.SetEnabled(false)
-		w.delayEdit.SetReadOnly(true)
-		w.appAutoHide.SetChecked(false)
-		w.appLaunchHidden.SetChecked(false)
-		w.appPauseTask.SetChecked(false)
-		return
-	}
-
-	w.pathEdit.SetText(app.ExePath)
-	w.pathEdit.SetToolTipText(app.ExePath)
-	w.argsEdit.SetText(app.Args)
-	// The delay only matters when the window gets closed after launch.
-	w.delayEdit.SetText(strconv.Itoa(app.TrayBehavior.CloseDelaySeconds))
-	w.delayEdit.SetEnabled(app.TrayBehavior.AutoMinimizeAndHideOnLaunch)
-	w.delayEdit.SetReadOnly(!app.TrayBehavior.AutoMinimizeAndHideOnLaunch)
-	w.appAutoHide.SetChecked(app.TrayBehavior.AutoMinimizeAndHideOnLaunch)
-	w.appLaunchHidden.SetChecked(app.LaunchHiddenInBackground)
-	w.appPauseTask.SetChecked(!app.RunOnStartup)
-	w.appAutoHide.SetEnabled(!app.LaunchHiddenInBackground)
-}
-
-func (w *MainWindow) selectedManagedApp() (*config.ManagedAppEntry, int, bool) {
-	idx := w.managedList.CurrentIndex()
-	if idx < 0 || idx >= len(w.settings.ManagedApps) {
-		return nil, -1, false
-	}
-	return &w.settings.ManagedApps[idx], idx, true
 }
 
 // synchronize queues f on the UI thread and wakes the message loop. walk only
@@ -1036,8 +319,14 @@ func (w *MainWindow) save() {
 	}
 }
 
+// ShowMainWindow brings the window to the front. A window reopened from the
+// tray starts on the program list, whichever page it was closed on.
 func (w *MainWindow) ShowMainWindow() {
 	w.synchronize(func() {
+		if !w.mw.Visible() && w.onSettingsPage {
+			w.showSettings(false)
+		}
+		w.fitWindowToPages()
 		hwnd := w.mw.Handle()
 		if hwnd != 0 {
 			win.ShowWindow(hwnd, win.SW_RESTORE)
@@ -1050,17 +339,19 @@ func (w *MainWindow) ShowMainWindow() {
 	})
 }
 
-// focusDefaultControl gives keyboard focus to the program list, or to the
-// primary action while the list is empty. Focus has to land on a child: walk
-// otherwise moves it to the first tab stop after a layout pass, which is the
-// language selector, whose text then shows up selected.
+// focusDefaultControl gives keyboard focus to the program list, to the add
+// button while the list is empty, or to the back button on the settings page.
+// Focus has to land on a child: walk otherwise moves it to the first tab stop
+// after a layout pass, whose text then shows up selected. Moving focus is also
+// what commits a field still being edited.
 func (w *MainWindow) focusDefaultControl() {
-	if w.managedList != nil && w.managedList.Visible() {
+	switch {
+	case w.onSettingsPage:
+		_ = w.backBtn.SetFocus()
+	case w.managedList != nil && w.managedList.Visible():
 		_ = w.managedList.SetFocus()
-		return
-	}
-	if w.addProgramBtn != nil {
-		_ = w.addProgramBtn.SetFocus()
+	case w.emptyAddBtn != nil:
+		_ = w.emptyAddBtn.SetFocus()
 	}
 }
 
@@ -1069,6 +360,7 @@ func (w *MainWindow) HideMainWindow() {
 }
 
 func (w *MainWindow) Run() int {
+	w.fitWindowToPages()
 	return w.mw.Run()
 }
 
@@ -1094,13 +386,4 @@ func (w *MainWindow) Native() *walk.MainWindow {
 
 func (w *MainWindow) Settings() config.Settings {
 	return w.settings
-}
-
-func (w *MainWindow) clearManagedSelection() {
-	if w.managedList == nil {
-		return
-	}
-	_ = w.managedList.SetSelectedIndexes([]int{})
-	_ = w.managedList.SetCurrentIndex(-1)
-	w.syncManagedEditor()
 }

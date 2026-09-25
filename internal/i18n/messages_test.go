@@ -8,6 +8,27 @@ import (
 	"wintray/internal/config"
 )
 
+func TestCloseDelayRecommendation(t *testing.T) {
+	for _, language := range []string{"zh-CN", "en-US"} {
+		if hint := For(language).ManagedCloseDelayHint; !strings.Contains(hint, "10–15") || strings.Contains(hint, "20–30") {
+			t.Errorf("%s close-delay hint = %q, want 10–15 seconds", language, hint)
+		}
+	}
+}
+
+func TestUICopyHasNoSentencePeriods(t *testing.T) {
+	for _, language := range []string{"zh-CN", "en-US"} {
+		messages := reflect.ValueOf(For(language))
+		fields := messages.Type()
+		for i := 0; i < messages.NumField(); i++ {
+			name, text := fields.Field(i).Name, messages.Field(i).String()
+			if strings.Contains(text, "。") || strings.HasSuffix(text, ".") || strings.Contains(text, ". ") || strings.Contains(text, ".\\r\\n") {
+				t.Errorf("%s %s contains a sentence period: %q", language, name, text)
+			}
+		}
+	}
+}
+
 func TestFormatManagedRules(t *testing.T) {
 	languages := []struct {
 		language        string
@@ -19,26 +40,26 @@ func TestFormatManagedRules(t *testing.T) {
 	}{
 		{
 			language:        "zh-CN",
-			launchOnly:      "仅启动",
-			autoHide:        "启动后关闭窗口",
-			autoHideDelayed: "启动后关闭窗口 (延迟 30 秒)",
-			hidden:          "后台静默启动",
+			launchOnly:      "正常启动",
+			autoHide:        "收进托盘",
+			autoHideDelayed: "收进托盘（等 30 秒）",
+			hidden:          "后台启动",
 			paused:          "已暂停",
 		},
 		{
 			language:        "en-US",
-			launchOnly:      "Launch only",
-			autoHide:        "Close window after launch",
-			autoHideDelayed: "Close window after launch (30 s delay)",
-			hidden:          "Launch hidden in background",
+			launchOnly:      "Start normally",
+			autoHide:        "Close to tray",
+			autoHideDelayed: "Close to tray (after 30 s)",
+			hidden:          "Run in background",
 			paused:          "Paused",
 		},
 		{
 			language:        "unknown",
-			launchOnly:      "仅启动",
-			autoHide:        "启动后关闭窗口",
-			autoHideDelayed: "启动后关闭窗口 (延迟 30 秒)",
-			hidden:          "后台静默启动",
+			launchOnly:      "正常启动",
+			autoHide:        "收进托盘",
+			autoHideDelayed: "收进托盘（等 30 秒）",
+			hidden:          "后台启动",
 			paused:          "已暂停",
 		},
 	}

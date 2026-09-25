@@ -15,53 +15,71 @@ const (
 
 type Messages struct {
 	WindowTitle                    string
-	GlobalSettingsTitle            string
+	OpenSettings                   string
+	BackToPrograms                 string
+	SettingsTitle                  string
+	LogonOffNotice                 string
+	LogonOffEnable                 string
+	SettingsStartupTitle           string
 	RunAtLogon                     string
+	RunAtLogonHint                 string
 	StartHidden                    string
+	StartHiddenHint                string
 	ExitOnDone                     string
 	ExitOnDoneHint                 string
+	SettingsTimingTitle            string
 	RetrySeconds                   string
+	RetrySecondsHint               string
 	RetrySecondsInvalid            string
 	StartupInterval                string
 	StartupIntervalInvalid         string
 	StartupIntervalHint            string
+	SecondsUnit                    string
 	LanguageLabel                  string
+	SettingsTroubleshootTitle      string
+	LogsTitle                      string
+	CleanupRestoreTitle            string
 	ManagedListTitle               string
-	ManagedListCount               string
+	ManagedListHint                string
 	ManagedListEmpty               string
 	ManagedListEmptyHint           string
 	ManagedColumnName              string
-	ManagedColumnPath              string
 	ManagedColumnRule              string
-	ManagedEditorTitle             string
-	ManagedEditorHint              string
-	ManagedSelectedTitle           string
-	ManagedSelectionHint           string
-	ManagedAppPath                 string
 	BrowseProgram                  string
+	BrowseProgramHint              string
 	ManagedAppArgs                 string
+	ManagedArgsHint                string
 	ManagedArgsPlaceholder         string
+	ManagedEnabled                 string
+	ManagedEnabledLabel            string
+	ManagedEnabledHint             string
+	ManagedModeLabel               string
 	ManagedLaunchOnly              string
+	ManagedLaunchOnlyHint          string
 	ManagedAutoHide                string
 	ManagedAutoHideHint            string
+	ManagedAutoHideTip             string
 	ManagedAutoHideDelayed         string
 	ManagedCloseDelay              string
 	ManagedCloseDelayHint          string
 	ManagedCloseDelayInvalid       string
 	ManagedLaunchHidden            string
 	ManagedLaunchHiddenHint        string
-	ManagedPauseTask               string
-	ManagedPauseTaskHint           string
 	ManagedLaunchNow               string
+	ManagedLaunchNowHint           string
 	ManagedLaunchNowBusy           string
 	LaunchNowDoneBody              string
 	AddProgram                     string
+	AddProgramHint                 string
 	RemoveSelected                 string
+	RemoveSelectedHint             string
 	OpenLogs                       string
+	OpenLogsHint                   string
 	CleanupRestore                 string
+	CleanupRestoreHint             string
 	CheckUpdate                    string
 	CheckUpdateBusy                string
-	GitHubTooltip                  string
+	GitHubLink                     string
 	VersionLabel                   string
 	UpdateTitle                    string
 	UpdateAvailableBody            string
@@ -78,6 +96,7 @@ type Messages struct {
 	HostedQuitProgram              string
 	HostedReleaseWindow            string
 	SelectManagedExe               string
+	SelectReplacementExe           string
 	ExeFilter                      string
 	AllFilesFilter                 string
 	NewAppName                     string
@@ -108,70 +127,84 @@ type Messages struct {
 
 var zhCN = Messages{
 	WindowTitle:                    "WinTray",
-	GlobalSettingsTitle:            "全局设置",
-	RunAtLogon:                     "WinTray 开机自启动",
-	StartHidden:                    "启动后最小化到托盘",
-	ExitOnDone:                     "任务完成后自动退出（托管时留后台）",
-	ExitOnDoneHint:                 "开机任务完成后，没有托管图标则退出；仍有托管程序时仅隐藏 WinTray 窗口和自身图标，最后一个托管结束后退出。再次打开 WinTray 可进入设置。",
-	RetrySeconds:                   "窗口检测超时 (0–120 秒)",
-	RetrySecondsInvalid:            "超时秒数必须是 0 到 120 的数字。",
-	StartupInterval:                "启动间隔 (0–120 秒)",
-	StartupIntervalInvalid:         "启动间隔必须是 0 到 120 的数字。",
-	StartupIntervalHint:            "按列表顺序错峰启动，默认 3 秒，0 为不等待。只间隔 WinTray 实际拉起的程序；不控制程序自带自启，不影响立即启动或窗口处理。",
-	LanguageLabel:                  "语言:",
-	ManagedListTitle:               "程序列表",
-	ManagedListCount:               "%d 个程序 · %d 个已启用",
+	OpenSettings:                   "更多功能",
+	BackToPrograms:                 "← 返回",
+	SettingsTitle:                  "设置",
+	LogonOffNotice:                 "WinTray 没有设置开机自启动，下面的程序不会在开机时自动启动",
+	LogonOffEnable:                 "开启",
+	SettingsStartupTitle:           "开机启动",
+	RunAtLogon:                     "开机时自动运行 WinTray",
+	RunAtLogonHint:                 "关闭后，开机启动项里的程序也不会自动启动",
+	StartHidden:                    "开机时不弹出 WinTray 窗口",
+	ExitOnDone:                     "开机任务完成后自动退出 WinTray",
+	ExitOnDoneHint:                 "如果还有命令行程序在用 WinTray 提供的托盘图标，会等它们都退出后再退出",
+	SettingsTimingTitle:            "启动节奏",
+	RetrySeconds:                   "最长等待程序窗口",
+	RetrySecondsHint:               "程序启动较慢、窗口没被收进托盘时，可以调大；可填 0–120",
+	RetrySecondsInvalid:            "等待时间必须是 0 到 120 之间的整数",
+	StartupInterval:                "程序之间的启动间隔",
+	StartupIntervalInvalid:         "启动间隔必须是 0 到 120 之间的整数",
+	StartupIntervalHint:            "错开启动，减轻开机卡顿；可填 0–120，0 表示不等待",
+	SecondsUnit:                    "秒",
+	LanguageLabel:                  "语言 / Language",
+	ManagedListTitle:               "开机启动项",
+	ManagedListHint:                "勾选开启任务，未选则暂停",
 	ManagedListEmpty:               "还没有添加程序",
-	ManagedListEmptyHint:           "点击“添加程序”，选择应用或脚本开始配置。",
+	ManagedListEmptyHint:           "添加开机时想自动启动的程序，WinTray 会依次启动它们，并按你的设置收进托盘或在后台运行",
 	ManagedColumnName:              "程序",
-	ManagedColumnPath:              "路径",
 	ManagedColumnRule:              "启动方式",
-	ManagedEditorTitle:             "程序设置",
-	ManagedEditorHint:              "更改会自动保存",
-	ManagedSelectedTitle:           "程序设置 · %s",
-	ManagedSelectionHint:           "选择上方的程序以编辑启动方式。",
-	ManagedAppPath:                 "程序路径:",
 	BrowseProgram:                  "更换…",
-	ManagedAppArgs:                 "启动参数:",
-	ManagedArgsPlaceholder:         "可选，例如 --minimized",
-	ManagedLaunchOnly:              "仅启动",
-	ManagedAutoHide:                "启动后关闭窗口",
-	ManagedAutoHideHint:            "发送关闭消息（WM_CLOSE）：托盘应用通常会收起，其他应用可能退出；控制台窗口由 WinTray 隐藏并代管托盘图标。",
-	ManagedAutoHideDelayed:         "启动后关闭窗口 (延迟 %d 秒)",
-	ManagedCloseDelay:              "关闭延迟 (秒):",
-	ManagedCloseDelayHint:          "运行满该秒数后再关窗，用于跳过登录弹窗；0 为不等待。",
-	ManagedCloseDelayInvalid:       "关闭延迟必须是 0 到 600 的数字。",
-	ManagedLaunchHidden:            "后台静默启动",
-	ManagedLaunchHiddenHint:        "适用于脚本或命令行程序；不能与“启动后关闭窗口”同时启用。",
-	ManagedPauseTask:               "暂停任务",
-	ManagedPauseTaskHint:           "暂停后跳过该程序的开机启动，仍可点击“立即启动”。",
+	BrowseProgramHint:              "换成另一个程序文件",
+	ManagedAppArgs:                 "启动参数（可选）",
+	ManagedArgsHint:                "适用于 .exe 程序及 .bat、.cmd、.ps1、.py 等脚本",
+	ManagedArgsPlaceholder:         "例如 --minimized",
+	ManagedEnabled:                 "开机后自动启动此程序",
+	ManagedEnabledHint:             "取消勾选后，开机时会跳过它；仍可随时点“立即启动”",
+	ManagedModeLabel:               "启动方式",
+	ManagedLaunchOnly:              "正常启动",
+	ManagedLaunchOnlyHint:          "只负责启动，窗口保持原样",
+	ManagedAutoHide:                "收进托盘",
+	ManagedAutoHideHint:            "启动后自动关闭主窗口，程序继续在托盘运行；适合 QQ、微信等带托盘图标的程序；命令行程序会由 WinTray 提供托盘图标",
+	ManagedAutoHideTip:             "WinTray 会向主窗口发送关闭消息（WM_CLOSE）；没有托盘图标的普通程序可能会因此退出",
+	ManagedAutoHideDelayed:         "收进托盘（等 %d 秒）",
+	ManagedCloseDelay:              "收起前等待",
+	ManagedCloseDelayHint:          "先弹出登录窗口的程序（如 QQ）建议设为 10–15 秒，0 表示立即收起",
+	ManagedCloseDelayInvalid:       "收起前等待时间必须是 0 到 600 之间的整数",
+	ManagedLaunchHidden:            "后台启动",
+	ManagedLaunchHiddenHint:        "不弹出任何窗口，直接在后台运行；适合 .bat、.ps1、.py 等脚本和命令行工具",
 	ManagedLaunchNow:               "立即启动",
+	ManagedLaunchNowHint:           "按当前设置马上启动一次，可以用来试试效果",
 	ManagedLaunchNowBusy:           "启动中…",
 	LaunchNowDoneBody:              "已启动: %s",
 	AddProgram:                     "添加程序",
-	RemoveSelected:                 "移除",
+	AddProgramHint:                 "选择要开机启动的程序或脚本，可以一次选多个",
+	RemoveSelected:                 "移除此程序",
+	RemoveSelectedHint:             "只从列表中移除，不会卸载或删除程序本身",
 	OpenLogs:                       "打开日志",
-	CleanupRestore:                 "重置数据…",
+	OpenLogsHint:                   "查看 WinTray 的运行记录，排查问题时使用",
+	CleanupRestore:                 "重置…",
+	CleanupRestoreHint:             "清除所有设置和日志，恢复初始状态（会先确认）",
 	CheckUpdate:                    "检查更新",
 	CheckUpdateBusy:                "检查中…",
-	GitHubTooltip:                  "在 GitHub 上查看项目",
+	GitHubLink:                     "GitHub 项目主页",
 	VersionLabel:                   "版本 %s",
 	UpdateTitle:                    "检查更新",
-	UpdateAvailableBody:            "发现新版本 %s（当前 %s）。\r\n\r\n是否前往下载页面？",
-	UpdateLatestBody:               "当前已是最新版本 %s。",
+	UpdateAvailableBody:            "发现新版本 %s（当前 %s）\r\n\r\n是否前往下载页面？",
+	UpdateLatestBody:               "当前已是最新版本 %s",
 	UpdateFailedBody:               "检查更新失败: %s",
 	ExitApp:                        "退出 WinTray",
 	RunSilently:                    "后台静默运行",
-	RunSilentlyHint:                "隐藏设置窗口和 WinTray 自身图标，保留 syncthing、frpc 等控制台程序的托管图标；最后一个托管结束后自动退出。再次打开 WinTray 可恢复设置和图标。",
-	TrayOpenSettings:               "打开设置",
+	RunSilentlyHint:                "隐藏此窗口和 WinTray 自己的图标，保留命令行程序的托盘图标；它们都退出后 WinTray 自动退出；再次打开 WinTray 可恢复",
+	TrayOpenSettings:               "打开 WinTray",
 	TrayExit:                       "退出 WinTray",
 	TrayToolTip:                    "WinTray",
 	HostedShowWindow:               "显示窗口",
 	HostedHideWindow:               "隐藏窗口",
 	HostedQuitProgram:              "退出 %s",
 	HostedReleaseWindow:            "结束托管并显示窗口",
-	SelectManagedExe:               "选择要托管的程序",
-	ExeFilter:                      "程序文件 (*.exe;*.cmd;*.bat;*.ps1;*.py)|*.exe;*.cmd;*.bat;*.ps1;*.py",
+	SelectManagedExe:               "选择要添加的程序（可多选）",
+	SelectReplacementExe:           "选择新的程序文件",
+	ExeFilter:                      "程序和脚本 (*.exe;*.bat;*.cmd;*.ps1;*.py;*.pyw)|*.exe;*.bat;*.cmd;*.ps1;*.py;*.pyw",
 	AllFilesFilter:                 "所有文件 (*.*)|*.*",
 	NewAppName:                     "新程序",
 	ManagedListItemTemplate:        "%s | %s | 启动后关闭窗口=%t",
@@ -179,92 +212,111 @@ var zhCN = Messages{
 	ManagedListParamTemplate:       "关闭窗口=%t",
 	ManagedListParamHiddenTemplate: "静默启动=%t",
 	ManagedListParamPausedTemplate: "已暂停",
-	RunSummaryNone:                 "没有可执行的受管任务。",
+	RunSummaryNone:                 "没有可执行的受管任务",
 	RunSummaryLine:                 "%s: %s",
 	FatalStartupTitle:              "WinTray 启动失败",
 	FatalStartupBodyTemplate:       "%s\n\n日志: %s",
 	AlreadyRunningTitle:            "WinTray",
-	AlreadyRunningBody:             "WinTray 已在运行。",
+	AlreadyRunningBody:             "WinTray 已在运行",
 	StatusLaunchFailTemplate:       "启动失败: %s (%s)",
 	StatusRetryExhausted:           "等待超时，未检测到程序窗口",
-	StatusPermissionHint:           "可能是权限限制 (UIPI): 请尝试以管理员身份运行 WinTray。",
+	StatusPermissionHint:           "可能是权限限制 (UIPI): 请尝试以管理员身份运行 WinTray",
 	StatusOpenLogsFailed:           "打开日志失败",
 	CleanupConfirmTitle:            "重置并清理数据",
-	CleanupConfirmBody:             "将清除 WinTray 的本地配置与日志，并恢复默认设置。\r\n\r\n是否继续？",
+	CleanupConfirmBody:             "将清除 WinTray 的本地配置与日志，并恢复默认设置\r\n\r\n是否继续？",
 	CleanupDoneTitle:               "已计划清理",
-	CleanupDoneBody:                "已恢复默认设置，WinTray 将在退出后清理本地数据。",
+	CleanupDoneBody:                "已恢复默认设置，WinTray 将在退出后清理本地数据",
 	CleanupFailedTitle:             "清理失败",
 	CleanupFailedBody:              "重置并清理数据失败: %s",
 	LanguageZhLabel:                "中文",
+	StartHiddenHint:                "开机后只在托盘显示图标，需要时再打开窗口",
+	SettingsTroubleshootTitle:      "故障排查",
+	LogsTitle:                      "运行日志",
+	CleanupRestoreTitle:            "重置所有数据",
+	ManagedEnabledLabel:            "开机启动",
 	LanguageEnLabel:                "English",
 }
 
 var enUS = Messages{
 	WindowTitle:                    "WinTray",
-	GlobalSettingsTitle:            "Global Settings",
-	RunAtLogon:                     "Run WinTray at logon",
-	StartHidden:                    "Minimize to tray after launch",
-	ExitOnDone:                     "Exit after tasks (keep hosting)",
-	ExitOnDoneHint:                 "After logon tasks, exit if no hosted icons remain. Otherwise hide WinTray's window and own icon, and exit when the last hosted program ends. Open WinTray again for settings.",
-	RetrySeconds:                   "Window timeout (0–120 s)",
-	RetrySecondsInvalid:            "Retry seconds must be a number between 0 and 120.",
-	StartupInterval:                "Launch interval (0–120 s)",
-	StartupIntervalInvalid:         "Launch interval must be a number between 0 and 120.",
-	StartupIntervalHint:            "Start in list order, 3 seconds apart by default; 0 = no wait. Only spaces processes launched by WinTray, not external autoruns, Launch Now or window handling.",
-	LanguageLabel:                  "Language:",
-	ManagedListTitle:               "Program List",
-	ManagedListCount:               "%d programs · %d enabled",
-	ManagedListEmpty:               "No programs added yet",
-	ManagedListEmptyHint:           "Add an application or script to get started.",
+	OpenSettings:                   "More Features",
+	BackToPrograms:                 "← Back",
+	SettingsTitle:                  "Settings",
+	LogonOffNotice:                 "WinTray isn't set to run at sign-in, so the programs below won't start automatically",
+	LogonOffEnable:                 "Turn On",
+	SettingsStartupTitle:           "Sign-in",
+	RunAtLogon:                     "Run WinTray at sign-in",
+	RunAtLogonHint:                 "When off, your startup programs won't start automatically either",
+	StartHidden:                    "Don't show the WinTray window at sign-in",
+	ExitOnDone:                     "Exit WinTray when sign-in tasks finish",
+	ExitOnDoneHint:                 "If console programs still use tray icons from WinTray, it waits until they all exit",
+	SettingsTimingTitle:            "Timing",
+	RetrySeconds:                   "Wait for a window up to",
+	RetrySecondsHint:               "Increase it if slow programs aren't closed to the tray; 0–120",
+	RetrySecondsInvalid:            "The wait must be a whole number from 0 to 120",
+	StartupInterval:                "Delay between programs",
+	StartupIntervalInvalid:         "The delay must be a whole number from 0 to 120",
+	StartupIntervalHint:            "Staggers launches to ease sign-in load; 0–120; 0 means no wait",
+	SecondsUnit:                    "seconds",
+	LanguageLabel:                  "Language / 语言",
+	ManagedListTitle:               "Startup programs",
+	ManagedListHint:                "Check to enable, uncheck to pause",
+	ManagedListEmpty:               "No programs yet",
+	ManagedListEmptyHint:           "Add the programs you want to start at sign-in; WinTray starts them one by one and can close them to the tray or run them in the background",
 	ManagedColumnName:              "Program",
-	ManagedColumnPath:              "Path",
-	ManagedColumnRule:              "Startup behavior",
-	ManagedEditorTitle:             "Program Settings",
-	ManagedEditorHint:              "Changes are saved automatically",
-	ManagedSelectedTitle:           "Program settings · %s",
-	ManagedSelectionHint:           "Select a program above to edit its startup behavior.",
-	ManagedAppPath:                 "Program path:",
+	ManagedColumnRule:              "How it starts",
 	BrowseProgram:                  "Change…",
-	ManagedAppArgs:                 "Launch arguments:",
-	ManagedArgsPlaceholder:         "Optional, e.g. --minimized",
-	ManagedLaunchOnly:              "Launch only",
-	ManagedAutoHide:                "Close window after launch",
-	ManagedAutoHideHint:            "Sends WM_CLOSE: tray-aware apps usually stay in the tray; other apps may exit. WinTray hides console windows and provides their tray icons.",
-	ManagedAutoHideDelayed:         "Close window after launch (%d s delay)",
-	ManagedCloseDelay:              "Close delay (s):",
-	ManagedCloseDelayHint:          "Close the window only after the program has run this many seconds, e.g. to skip login dialogs; 0 = no wait.",
-	ManagedCloseDelayInvalid:       "Close delay must be a number between 0 and 600.",
-	ManagedLaunchHidden:            "Launch hidden in background",
-	ManagedLaunchHiddenHint:        "For scripts or command-line programs. Cannot be combined with \"Close window after launch\".",
-	ManagedPauseTask:               "Pause task",
-	ManagedPauseTaskHint:           "Skips this program at startup. You can still use \"Launch Now\".",
+	BrowseProgramHint:              "Use a different program file",
+	ManagedAppArgs:                 "Arguments (optional)",
+	ManagedArgsHint:                "For .exe programs and scripts such as .bat, .cmd, .ps1 and .py",
+	ManagedArgsPlaceholder:         "Example: --minimized",
+	ManagedEnabled:                 "Start this program at sign-in",
+	ManagedEnabledHint:             "When unchecked, it's skipped at sign-in; you can still use Launch Now",
+	ManagedModeLabel:               "How it starts",
+	ManagedLaunchOnly:              "Start normally",
+	ManagedLaunchOnlyHint:          "Just starts the program and leaves its window as is",
+	ManagedAutoHide:                "Close to tray",
+	ManagedAutoHideHint:            "Closes the main window after launch; the program keeps running in the tray; best for apps with a tray icon, such as QQ or WeChat; WinTray adds tray icons for console programs",
+	ManagedAutoHideTip:             "WinTray sends WM_CLOSE to the main window; apps without a tray icon may exit",
+	ManagedAutoHideDelayed:         "Close to tray (after %d s)",
+	ManagedCloseDelay:              "Wait before closing",
+	ManagedCloseDelayHint:          "Programs that show a sign-in window first (such as QQ) need about 10–15 seconds; 0 closes right away",
+	ManagedCloseDelayInvalid:       "The wait must be a whole number from 0 to 600",
+	ManagedLaunchHidden:            "Run in background",
+	ManagedLaunchHiddenHint:        "Runs in the background without showing any window; best for scripts (.bat, .ps1, .py) and command-line tools",
 	ManagedLaunchNow:               "Launch Now",
+	ManagedLaunchNowHint:           "Starts it now with these settings, so you can try them out",
 	ManagedLaunchNowBusy:           "Starting…",
 	LaunchNowDoneBody:              "Started: %s",
 	AddProgram:                     "Add Program",
+	AddProgramHint:                 "Pick programs or scripts to start at sign-in; you can select several at once",
 	RemoveSelected:                 "Remove",
+	RemoveSelectedHint:             "Only removes it from this list; the program itself isn't uninstalled or deleted",
 	OpenLogs:                       "Open Logs",
-	CleanupRestore:                 "Reset data…",
+	OpenLogsHint:                   "WinTray's activity record, for troubleshooting",
+	CleanupRestore:                 "Reset…",
+	CleanupRestoreHint:             "Clears all settings and logs and restores defaults (asks first)",
 	CheckUpdate:                    "Check for Updates",
 	CheckUpdateBusy:                "Checking…",
-	GitHubTooltip:                  "View the project on GitHub",
+	GitHubLink:                     "GitHub project page",
 	VersionLabel:                   "Version %s",
 	UpdateTitle:                    "Check for Updates",
-	UpdateAvailableBody:            "Version %s is available (current %s).\r\n\r\nOpen the download page?",
-	UpdateLatestBody:               "You are on the latest version %s.",
+	UpdateAvailableBody:            "Version %s is available (current %s)\r\n\r\nOpen the download page?",
+	UpdateLatestBody:               "You are on the latest version %s",
 	UpdateFailedBody:               "Update check failed: %s",
 	ExitApp:                        "Exit WinTray",
 	RunSilently:                    "Run silently",
-	RunSilentlyHint:                "Hide the settings window and WinTray's own icon while keeping hosted icons for console programs such as syncthing and frpc. WinTray exits when the last hosted program ends. Open WinTray again to restore settings and its icon.",
-	TrayOpenSettings:               "Open Settings",
+	RunSilentlyHint:                "Hides this window and WinTray's own icon but keeps tray icons for console programs; WinTray exits once they all end; open WinTray again to bring it back",
+	TrayOpenSettings:               "Open WinTray",
 	TrayExit:                       "Exit WinTray",
 	TrayToolTip:                    "WinTray",
 	HostedShowWindow:               "Show Window",
 	HostedHideWindow:               "Hide Window",
 	HostedQuitProgram:              "Quit %s",
 	HostedReleaseWindow:            "Stop Hosting and Show Window",
-	SelectManagedExe:               "Select program to manage",
-	ExeFilter:                      "Program files (*.exe;*.cmd;*.bat;*.ps1;*.py)|*.exe;*.cmd;*.bat;*.ps1;*.py",
+	SelectManagedExe:               "Select programs to add (you can pick several)",
+	SelectReplacementExe:           "Select the new program file",
+	ExeFilter:                      "Programs and scripts (*.exe;*.bat;*.cmd;*.ps1;*.py;*.pyw)|*.exe;*.bat;*.cmd;*.ps1;*.py;*.pyw",
 	AllFilesFilter:                 "All Files (*.*)|*.*",
 	NewAppName:                     "New App",
 	ManagedListItemTemplate:        "%s | %s | CloseAfterLaunch=%t",
@@ -272,23 +324,28 @@ var enUS = Messages{
 	ManagedListParamTemplate:       "CloseAfterLaunch=%t",
 	ManagedListParamHiddenTemplate: "LaunchHidden=%t",
 	ManagedListParamPausedTemplate: "Paused",
-	RunSummaryNone:                 "No managed tasks to run.",
+	RunSummaryNone:                 "No managed tasks to run",
 	RunSummaryLine:                 "%s: %s",
 	FatalStartupTitle:              "WinTray startup failed",
 	FatalStartupBodyTemplate:       "%s\n\nLog: %s",
 	AlreadyRunningTitle:            "WinTray",
-	AlreadyRunningBody:             "WinTray is already running.",
+	AlreadyRunningBody:             "WinTray is already running",
 	StatusLaunchFailTemplate:       "Launch failed: %s (%s)",
 	StatusRetryExhausted:           "Retry exhausted, no manageable window found",
-	StatusPermissionHint:           "Possible UIPI permission limitation: try running WinTray as administrator.",
+	StatusPermissionHint:           "Possible UIPI permission limitation: try running WinTray as administrator",
 	StatusOpenLogsFailed:           "Failed to open logs",
 	CleanupConfirmTitle:            "Cleanup && Restore Defaults",
-	CleanupConfirmBody:             "This will clear WinTray local settings and logs, then restore defaults.\r\n\r\nContinue?",
+	CleanupConfirmBody:             "This will clear WinTray local settings and logs, then restore defaults\r\n\r\nContinue?",
 	CleanupDoneTitle:               "Cleanup Scheduled",
-	CleanupDoneBody:                "Default settings restored. WinTray data will be cleaned after exit.",
+	CleanupDoneBody:                "Default settings restored; WinTray data will be cleaned after exit",
 	CleanupFailedTitle:             "Cleanup Failed",
 	CleanupFailedBody:              "Cleanup and restore failed: %s",
 	LanguageZhLabel:                "中文",
+	StartHiddenHint:                "Only the tray icon appears at sign-in; open the window when you need it",
+	SettingsTroubleshootTitle:      "Troubleshooting",
+	LogsTitle:                      "Logs",
+	CleanupRestoreTitle:            "Reset all data",
+	ManagedEnabledLabel:            "At sign-in",
 	LanguageEnLabel:                "English",
 }
 

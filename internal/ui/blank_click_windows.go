@@ -33,14 +33,19 @@ var (
 )
 
 func (w *MainWindow) installBlankClickReset() error {
-	w.blankSurfaces = map[win.HWND]walk.Widget{}
+	w.blankSurfaces = map[win.HWND]walk.Window{}
 	w.mw.ForEachDescendant(func(widget walk.Widget) bool {
 		switch widget.(type) {
-		case *walk.Composite, *walk.Label, *walk.Spacer:
+		case *walk.Composite, *walk.Label, *walk.TextLabel, *walk.Spacer:
 			w.blankSurfaces[widget.Handle()] = widget
 		}
 		return true
 	})
+	// The window margins belong to the form's own client composite, which
+	// walk keeps out of its descendants; its children are the window's.
+	if children := w.mw.Children(); children.Len() > 0 {
+		w.blankSurfaces[win.GetParent(children.At(0).Handle())] = w.mw
+	}
 	hook, _, err := procSetWindowsHookExW.Call(whGetMessage, blankClickHookCallback, 0, uintptr(windows.GetCurrentThreadId()))
 	if hook == 0 {
 		return fmt.Errorf("install blank click hook: %w", err)
@@ -72,8 +77,8 @@ func blankClickHook(code, wParam, lParam uintptr) uintptr {
 }
 
 // isBlankClick reports whether a left click at x, y in hwnd's client area
-// landed on the window background, a label, a spacer or the list outside its
-// rows, rather than on a control.
+// landed on the window background, a label or hint, a spacer or the list
+// outside its rows, rather than on a control.
 func (w *MainWindow) isBlankClick(hwnd win.HWND, x, y int) bool {
 	surface, ok := w.blankSurfaces[hwnd]
 	if !ok {
@@ -85,8 +90,11 @@ func (w *MainWindow) isBlankClick(hwnd win.HWND, x, y int) bool {
 			return hit.IItem < 0
 		}
 		// A label draws its text in a native static control it owns.
-		_, isLabel := w.blankSurfaces[parent].(*walk.Label)
-		return isLabel
+		switch w.blankSurfaces[parent].(type) {
+		case *walk.Label, *walk.TextLabel:
+			return true
+		}
+		return false
 	}
 	container, ok := surface.(walk.Container)
 	if !ok {
@@ -107,9 +115,12 @@ func (w *MainWindow) isBlankClick(hwnd win.HWND, x, y int) bool {
 }
 
 // leaveEditorOnBlankClick takes focus off the fields first, so text still being
-// typed is committed to the program it belongs to, then clears the selection,
-// which returns the program editor to its empty default state.
+// typed is committed, then clears the program selection, which returns the
+// program editor to its empty default state. The settings page keeps the
+// selection for the way back to the program list.
 func (w *MainWindow) leaveEditorOnBlankClick() {
 	w.focusDefaultControl()
-	w.clearManagedSelection()
+	if !w.onSettingsPage {
+		w.clearManagedSelection()
+	}
 }

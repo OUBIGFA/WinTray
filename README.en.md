@@ -27,6 +27,8 @@ Core use cases:
 
 ![](image/01.png)
 
+![](image/02.png)
+
 ---
 
 ## Features
@@ -108,7 +110,7 @@ Scoring system (an action is only taken when the total score ≥ 500):
 | Scenario                                                     | Configuration                                            |
 | ------------------------------------------------------------ | -------------------------------------------------------- |
 | WeChat / DingTalk auto-start and minimize to tray            | Add `.exe`, enable "Close window after launch"           |
-| New QQ (NT-based) auto-start, minimize to tray after login   | Add `QQ.exe`, enable "Close window after launch", set a "Close delay" (e.g. 20–30 s) to skip the login window; QQ's own auto-start can stay enabled |
+| New QQ (NT-based) auto-start, minimize to tray after login   | Add `QQ.exe`, enable "Close window after launch", set a "Close delay" (e.g. 10–15 s) to skip the login window; QQ's own auto-start can stay enabled |
 | syncthing / frpc console programs running in the background, reachable from the tray | Add `.exe`, enable "Close window after launch"; WinTray hosts the tray icon |
 | Tunnel scripts (frpc / SSH) running in background at startup | Add `.bat` / `.ps1`, hidden background launch by default |
 | Python crawler/service starting silently in background       | Add `.py`, hidden background launch by default           |
@@ -195,3 +197,4 @@ A: Make sure the program has "Close window after launch" enabled, and that WinTr
 ## License
 
 This project is released under the [MIT License](LICENSE).
+
