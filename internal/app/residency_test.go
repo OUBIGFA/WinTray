@@ -1,6 +1,10 @@
 package app
 
-import "testing"
+import (
+	"testing"
+
+	"wintray/internal/config"
+)
 
 func TestResidencyAutoExitKeepsOnlyHostedIconsUntilLastProgramEnds(t *testing.T) {
 	state := residencyState{autorun: true, startupPending: true}
@@ -57,5 +61,32 @@ func TestResidencySilentModeKeepsHostedIconsInAnyLaunchMode(t *testing.T) {
 	pending := residencyState{silent: true, autorun: true, startupPending: true, manualLaunches: 1}
 	if pending.shouldExit(false, 0) {
 		t.Fatal("silent mode must wait for startup and manual launches to hand off")
+	}
+}
+
+func TestTrayBoxInUseKeepsAutorunSessionResident(t *testing.T) {
+	s := config.DefaultSettings()
+	if !exitsAfterStartup(s) {
+		t.Fatal("default settings exit after startup")
+	}
+	s.ManagedApps = []config.ManagedAppEntry{{ID: "one", ExePath: `C:\Apps\Listary.exe`}}
+	if !exitsAfterStartup(s) {
+		t.Fatal("unselected programs must not keep WinTray running")
+	}
+	s.ManagedApps[0].CollectTrayIcon = true
+	if exitsAfterStartup(s) {
+		t.Fatal("collected tray icons need WinTray's menu, so it must stay")
+	}
+	state := residencyState{autorun: true, boxActive: true}
+	if state.hideMainIcon(true) || state.shouldExit(true, 0) {
+		t.Fatal("boxed icons must remain reachable even after startup")
+	}
+	state.silent = true
+	if state.hideMainIcon(true) || state.shouldExit(true, 0) {
+		t.Fatal("silent mode must not hide an active box")
+	}
+	s.ManagedApps[0].CollectTrayIcon = false
+	if !exitsAfterStartup(s) {
+		t.Fatal("deselecting the program restores the normal exit setting")
 	}
 }

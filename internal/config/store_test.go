@@ -327,3 +327,52 @@ func TestMigrate_ClampsCloseDelaySeconds(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadWithError_PerProgramTrayIconCollection(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if err := os.WriteFile(path, []byte(`{"schemaVersion":3,"language":"zh-CN","managedApps":[{"id":"a","exePath":"C:\\Apps\\One.exe"},{"id":"b","exePath":"C:\\Apps\\Two.exe"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore(path)
+	got, err := store.LoadWithError()
+	if err != nil || got.ManagedApps[0].CollectTrayIcon || got.ManagedApps[1].CollectTrayIcon {
+		t.Fatalf("default collection = %+v, %v", got.ManagedApps, err)
+	}
+	got.ManagedApps[0].CollectTrayIcon = true
+	if err := store.Save(got); err != nil {
+		t.Fatal(err)
+	}
+	again, err := store.LoadWithError()
+	if err != nil || !again.ManagedApps[0].CollectTrayIcon || again.ManagedApps[1].CollectTrayIcon {
+		t.Fatalf("collection round-trip = %+v, %v", again.ManagedApps, err)
+	}
+	if paths := CollectedTrayIconPaths(again); len(paths) != 1 || paths[0] != `C:\Apps\One.exe` {
+		t.Fatalf("selected icon paths = %v", paths)
+	}
+}
+
+func TestCollectedTrayIconPathsFiltersScriptsAndDuplicateExecutables(t *testing.T) {
+	s := DefaultSettings()
+	s.ManagedApps = []ManagedAppEntry{
+		{ExePath: `C:\Apps\One.exe`, CollectTrayIcon: true},
+		{ExePath: `c:\apps\ONE.exe`, CollectTrayIcon: true},
+		{ExePath: `C:\Scripts\run.ps1`, CollectTrayIcon: true},
+		{ExePath: `C:\Apps\Two.exe`},
+	}
+	paths := CollectedTrayIconPaths(s)
+	if len(paths) != 1 || paths[0] != s.ManagedApps[0].ExePath {
+		t.Fatalf("collected icon paths = %v", paths)
+	}
+}
+
+func TestLoadWithError_MigratesGlobalTrayCollectionByExecutable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	data := `{"schemaVersion":3,"language":"zh-CN","trayBoxEnabled":true,"trayBoxApps":["C:\\Apps\\One.exe","C:\\Apps\\Absent.exe"],"managedApps":[{"id":"a","exePath":"c:\\apps\\ONE.exe"},{"id":"b","exePath":"C:\\Apps\\Two.exe"}]}`
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := NewStore(path).LoadWithError()
+	if err != nil || !got.ManagedApps[0].CollectTrayIcon || got.ManagedApps[1].CollectTrayIcon || !got.TrayBoxEnabled || len(got.TrayBoxApps) != 2 {
+		t.Fatalf("legacy migration = %+v, %v", got, err)
+	}
+}

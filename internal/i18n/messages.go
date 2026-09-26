@@ -91,6 +91,9 @@ type Messages struct {
 	TrayOpenSettings               string
 	TrayExit                       string
 	TrayToolTip                    string
+	TrayBoxHomeTitle               string
+	TrayBoxHomeHint                string
+	TrayBoxFailedTitle             string
 	HostedShowWindow               string
 	HostedHideWindow               string
 	HostedQuitProgram              string
@@ -200,10 +203,13 @@ var zhCN = Messages{
 	UpdateFailedBody:               "检查更新失败: %s",
 	ExitApp:                        "退出 WinTray",
 	RunSilently:                    "后台静默运行",
-	RunSilentlyHint:                "隐藏此窗口和 WinTray 自己的图标，保留命令行程序的托盘图标；它们都退出后 WinTray 自动退出；再次打开 WinTray 可恢复",
+	RunSilentlyHint:                "隐藏此窗口；有程序勾选托盘图标收纳时保留 WinTray 菜单入口，否则隐藏自身图标；保留命令行程序的托盘图标，再次打开 WinTray 可恢复",
 	TrayOpenSettings:               "打开 WinTray",
 	TrayExit:                       "退出 WinTray",
 	TrayToolTip:                    "WinTray",
+	TrayBoxHomeTitle:               "托盘图标收纳",
+	TrayBoxHomeHint:                "将此程序的托盘图标收进 WinTray 菜单；点击菜单中的程序图标可打开程序",
+	TrayBoxFailedTitle:             "托盘图标收纳",
 	HostedShowWindow:               "显示窗口",
 	HostedHideWindow:               "隐藏窗口",
 	HostedQuitProgram:              "退出 %s",
@@ -318,10 +324,13 @@ var enUS = Messages{
 	UpdateFailedBody:               "Update check failed: %s",
 	ExitApp:                        "Exit WinTray",
 	RunSilently:                    "Run silently",
-	RunSilentlyHint:                "Hides this window and WinTray's own icon but keeps tray icons for console programs; WinTray exits once they all end; open WinTray again to bring it back",
+	RunSilentlyHint:                "Hides this window; keeps WinTray's menu icon if a program collects its tray icon, otherwise hides it; hosted console icons remain",
 	TrayOpenSettings:               "Open WinTray",
 	TrayExit:                       "Exit WinTray",
 	TrayToolTip:                    "WinTray",
+	TrayBoxHomeTitle:               "Collect tray icon",
+	TrayBoxHomeHint:                "Collect this program's tray icon in WinTray's menu; select its icon there to open the program",
+	TrayBoxFailedTitle:             "Collected tray icons",
 	HostedShowWindow:               "Show Window",
 	HostedHideWindow:               "Hide Window",
 	HostedQuitProgram:              "Quit %s",

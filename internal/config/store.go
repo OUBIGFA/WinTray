@@ -137,6 +137,17 @@ func migrate(settings Settings) Settings {
 	if settings.ManagedApps == nil {
 		settings.ManagedApps = make([]ManagedAppEntry, 0)
 	}
+	if settings.TrayBoxApps == nil {
+		settings.TrayBoxApps = make([]string, 0)
+	}
+	if settings.TrayBoxEnabled {
+		for i := range settings.ManagedApps {
+			app := &settings.ManagedApps[i]
+			if strings.EqualFold(filepath.Ext(app.ExePath), ".exe") && containsPath(settings.TrayBoxApps, app.ExePath) {
+				app.CollectTrayIcon = true
+			}
+		}
+	}
 	for i := range settings.ManagedApps {
 		if settings.ManagedApps[i].Name == "" {
 			settings.ManagedApps[i].Name = "New App"

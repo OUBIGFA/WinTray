@@ -88,8 +88,8 @@ func TestMainWindowInteractions(t *testing.T) {
 				if w.managedHint.Text() != zh.ManagedListHint {
 					t.Errorf("startup list hint = %q", w.managedHint.Text())
 				}
-				if !w.editor.Visible() || w.editor.Enabled() || w.launchNowBtn.Enabled() || w.argsEdit.Enabled() || w.appEnabled.Enabled() {
-					t.Error("without a selection the editor must remain visible but not editable")
+				if !w.editor.Visible() || w.editor.Enabled() || w.launchNowBtn.Enabled() || w.argsEdit.Enabled() || w.appEnabled.Enabled() || w.trayBoxEnabled.Enabled() {
+					t.Error("without a selection the program editor must not be editable")
 				}
 				if w.appName.Text() != "" || w.appPath.Text() != "" || w.argsEdit.Text() != "" || w.delayEdit.Text() != "0" || !w.modeTray.Checked() || w.appEnabled.Checked() {
 					t.Error("without a selection the editor must show defaults")
@@ -102,6 +102,12 @@ func TestMainWindowInteractions(t *testing.T) {
 				}
 				if w.logonNotice.Visible() || w.settingsView.Visible() {
 					t.Error("the program list must open without the sign-in notice or the settings page")
+				}
+				if w.trayBoxEnabled.Checked() || w.trayBoxTitle.Text() != zh.TrayBoxHomeTitle || w.trayBoxRow.Parent() != w.editor || w.trayBoxRow.Bounds().X != 0 {
+					t.Error("tray collection must be off and placed in the right editor by default")
+				}
+				if w.trayBoxRow.Bounds().Y < w.modeLabel.Parent().Bounds().Y+w.modeLabel.Parent().Bounds().Height || w.delayBlock.Bounds().Y < w.trayBoxRow.Bounds().Y+w.trayBoxRow.Bounds().Height {
+					t.Error("tray collection must appear between start mode and close delay")
 				}
 				w.managedList.SetCurrentIndex(0)
 			})
@@ -127,6 +133,23 @@ func TestMainWindowInteractions(t *testing.T) {
 				}
 				if !w.appEnabled.Checked() || !w.modeTray.Checked() || w.modeNormal.Checked() || w.modeHidden.Checked() {
 					t.Error("the editor must show the program's start settings")
+				}
+				before := saves
+				click(w.trayBoxEnabled)
+				if !w.trayBoxEnabled.Checked() || !w.settings.ManagedApps[0].CollectTrayIcon || w.settings.ManagedApps[1].CollectTrayIcon || saves != before+1 {
+					t.Error("tray icon collection must save only the selected program")
+				}
+				w.managedList.SetCurrentIndex(1)
+				if w.trayBoxEnabled.Checked() || w.trayBoxEnabled.Enabled() {
+					t.Error("script programs must not offer tray icon collection")
+				}
+				w.managedList.SetCurrentIndex(0)
+				if !w.trayBoxEnabled.Checked() {
+					t.Error("returning to the selected program must restore its checkbox state")
+				}
+				click(w.trayBoxEnabled)
+				if w.trayBoxEnabled.Checked() || w.settings.ManagedApps[0].CollectTrayIcon || saves != before+2 {
+					t.Error("deselecting tray icon collection must save only the selected program")
 				}
 				// Each setting starts at the left edge of the editor, with its
 				// name above its control.
@@ -187,7 +210,7 @@ func TestMainWindowInteractions(t *testing.T) {
 					t.Error("a program switched off should still launch manually, with busy feedback")
 				}
 				w.setLaunchNowBusy(false)
-				before := saves
+				before = saves
 				click(w.checkUpdateBtn)
 				click(w.checkUpdateBtn)
 				if updateChecks != 1 || w.checkUpdateBtn.Enabled() || w.checkUpdateBtn.Text() != zh.CheckUpdateBusy {
@@ -243,8 +266,8 @@ func TestMainWindowInteractions(t *testing.T) {
 				if w.checkUpdateBtn.Enabled() || w.checkUpdateBtn.Text() != en.CheckUpdateBusy {
 					t.Error("changing language must translate and preserve an in-flight update check")
 				}
-				if w.argsHint.Text() != en.ManagedArgsHint {
-					t.Errorf("English argument hint = %q, want %q", w.argsHint.Text(), en.ManagedArgsHint)
+				if w.argsHint.Text() != en.ManagedArgsHint || w.trayBoxTitle.Text() != en.TrayBoxHomeTitle {
+					t.Errorf("English home copy did not update: args=%q box=%q", w.argsHint.Text(), w.trayBoxTitle.Text())
 				}
 				click(w.settingsBtn)
 			})
@@ -707,7 +730,7 @@ func checkWindowLayout(t *testing.T, w *MainWindow) {
 			}
 		}
 	}
-	for _, box := range []*walk.CheckBox{w.appEnabled, w.runAtLogon, w.hideAtLogon, w.exitOnDone} {
+	for _, box := range []*walk.CheckBox{w.appEnabled, w.trayBoxEnabled, w.runAtLogon, w.hideAtLogon, w.exitOnDone} {
 		clipped("check box", box, box.Text())
 	}
 	for _, button := range []*walk.RadioButton{w.modeTray, w.modeNormal, w.modeHidden} {

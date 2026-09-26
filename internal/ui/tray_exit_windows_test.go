@@ -13,6 +13,7 @@ import (
 	"github.com/lxn/win"
 	"wintray/internal/config"
 	"wintray/internal/tray"
+	"wintray/internal/traybox"
 )
 
 // Tray menu order: open settings, run silently, exit.
@@ -44,6 +45,7 @@ func TestTrayMenuActionsDoNotReopenMenu(t *testing.T) {
 
 	var opened, silent, exited atomic.Int32
 	var shown, popupCount atomic.Int32
+	box := traybox.NewBox("", func() []string { return nil })
 	controller, err := tray.New(w.Native(), func() {
 		opened.Add(1)
 		w.ShowMainWindow()
@@ -52,7 +54,7 @@ func TestTrayMenuActionsDoNotReopenMenu(t *testing.T) {
 		w.HideMainWindow()
 	}, func() {
 		exited.Add(1)
-	}, "en-US", true)
+	}, "en-US", true, box, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,6 +77,10 @@ func TestTrayMenuActionsDoNotReopenMenu(t *testing.T) {
 				menu := waitForPopupMenu(uint32(os.Getpid()), 2*time.Second)
 				if menu == 0 {
 					reportTrayMenuFailure(failure, "tray popup did not open", w)
+					return
+				}
+				if hMenu := win.HMENU(win.SendMessage(menu, 0x1e1, 0, 0)); win.GetMenuItemCount(hMenu) != 3 {
+					reportTrayMenuFailure(failure, "unselected programs added entries to the tray menu", w)
 					return
 				}
 				selectTrayMenuItem(menu, item)

@@ -21,6 +21,7 @@ import (
 	"wintray/internal/orchestrator"
 	"wintray/internal/startup"
 	"wintray/internal/tray"
+	"wintray/internal/traybox"
 	"wintray/internal/ui"
 	"wintray/internal/update"
 	"wintray/internal/version"
@@ -112,6 +113,20 @@ type sessionServices struct {
 // Registry registration and data paths are supplied by the composition root.
 func runMainSession(args []string, settings config.Settings, services sessionServices) int {
 	store, logger := services.store, services.logger
+	if settings.TrayBoxEnabled || len(settings.TrayBoxApps) != 0 {
+		if err := traybox.RestorePaths(settings.TrayBoxApps); err != nil && !errors.Is(err, traybox.ErrUnsupported) {
+			logger.Error(fmt.Sprintf("restore legacy tray icon selections failed: %v", err))
+			emitFatalWithLog(settings.Language, "failed to migrate tray icon settings", err)
+			return 1
+		}
+		settings.TrayBoxEnabled = false
+		settings.TrayBoxApps = nil
+		if err := store.Save(settings); err != nil {
+			logger.Error(fmt.Sprintf("save migrated tray icon settings failed: %v", err))
+			emitFatalWithLog(settings.Language, "failed to save tray icon settings", err)
+			return 1
+		}
+	}
 	enumerator := orchestrator.NewWin32WindowEnumerator()
 	manager := orchestrator.NewWin32WindowManager()
 	orch := orchestrator.NewService(enumerator, manager, logger)
@@ -120,6 +135,7 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 	var trayController *tray.Controller
 	var mainWindow *ui.MainWindow
 	host := tray.NewHost(settings.Language, logger, orchestrator.FindConsoleWindow)
+	var box *traybox.Box
 	state := residencyState{autorun: isAutorunLaunch(args), startupPending: isAutorunLaunch(args)}
 	state.settingsOpen = shouldShowMainWindowForSettings(args, settings)
 	quitting := false
@@ -151,7 +167,9 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 		if quitting || mainWindow == nil {
 			return
 		}
-		exitAfter := mainWindow.Settings().ExitAfterManagedAppsCompleted
+		current := mainWindow.Settings()
+		state.boxActive = len(config.CollectedTrayIconPaths(current)) > 0
+		exitAfter := exitsAfterStartup(current)
 		if trayController != nil {
 			if err := trayController.SetVisible(!state.hideMainIcon(exitAfter)); err != nil {
 				logger.Warn(fmt.Sprintf("update main tray visibility failed: %v", err))
@@ -161,6 +179,11 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 			requestExit()
 		}
 	}
+	selfPath, _ := os.Executable()
+	// These callbacks run on the UI thread, after mainWindow is created.
+	box = traybox.NewBox(selfPath, func() []string {
+		return config.CollectedTrayIconPaths(mainWindow.Settings())
+	})
 	host.SetOnEmpty(applyResidency)
 	openSettings := func() {
 		if quitting {
@@ -251,14 +274,13 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 			return
 		}
 
-		defaults := config.DefaultSettings()
-
-		if saveErr := store.Save(defaults); saveErr != nil {
-			mainWindow.ShowError(m.CleanupFailedTitle, fmt.Sprintf(m.CleanupFailedBody, saveErr))
+		if resetErr := resetSettings(store, box.Release); resetErr != nil {
+			logger.Warn(fmt.Sprintf("reset settings failed: %v", resetErr))
+			mainWindow.ShowError(m.CleanupFailedTitle, fmt.Sprintf(m.CleanupFailedBody, resetErr))
 			return
 		}
 
-		services.setRunAtLogon(defaults)
+		services.setRunAtLogon(config.DefaultSettings())
 		if scheduleErr := scheduleAppDataCleanupOnExit(); scheduleErr != nil {
 			mainWindow.ShowError(m.CleanupFailedTitle, fmt.Sprintf(m.CleanupFailedBody, scheduleErr))
 			return
@@ -304,6 +326,25 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 			}
 			host.SetLanguage(s.Language)
 			applyResidency()
+		},
+		OnToggleTrayBox: func(id string, on bool) error {
+			before := mainWindow.Settings()
+			next, path, wasSelected, isSelected, err := traySelectionChange(before, id, on)
+			if err != nil {
+				return err
+			}
+			commit := func() error {
+				if err := store.Save(next); err != nil {
+					return err
+				}
+				mainWindow.SetCollectedTrayIcon(id, on)
+				applyResidency()
+				return nil
+			}
+			if wasSelected == isSelected {
+				return commit()
+			}
+			return box.SetSelected(path, isSelected, commit)
 		},
 		OnOpenLogs: func() {
 			if openErr := openLogLocation(); openErr != nil {
@@ -405,6 +446,10 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 
 	services.setRunAtLogon(settings)
 
+	if applyErr := box.Apply(); applyErr != nil && !errors.Is(applyErr, traybox.ErrUnsupported) {
+		logger.Warn(fmt.Sprintf("hide boxed tray icons failed: %v", applyErr))
+	}
+
 	createTray := func() error {
 		current := mainWindow.Settings()
 		c, trayErr := tray.New(
@@ -413,7 +458,9 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 			runSilently,
 			requestExit,
 			current.Language,
-			!state.hideMainIcon(current.ExitAfterManagedAppsCompleted),
+			!state.hideMainIcon(exitsAfterStartup(current)),
+			box,
+			logger,
 		)
 		if trayErr == nil {
 			trayController = c

@@ -3,6 +3,7 @@
 package tray
 
 import (
+	"fmt"
 	"syscall"
 	"unsafe"
 
@@ -10,12 +11,15 @@ import (
 	"github.com/lxn/win"
 	"wintray/internal/branding"
 	"wintray/internal/i18n"
+	"wintray/internal/traybox"
 )
 
 const (
 	trayActionOpenSettings = 1
 	trayActionRunSilently  = 2
 	trayActionExit         = 3
+	trayBoxedBase          = 100
+	trayIDLimit            = 9000
 )
 
 type Controller struct {
@@ -26,6 +30,8 @@ type Controller struct {
 	exitApp       func()
 	language      string
 	exitRequested bool
+	box           *traybox.Box
+	logger        Logger
 }
 
 func New(
@@ -35,6 +41,8 @@ func New(
 	exitApp func(),
 	language string,
 	visible bool,
+	box *traybox.Box,
+	logger Logger,
 ) (*Controller, error) {
 	ni, err := walk.NewNotifyIcon(window)
 	if err != nil {
@@ -48,6 +56,8 @@ func New(
 		runSilently: runSilently,
 		exitApp:     exitApp,
 		language:    language,
+		box:         box,
+		logger:      logger,
 	}
 
 	if appIcon, iconErr := branding.AppIcon(); iconErr == nil && appIcon != nil {
@@ -91,9 +101,22 @@ func (c *Controller) showContextMenu() {
 	defer win.DestroyMenu(hMenu)
 
 	msg := i18n.For(c.language)
-	if !appendTrayMenuItem(hMenu, trayActionOpenSettings, msg.TrayOpenSettings) ||
-		!appendTrayMenuItem(hMenu, trayActionRunSilently, msg.RunSilently) ||
-		!appendTrayMenuItem(hMenu, trayActionExit, msg.TrayExit) {
+	var view traybox.View
+	if c.box != nil && c.box.HasSelection() {
+		view = c.box.View()
+		if view.Err != nil {
+			c.logger.Warn(fmt.Sprintf("tray box: %v", view.Err))
+		}
+		bitmaps := c.appendBox(hMenu, view, msg)
+		defer func() {
+			for _, b := range bitmaps {
+				win.DeleteObject(win.HGDIOBJ(b))
+			}
+		}()
+	}
+	if !appendTrayMenuItem(hMenu, menuItem{id: trayActionOpenSettings, text: msg.TrayOpenSettings}) ||
+		!appendTrayMenuItem(hMenu, menuItem{id: trayActionRunSilently, text: msg.RunSilently}) ||
+		!appendTrayMenuItem(hMenu, menuItem{id: trayActionExit, text: msg.TrayExit}) {
 		return
 	}
 
@@ -116,6 +139,10 @@ func (c *Controller) showContextMenu() {
 	// Required by the Windows tray-menu contract after TrackPopupMenuEx.
 	win.PostMessage(hwnd, win.WM_NULL, 0, 0)
 
+	if id := uint32(actionID); id >= trayBoxedBase && id < trayIDLimit {
+		c.runBoxAction(view, id)
+		return
+	}
 	switch uint32(actionID) {
 	case trayActionOpenSettings:
 		if c.showMain != nil && !c.exitRequested {
@@ -133,21 +160,99 @@ func (c *Controller) showContextMenu() {
 	}
 }
 
-func appendTrayMenuItem(hMenu win.HMENU, id uint32, text string) bool {
-	label, err := syscall.UTF16PtrFromString(text)
-	if err != nil {
-		return false
+// appendBox lists only icons selected in the program editor. Their bitmaps
+// must outlive the menu.
+func (c *Controller) appendBox(hMenu win.HMENU, view traybox.View, msg i18n.Messages) []win.HBITMAP {
+	var bitmaps []win.HBITMAP
+	iconSize := int(win.GetSystemMetrics(win.SM_CXSMICON))
+	bitmapOf := func(icon traybox.Icon) win.HBITMAP {
+		b, err := traybox.MenuBitmap(icon.Snapshot, iconSize)
+		if err != nil {
+			return 0
+		}
+		bitmaps = append(bitmaps, b)
+		return b
 	}
+
+	for i, l := range view.Boxed {
+		id := uint32(trayBoxedBase + i)
+		if id >= trayIDLimit {
+			break
+		}
+		appendTrayMenuItem(hMenu, menuItem{id: id, text: l.DisplayName(), bitmap: bitmapOf(l.Icon)})
+	}
+	if len(view.Boxed) > 0 {
+		appendTrayMenuItem(hMenu, menuItem{separator: true})
+	}
+	return bitmaps
+}
+
+// runBoxAction opens a selected program from its icon in WinTray's menu.
+func (c *Controller) runBoxAction(view traybox.View, id uint32) {
+	i := int(id - trayBoxedBase)
+	if i >= len(view.Boxed) {
+		return
+	}
+	icon := view.Boxed[i]
+	// Opening the hidden-icons flyout takes a moment; the UI thread
+	// must keep pumping meanwhile.
+	go func() {
+		if err := traybox.Activate(icon, traybox.ActionDoubleClick); err != nil {
+			c.logger.Warn(fmt.Sprintf("tray box click failed: %s %v", icon.ExePath, err))
+			c.window.Synchronize(func() { c.showBoxError(err) })
+		}
+	}()
+}
+
+func (c *Controller) showBoxError(err error) {
+	if c.exitRequested {
+		return
+	}
+	walk.MsgBox(c.window, i18n.For(c.language).TrayBoxFailedTitle, err.Error(), walk.MsgBoxIconWarning)
+}
+
+type menuItem struct {
+	id        uint32
+	text      string
+	submenu   win.HMENU
+	bitmap    win.HBITMAP
+	checked   bool
+	disabled  bool
+	separator bool
+}
+
+func appendTrayMenuItem(hMenu win.HMENU, m menuItem) bool {
 	position := win.GetMenuItemCount(hMenu)
 	if position < 0 {
 		return false
 	}
-	item := win.MENUITEMINFO{
-		CbSize:     uint32(unsafe.Sizeof(win.MENUITEMINFO{})),
-		FMask:      win.MIIM_FTYPE | win.MIIM_ID | win.MIIM_STRING,
-		FType:      win.MFT_STRING,
-		WID:        id,
-		DwTypeData: label,
+	item := win.MENUITEMINFO{CbSize: uint32(unsafe.Sizeof(win.MENUITEMINFO{}))}
+	if m.separator {
+		item.FMask = win.MIIM_FTYPE
+		item.FType = win.MFT_SEPARATOR
+		return win.InsertMenuItem(hMenu, uint32(position), true, &item)
+	}
+	label, err := syscall.UTF16PtrFromString(m.text)
+	if err != nil {
+		return false
+	}
+	item.FMask = win.MIIM_FTYPE | win.MIIM_ID | win.MIIM_STRING | win.MIIM_STATE
+	item.FType = win.MFT_STRING
+	item.WID = m.id
+	item.DwTypeData = label
+	if m.checked {
+		item.FState |= win.MFS_CHECKED
+	}
+	if m.disabled {
+		item.FState |= win.MFS_DISABLED
+	}
+	if m.submenu != 0 {
+		item.FMask |= win.MIIM_SUBMENU
+		item.HSubMenu = m.submenu
+	}
+	if m.bitmap != 0 {
+		item.FMask |= win.MIIM_BITMAP
+		item.HbmpItem = m.bitmap
 	}
 	return win.InsertMenuItem(hMenu, uint32(position), true, &item)
 }

@@ -35,10 +35,10 @@ Core use cases:
 
 - **Tray Resident**: Lives in the notification area with one-click access to settings and exit
 - **Managed Program List**: Maintain any number of programs, each with independent behavior configuration
-- **Auto Start**: Registers a per-user logon task that starts WinTray right after sign-in, ahead of the `Run` entries Explorer launches one by one; no administrator rights needed. Falls back to the current user's `Run` registry key if the task cannot be registered
+- **Auto Start**: Registers a per-user logon task that starts WinTray right after sign-in; no administrator rights needed
 - **Close to Tray**: When configured in the program list, the sign-in task closes the target window while the program keeps running in the tray
 - **Wait for a Window**: 0–120 seconds, for slow-starting programs whose window shows up late
-- **Wait Before Closing**: Each program can run for a set number of seconds before its window is closed, to skip login dialogs and other pre-launch popups (such as the new QQ); also covers instances started by the program's own auto-start
+- **Wait Before Closing**: Each program can run for a set number of seconds before its window is closed, to skip login dialogs and other pre-launch popups (such as the new QQ)
 - **Staggered Startup**: Launch programs in list order, 3 seconds apart by default; adjust the interval from 0–120 seconds in Global Settings to reduce competing startup workloads
 - **Cleanup & Restore Defaults**: One-click cleanup of local config/logs from the main window
 - **Bilingual UI**: Built-in Simplified Chinese / English, switchable instantly
@@ -53,7 +53,7 @@ WinTray is **portable only** — no installation needed.
 Go to the [Releases](../../releases) page, download the latest `WinTray-Portable.zip`, extract it, and run `WinTray.exe` directly.
 
 - Configuration and logs are stored in `%LOCALAPPDATA%\WinTray\` with no registry dependencies
-- Exit WinTray before deleting the folder: `WinTray.exe` remains in use while it runs, and removing the folder afterwards is all it takes to clean up
+- Exit WinTray first, then delete the folder to remove it completely
 
 ---
 
@@ -70,29 +70,31 @@ WinTray supports adding the following program types to the managed list, automat
 
 > Non-`.exe` scripts (`.bat` / `.cmd` / `.ps1` / `.py` / `.pyw`) default to "Run in background" when added and cannot use "Close to tray".
 
-> **Important:** Some applications contain multiple `.exe` files, such as launchers, updaters, helper processes, and the actual main program. When adding an application, select the executable that owns the main visible window. Selecting the wrong `.exe` may allow the program to start, but WinTray may not find its window, so "Close to tray" will not take effect.
+> **Note:** Some applications contain multiple `.exe` files (launchers, updaters, etc.); pick the one that owns the main window, or "Close to tray" won't take effect.
 
 ### Per-Program Configuration Options
 
 - **How it starts**: **Start normally** (just starts the program, window untouched) / **Close to tray** (closes the main window after launch, the program keeps running in the tray) / **Run in background** (no window at all, best for scripts and command-line tools)
-- **Wait before closing**: Available with "Close to tray", 0–600 seconds. WinTray only looks for the window and closes it once the program's process has been running that long, which skips a sign-in window — about 10–15 seconds for the new QQ. The delay counts from process creation, so instances started by the program's own auto-start are covered too, and that auto-start can stay enabled
+- **Wait before closing**: Available with "Close to tray", 0–600 seconds — the window is closed only after the program has been running that long, skipping sign-in windows (10–15 seconds for the new QQ). Covers instances started by the program's own auto-start too
 - **Arguments**: Command-line arguments passed to the program
 - **Start this program at sign-in**: Uncheck it to pause the program, which is then skipped at sign-in; "Launch Now" remains available
 
-> Console programs without a tray icon of their own (such as `syncthing.exe` or `frpc.exe`) exit on a close message, so "Close to tray" hides their console window instead and WinTray hosts a tray icon for them: left-click shows/hides the window, and the context menu can show, hide, stop hosting or quit the program. All icons are owned by the main WinTray process, with no extra processes.
+> Console programs without a tray icon of their own (such as `syncthing.exe` or `frpc.exe`) get a WinTray-hosted tray icon instead: left-click shows/hides the window, and the context menu can show, hide, stop hosting or quit the program.
+
+### Collect Tray Icons
+
+Check "Collect tray icon" in a program's editor, below "How it starts", and its tray icon moves into WinTray's right-click menu, shown with its own icon and name; click the entry to open the program. Uncheck to restore. Requires Windows 11.
 
 ### Staggered Startup
 
-The global **Delay between programs** sets the minimum gap between launches by WinTray: **3 seconds** by default, configurable from **0–120 seconds** (0 means no wait) and worth raising when many heavy programs are involved. Launches follow list order, with no extra wait before the first one or after the last one; paused, already-running and failed entries add no gap. "Launch Now" is unaffected.
-
-The delay only paces programs that WinTray launches itself: enabled Windows `Run` entries remain scheduled by Windows, and WinTray only waits for those programs and handles their windows without changing other programs' startup settings.
+The global **Delay between programs** sets the minimum gap between launches: **3 seconds** by default, configurable from **0–120 seconds**. Launches follow list order, and "Launch Now" is unaffected.
 
 ### Common Use Cases
 
 | Scenario                                                     | Configuration                                            |
 | ------------------------------------------------------------ | -------------------------------------------------------- |
 | WeChat / DingTalk auto-start and minimize to tray            | Add `.exe`, set "How it starts" to "Close to tray"        |
-| New QQ (NT-based) auto-start, minimize to tray after login   | Add `QQ.exe`, set "Close to tray" and "Wait before closing" to 10–15 s to skip the login window; QQ's own auto-start can stay enabled |
+| New QQ auto-start, minimize to tray after login | Add `QQ.exe`, set "Close to tray" and "Wait before closing" to 10–15 s |
 | syncthing / frpc console programs running in the background, reachable from the tray | Add `.exe`, set "Close to tray"; WinTray hosts the tray icon |
 | Tunnel scripts (frpc / SSH) running in background at startup | Add `.bat` / `.ps1`, set "Run in background"              |
 | Python crawler/service starting silently in background       | Add `.py`, set "Run in background"                        |
@@ -130,9 +132,9 @@ The source and release package support Windows only; cross-platform builds are n
 | `--cleanup-restore` | Clear `%LOCALAPPDATA%\WinTray\` and exit                         |
 | `--host`            | Compatibility with older callers only; not needed by new launches |
 
-**Exit WinTray when sign-in tasks finish** (optional, in Settings): with no hosted icons WinTray exits once the tasks are done; with hosted icons still present it hides the settings window and its own icon, leaving only the programs' icons, and exits after the last hosted program ends. Running WinTray again opens the existing instance's settings, and it never auto-exits while settings are open or a manual launch is in progress. Choosing "Exit WinTray" manually cancels pending tasks, restores hidden windows and then exits.
+**Exit WinTray when sign-in tasks finish** (optional, in Settings): exits once the tasks are done; while tray icons are still in use it waits, and exits after the last one ends.
 
-**Run silently** (next to "Exit WinTray" at the bottom of the settings window, and in the tray menu; available at any time): hides the settings window and WinTray's own icon while hidden program windows stay hidden and hosted icons for console programs such as syncthing and frpc remain available; runs in progress finish, then WinTray exits when the last hosted program ends, or immediately if nothing is hosted. Running WinTray again brings it back.
+**Run silently** (in the settings window footer and tray menu): hides the window and runs in the background; run WinTray again to restore it.
 
 With "Exit WinTray when sign-in tasks finish" unchecked, WinTray keeps its own tray icon, and "Don't show the WinTray window at sign-in" controls whether settings are shown in that mode.
 
@@ -153,19 +155,19 @@ With "Exit WinTray when sign-in tasks finish" unchecked, WinTray keeps its own t
 ## FAQ
 
 **Q: I don't see a main window after launch — how do I access settings?**
-A: Right-click WinTray's tray icon and select "Open Settings". If automatic-exit mode leaves only the hosted programs' icons, run `WinTray.exe` again to open settings in the existing process.
+A: Right-click WinTray's tray icon and select "Open WinTray", or run `WinTray.exe` again.
 
 **Q: How do I disable auto-start after it's been enabled?**
-A: Uncheck "Run WinTray at logon" in the settings page; the logon task and registry entry are removed automatically. You can also use "Remove sign-in task" under More Features → Troubleshooting, which deletes both and turns running at sign-in off after confirmation.
+A: Turn off "Run WinTray at sign-in" in the settings page; the logon task and registry entry are removed automatically.
 
 **Q: The new QQ doesn't minimize to the tray; instead the login fails or QQ quits.**
-A: The new QQ shows a login window first and quits when that window receives a close message. Set "Wait before closing" for it so the delay covers the whole login (auto-login usually takes 15–30 seconds; allow more for manual login). Whether WinTray or QQ's own auto-start launched it, WinTray waits until QQ has been running for the delay and its main window is up before closing it.
+A: The new QQ shows a login window first and quits if it is closed too early. Set "Wait before closing" longer than the whole login (auto-login usually takes 15–30 seconds).
 
 **Q: Can QQ's own auto-start and WinTray launch two instances?**
-A: WinTray checks enabled `HKCU/HKLM Run` entries (including 32-bit entries) that directly launch the configured executable, respecting Task Manager's disabled state. If one exists, WinTray only waits for Windows to start the program, for up to 300 seconds, then applies the configured "Wait before closing" before handling its window. A timeout is logged explicitly, with **no fallback launch**, so a later Windows launch does not create a duplicate. "Launch now" can still start an absent program manually. Detection does not cover scheduled tasks, Startup-folder items, or indirect launches through third-party launchers, and does not change other programs' startup settings.
+A: No. When the program's own `Run` entry is enabled, WinTray just waits for Windows to start it and **never launches it again**, so there's no duplicate.
 
 **Q: A program in my list isn't being minimized to the tray.**
-A: Make sure the program is set to "Close to tray", and that WinTray was triggered with the `--autorun` flag (auto-start does this automatically). If the program starts slowly, increase "Wait for a window up to".
+A: Make sure the program is set to "Close to tray" and WinTray's auto-start is enabled. If the program starts slowly, increase "Wait for a window up to".
 
 ---
 

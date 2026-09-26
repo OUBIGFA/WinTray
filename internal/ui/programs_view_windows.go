@@ -127,6 +127,42 @@ func (w *MainWindow) buildLogonNotice(parent walk.Container) error {
 	return err
 }
 
+func (w *MainWindow) buildTrayBoxToggle(parent walk.Container) error {
+	row, err := newRow(parent, 12)
+	if err != nil {
+		return err
+	}
+	w.trayBoxRow = row
+	if w.trayBoxTitle, err = newFieldLabel(row); err != nil {
+		return err
+	}
+	if w.trayBoxEnabled, err = walk.NewCheckBox(row); err != nil {
+		return err
+	}
+	w.trayBoxEnabled.CheckedChanged().Attach(func() {
+		if w.updatingEditor {
+			return
+		}
+		app, _, ok := w.selectedManagedApp()
+		if !ok || app.CollectTrayIcon == w.trayBoxEnabled.Checked() {
+			return
+		}
+		on := w.trayBoxEnabled.Checked()
+		if w.callbacks.OnToggleTrayBox != nil {
+			if toggleErr := w.callbacks.OnToggleTrayBox(app.ID, on); toggleErr != nil {
+				w.updatingEditor = true
+				w.trayBoxEnabled.SetChecked(app.CollectTrayIcon)
+				w.updatingEditor = false
+				walk.MsgBox(w.mw, i18n.For(w.settings.Language).TrayBoxFailedTitle, toggleErr.Error(), walk.MsgBoxIconWarning)
+			}
+			return
+		}
+		app.CollectTrayIcon = on
+		w.save()
+	})
+	return nil
+}
+
 func (w *MainWindow) buildListPane(parent walk.Container) (*walk.Composite, error) {
 	pane, err := newColumn(parent, 8)
 	if err != nil {
@@ -222,6 +258,9 @@ func (w *MainWindow) buildDetailPane(parent walk.Container) error {
 		return err
 	}
 	if err = w.buildStartMode(w.editor); err != nil {
+		return err
+	}
+	if err = w.buildTrayBoxToggle(w.editor); err != nil {
 		return err
 	}
 	if err = w.buildCloseDelay(w.editor); err != nil {
@@ -552,6 +591,9 @@ func (w *MainWindow) buildFooter(parent walk.Container) error {
 func (w *MainWindow) applyProgramsLanguage(msg i18n.Messages) {
 	w.logonNoticeText.SetText(msg.LogonOffNotice)
 	w.enableLogonBtn.SetText(msg.LogonOffEnable)
+	w.trayBoxTitle.SetText(msg.TrayBoxHomeTitle)
+	w.trayBoxEnabled.SetToolTipText(msg.TrayBoxHomeHint)
+	_ = w.trayBoxEnabled.Accessibility().SetName(msg.TrayBoxHomeTitle)
 	w.managedTitle.SetText(msg.ManagedListTitle)
 	w.managedHint.SetText(msg.ManagedListHint)
 	for _, button := range []*walk.PushButton{w.addProgramBtn, w.emptyAddBtn} {
@@ -697,6 +739,9 @@ func (w *MainWindow) onSelectProgramForSelected() {
 	if err != nil || !result {
 		return
 	}
+	if !w.stopCollecting(app) {
+		return
+	}
 	app.ExePath = dlg.FilePath
 	name := stringutil.TrimExt(filepath.Base(dlg.FilePath))
 	if name != "" {
@@ -720,11 +765,29 @@ func (w *MainWindow) onRemoveSelected() {
 	if idx < 0 || idx >= len(w.settings.ManagedApps) {
 		return
 	}
+	if !w.stopCollecting(&w.settings.ManagedApps[idx]) {
+		return
+	}
 	w.settings.ManagedApps = append(w.settings.ManagedApps[:idx], w.settings.ManagedApps[idx+1:]...)
 	w.refreshManagedList()
 	// The button just used may have been hidden with the last program.
 	w.focusDefaultControl()
 	w.save()
+}
+
+func (w *MainWindow) stopCollecting(app *config.ManagedAppEntry) bool {
+	if !app.CollectTrayIcon {
+		return true
+	}
+	if w.callbacks.OnToggleTrayBox != nil {
+		if err := w.callbacks.OnToggleTrayBox(app.ID, false); err != nil {
+			walk.MsgBox(w.mw, i18n.For(w.settings.Language).TrayBoxFailedTitle, err.Error(), walk.MsgBoxIconWarning)
+			return false
+		}
+	} else {
+		app.CollectTrayIcon = false
+	}
+	return true
 }
 
 // onManagedChecked switches a program on or off for sign-in from its check box
@@ -821,6 +884,11 @@ func (w *MainWindow) syncManagedEditor() {
 	defer func() { w.updatingEditor = false }()
 
 	w.editor.SetEnabled(ok)
+	if ok {
+		w.trayBoxEnabled.SetEnabled(strings.EqualFold(filepath.Ext(app.ExePath), ".exe"))
+	} else {
+		w.trayBoxEnabled.SetEnabled(false)
+	}
 	w.browseLink.SetEnabled(ok)
 	w.browseLink.SetVisible(ok)
 	w.launchNowBtn.SetEnabled(ok && !w.launchNowBusy)
@@ -828,6 +896,7 @@ func (w *MainWindow) syncManagedEditor() {
 		w.appName.SetText("")
 		w.appPath.SetText("")
 		w.appEnabled.SetChecked(false)
+		w.trayBoxEnabled.SetChecked(false)
 		w.modeTray.SetChecked(true)
 		w.modeNormal.SetChecked(false)
 		w.modeHidden.SetChecked(false)
@@ -840,6 +909,7 @@ func (w *MainWindow) syncManagedEditor() {
 	w.appName.SetText(app.Name)
 	w.appPath.SetText(app.ExePath)
 	w.appEnabled.SetChecked(app.RunOnStartup)
+	w.trayBoxEnabled.SetChecked(app.CollectTrayIcon)
 	mode := startModeOf(*app)
 	w.modeTray.SetChecked(mode == startToTray)
 	w.modeNormal.SetChecked(mode == startNormal)

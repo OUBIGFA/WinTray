@@ -1,5 +1,10 @@
 package config
 
+import (
+	"path/filepath"
+	"strings"
+)
+
 // MaxCloseDelaySeconds bounds how long a program may wait between its launch
 // and the first action on its window.
 const MaxCloseDelaySeconds = 600
@@ -34,6 +39,7 @@ type ManagedAppEntry struct {
 	ExePath                  string       `json:"exePath"`
 	Args                     string       `json:"args"`
 	RunOnStartup             bool         `json:"runOnStartup"`
+	CollectTrayIcon          bool         `json:"collectTrayIcon"`
 	LaunchHiddenInBackground bool         `json:"launchHiddenInBackground"`
 	TrayBehavior             TrayBehavior `json:"trayBehavior"`
 }
@@ -47,6 +53,28 @@ type Settings struct {
 	CloseWindowRetrySeconds       int               `json:"closeWindowRetrySeconds"`
 	StartupIntervalSeconds        int               `json:"startupIntervalSeconds"`
 	ManagedApps                   []ManagedAppEntry `json:"managedApps"`
+	// Legacy settings from the first tray-box prototype. Reconciled at startup.
+	TrayBoxEnabled bool     `json:"trayBoxEnabled,omitempty"`
+	TrayBoxApps    []string `json:"trayBoxApps,omitempty"`
+}
+
+func CollectedTrayIconPaths(settings Settings) []string {
+	var paths []string
+	for _, app := range settings.ManagedApps {
+		if app.CollectTrayIcon && strings.EqualFold(filepath.Ext(app.ExePath), ".exe") && !containsPath(paths, app.ExePath) {
+			paths = append(paths, app.ExePath)
+		}
+	}
+	return paths
+}
+
+func containsPath(paths []string, path string) bool {
+	for _, p := range paths {
+		if strings.EqualFold(p, path) {
+			return true
+		}
+	}
+	return false
 }
 
 func ShouldLaunchViaWinTray(entry ManagedAppEntry) bool {
@@ -74,5 +102,6 @@ func DefaultSettings() Settings {
 		CloseWindowRetrySeconds:       10,
 		StartupIntervalSeconds:        DefaultStartupIntervalSeconds,
 		ManagedApps:                   make([]ManagedAppEntry, 0),
+		TrayBoxApps:                   make([]string, 0),
 	}
 }

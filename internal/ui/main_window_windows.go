@@ -14,6 +14,7 @@ import (
 
 type Callbacks struct {
 	OnSave           func(config.Settings)
+	OnToggleTrayBox  func(string, bool) error
 	OnOpenLogs       func()
 	OnCleanupRestore func()
 	OnRemoveLogon    func()
@@ -54,6 +55,9 @@ type MainWindow struct {
 	logonNotice      *walk.Composite
 	logonNoticeText  *walk.Label
 	enableLogonBtn   *walk.PushButton
+	trayBoxRow       *walk.Composite
+	trayBoxTitle     *walk.Label
+	trayBoxEnabled   *walk.CheckBox
 	programsBody     *walk.Composite
 	managedTitle     *walk.Label
 	managedHint      *walk.Label
@@ -385,6 +389,16 @@ func (w *MainWindow) RequestExplicitClose() {
 
 func (w *MainWindow) Native() *walk.MainWindow {
 	return w.mw
+}
+
+func (w *MainWindow) SetCollectedTrayIcon(id string, on bool) {
+	for i := range w.settings.ManagedApps {
+		if w.settings.ManagedApps[i].ID == id {
+			w.settings.ManagedApps[i].CollectTrayIcon = on
+			break
+		}
+	}
+	w.syncManagedEditor()
 }
 
 func (w *MainWindow) Settings() config.Settings {
