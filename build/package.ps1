@@ -71,7 +71,7 @@ if (Test-Path $manifestTarget) {
   Copy-Item -Path $manifestTarget -Destination $portableManifest -Force
 }
 
-$zipName = if ($Version) { "WinTray-Portable-$Version.zip" } else { "WinTray-Portable.zip" }
+$zipName = "WinTray-Portable.zip"
 $zipTarget = Join-Path $publishDir $zipName
 $tempZipTarget = Join-Path $publishDir "WinTray-Portable.tmp.zip"
 if (Test-Path $tempZipTarget) {

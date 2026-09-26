@@ -212,6 +212,12 @@ func (w *MainWindow) buildLogonSettings(parent walk.Container) error {
 	return err
 }
 
+// TurnOffRunAtLogon switches running at sign-in off and saves, as if the
+// user had flipped the switch. Must be called on the UI thread.
+func (w *MainWindow) TurnOffRunAtLogon() {
+	w.setRunAtLogon(false)
+}
+
 // setRunAtLogon is shared by the settings switch and the notice on the
 // program list that offers to turn running at sign-in back on. Showing the
 // stored state again through syncLogonState changes and saves nothing.
@@ -302,6 +308,16 @@ func (w *MainWindow) buildTroubleshooting(parent walk.Container) error {
 	}); err != nil {
 		return err
 	}
+	if w.removeLogonRow, err = addSettingRow(section, 0, false); err != nil {
+		return err
+	}
+	if w.removeLogonBtn, err = newActionButton(w.removeLogonRow.controls, func() {
+		if w.callbacks.OnRemoveLogon != nil {
+			w.callbacks.OnRemoveLogon()
+		}
+	}); err != nil {
+		return err
+	}
 	if w.cleanupRow, err = addSettingRow(section, 0, false); err != nil {
 		return err
 	}
@@ -341,6 +357,9 @@ func (w *MainWindow) applySettingsLanguage(msg i18n.Messages) {
 	w.logsRow.title.SetText(msg.LogsTitle)
 	w.logsRow.hint.SetText(msg.OpenLogsHint)
 	w.openLogsBtn.SetText(msg.OpenLogs)
+	w.removeLogonRow.title.SetText(msg.RemoveLogonTaskTitle)
+	w.removeLogonRow.hint.SetText(msg.RemoveLogonTaskHint)
+	w.removeLogonBtn.SetText(msg.RemoveLogonTask)
 	w.cleanupRow.title.SetText(msg.CleanupRestoreTitle)
 	w.cleanupRow.hint.SetText(msg.CleanupRestoreHint)
 	w.cleanupBtn.SetText(msg.CleanupRestore)

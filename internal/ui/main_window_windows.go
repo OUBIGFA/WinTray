@@ -16,6 +16,7 @@ type Callbacks struct {
 	OnSave           func(config.Settings)
 	OnOpenLogs       func()
 	OnCleanupRestore func()
+	OnRemoveLogon    func()
 	OnLaunchNow      func(config.ManagedAppEntry)
 	OnCheckUpdate    func()
 	OnOpenRepository func()
@@ -110,6 +111,8 @@ type MainWindow struct {
 	troubleshootTitle *walk.Label
 	logsRow           *settingRow
 	openLogsBtn       *walk.PushButton
+	removeLogonRow    *settingRow
+	removeLogonBtn    *walk.PushButton
 	cleanupRow        *settingRow
 	cleanupBtn        *walk.PushButton
 

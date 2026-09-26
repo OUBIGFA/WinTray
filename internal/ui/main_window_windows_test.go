@@ -667,7 +667,7 @@ func checkWindowLayout(t *testing.T, w *MainWindow) {
 			t.Errorf("%s %q clipped: width=%d needs=%d", kind, text, widget.Bounds().Width, widget.SizeHint().Width)
 		}
 	}
-	for _, button := range []*walk.PushButton{w.backBtn, w.settingsBtn, w.enableLogonBtn, w.addProgramBtn, w.emptyAddBtn, w.removeBtn, w.launchNowBtn, w.silentBtn, w.exitBtn, w.checkUpdateBtn, w.openLogsBtn, w.cleanupBtn} {
+	for _, button := range []*walk.PushButton{w.backBtn, w.settingsBtn, w.enableLogonBtn, w.addProgramBtn, w.emptyAddBtn, w.removeBtn, w.launchNowBtn, w.silentBtn, w.exitBtn, w.checkUpdateBtn, w.openLogsBtn, w.removeLogonBtn, w.cleanupBtn} {
 		clipped("button", button, button.Text())
 	}
 	for _, label := range []*walk.Label{w.pageTitle, w.settingsTitle, w.versionLabel, w.intervalUnit, w.retryUnit, w.delayUnit} {
@@ -682,7 +682,7 @@ func checkWindowLayout(t *testing.T, w *MainWindow) {
 	if want := fmt.Sprintf(i18n.For(w.settings.Language).VersionLabel, version.Number); w.versionLabel.Text() != want {
 		t.Errorf("version label = %q, want %q", w.versionLabel.Text(), want)
 	}
-	rows := []*settingRow{w.logonRow, w.hideAtLogonRow, w.exitOnDoneRow, w.intervalRow, w.retryRow, w.logsRow, w.cleanupRow}
+	rows := []*settingRow{w.logonRow, w.hideAtLogonRow, w.exitOnDoneRow, w.intervalRow, w.retryRow, w.logsRow, w.removeLogonRow, w.cleanupRow}
 	for _, row := range rows {
 		clipped("setting", row.title, row.title.Text())
 	}

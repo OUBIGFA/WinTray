@@ -69,7 +69,9 @@ func NewService(enumerator WindowEnumerator, manager WindowManager, logger Logge
 	return &Service{
 		enumerator: enumerator, manager: manager, logger: logger,
 		externalStartupLookup: startup.FindEnabledRunEntry,
-		externalStartupWait:   120 * time.Second,
+		// WinTray's logon task runs before Explorer works through its Run
+		// queue one entry at a time, so a late entry may take minutes.
+		externalStartupWait: 300 * time.Second,
 	}
 }
 

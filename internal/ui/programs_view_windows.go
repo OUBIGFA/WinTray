@@ -274,8 +274,8 @@ func (w *MainWindow) buildSignIn(parent walk.Container) error {
 }
 
 // buildIdentity shows which program is being edited, with its most used
-// action next to its name and the rarely needed file change as a link right
-// after its path.
+// action next to its name and the rarely needed file change as a link before
+// its path.
 func (w *MainWindow) buildIdentity(parent walk.Container) error {
 	identity, err := newColumn(parent, 4)
 	if err != nil {
@@ -301,12 +301,6 @@ func (w *MainWindow) buildIdentity(parent walk.Container) error {
 	if err != nil {
 		return err
 	}
-	if w.appPath, err = newHint(pathRow); err != nil {
-		return err
-	}
-	if err = w.appPath.SetEllipsisMode(walk.EllipsisPath); err != nil {
-		return err
-	}
 	if w.browseLink, err = walk.NewLinkLabel(pathRow); err != nil {
 		return err
 	}
@@ -314,6 +308,12 @@ func (w *MainWindow) buildIdentity(parent walk.Container) error {
 		return err
 	}
 	w.browseLink.LinkActivated().Attach(func(*walk.LinkLabelLink) { w.onSelectProgramForSelected() })
+	if w.appPath, err = newHint(pathRow); err != nil {
+		return err
+	}
+	if err = w.appPath.SetEllipsisMode(walk.EllipsisPath); err != nil {
+		return err
+	}
 	_, err = walk.NewHSpacer(pathRow)
 	return err
 }
@@ -342,10 +342,10 @@ func (w *MainWindow) buildStartMode(parent walk.Container) error {
 	if w.modeTray, err = w.newModeButton(choices, startToTray); err != nil {
 		return err
 	}
-	if w.modeNormal, err = w.newModeButton(choices, startNormal); err != nil {
+	if w.modeHidden, err = w.newModeButton(choices, startHidden); err != nil {
 		return err
 	}
-	if w.modeHidden, err = w.newModeButton(choices, startHidden); err != nil {
+	if w.modeNormal, err = w.newModeButton(choices, startNormal); err != nil {
 		return err
 	}
 	if _, err = walk.NewHSpacer(row); err != nil {

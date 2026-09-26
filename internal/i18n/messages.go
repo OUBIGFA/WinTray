@@ -121,6 +121,12 @@ type Messages struct {
 	CleanupDoneBody                string
 	CleanupFailedTitle             string
 	CleanupFailedBody              string
+	RemoveLogonTaskTitle           string
+	RemoveLogonTaskHint            string
+	RemoveLogonTask                string
+	RemoveLogonTaskConfirmBody     string
+	RemoveLogonTaskDoneBody        string
+	RemoveLogonTaskFailedBody      string
 	LanguageZhLabel                string
 	LanguageEnLabel                string
 }
@@ -228,6 +234,12 @@ var zhCN = Messages{
 	CleanupDoneBody:                "已恢复默认设置，WinTray 将在退出后清理本地数据",
 	CleanupFailedTitle:             "清理失败",
 	CleanupFailedBody:              "重置并清理数据失败: %s",
+	RemoveLogonTaskTitle:           "删除登录计划任务",
+	RemoveLogonTaskHint:            "删除开机时运行 WinTray 的计划任务和自启项，并关闭开机自动运行（会先确认）",
+	RemoveLogonTask:                "删除…",
+	RemoveLogonTaskConfirmBody:     "将删除任务计划程序中登录时运行 WinTray 的任务和注册表自启项，并关闭“开机时自动运行 WinTray”\r\n\r\n之后可随时重新打开该开关恢复开机自启\r\n\r\n是否继续？",
+	RemoveLogonTaskDoneBody:        "已删除登录计划任务，开机时不会再自动运行 WinTray",
+	RemoveLogonTaskFailedBody:      "删除登录计划任务失败: %s",
 	LanguageZhLabel:                "中文",
 	StartHiddenHint:                "开机后只在托盘显示图标，需要时再打开窗口",
 	SettingsTroubleshootTitle:      "故障排查",
@@ -340,6 +352,12 @@ var enUS = Messages{
 	CleanupDoneBody:                "Default settings restored; WinTray data will be cleaned after exit",
 	CleanupFailedTitle:             "Cleanup Failed",
 	CleanupFailedBody:              "Cleanup and restore failed: %s",
+	RemoveLogonTaskTitle:           "Remove sign-in task",
+	RemoveLogonTaskHint:            "Deletes the scheduled task and startup entry that run WinTray at sign-in, and turns running at sign-in off (asks first)",
+	RemoveLogonTask:                "Remove…",
+	RemoveLogonTaskConfirmBody:     "This deletes the Task Scheduler task and registry startup entry that run WinTray at sign-in, and turns off \"Run WinTray at sign-in\"\r\n\r\nTurn the switch back on at any time to restore it\r\n\r\nContinue?",
+	RemoveLogonTaskDoneBody:        "Sign-in task removed; WinTray will no longer run at sign-in",
+	RemoveLogonTaskFailedBody:      "Removing the sign-in task failed: %s",
 	LanguageZhLabel:                "中文",
 	StartHiddenHint:                "Only the tray icon appears at sign-in; open the window when you need it",
 	SettingsTroubleshootTitle:      "Troubleshooting",

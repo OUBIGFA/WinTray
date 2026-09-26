@@ -35,7 +35,7 @@ Core use cases:
 
 - **Tray Resident**: Lives in the notification area with one-click access to settings and exit
 - **Managed Program List**: Maintain any number of programs, each with independent behavior configuration
-- **Auto Start**: Writes to the current user's `Run` registry key for automatic launch at Windows logon
+- **Auto Start**: Registers a per-user logon task that starts WinTray right after sign-in, ahead of the `Run` entries Explorer launches one by one; no administrator rights needed. Falls back to the current user's `Run` registry key if the task cannot be registered
 - **Auto Hide Windows**: When configured in the program list, the `--autorun` flow automatically minimizes and hides target windows
 - **Retry on Window Handling**: Configurable 0–120 second retry window for slow-starting programs
 - **Close Delay**: Per-program running time a program must reach before its window is handled, to skip login dialogs and other pre-launch popups (such as the new QQ); also covers instances started by the program's own auto-start
@@ -181,13 +181,13 @@ With this option disabled, WinTray keeps its own tray icon. "Minimize to tray af
 A: Right-click WinTray's tray icon and select "Open Settings". If automatic-exit mode leaves only the hosted programs' icons, run `WinTray.exe` again to open settings in the existing process.
 
 **Q: How do I disable auto-start after it's been enabled?**
-A: Uncheck "Run WinTray at logon" in the settings page; the corresponding registry entry will be cleaned up automatically.
+A: Uncheck "Run WinTray at logon" in the settings page; the logon task and registry entry are removed automatically. You can also use "Remove sign-in task" under More Features → Troubleshooting, which deletes both and turns running at sign-in off after confirmation.
 
 **Q: The new QQ doesn't minimize to the tray; instead the login fails or QQ quits.**
 A: The new QQ shows a login window first and quits when that window receives a close message. Set a "Close delay" for it that covers the whole login (auto-login usually takes 15–30 seconds; allow more for manual login). Whether WinTray or QQ's own auto-start launched it, WinTray waits until QQ has been running for the delay and its main window is up before closing it.
 
 **Q: Can QQ's own auto-start and WinTray launch two instances?**
-A: WinTray checks enabled `HKCU/HKLM Run` entries (including 32-bit entries) that directly launch the configured executable, respecting Task Manager's disabled state. If one exists, WinTray only waits for Windows to start the program, for up to 120 seconds, then applies the configured close delay before handling its window. A timeout is logged explicitly, with **no fallback launch**, so a later Windows launch does not create a duplicate. "Launch now" can still start an absent program manually. Detection does not cover scheduled tasks, Startup-folder items, or indirect launches through third-party launchers, and does not change other programs' startup settings.
+A: WinTray checks enabled `HKCU/HKLM Run` entries (including 32-bit entries) that directly launch the configured executable, respecting Task Manager's disabled state. If one exists, WinTray only waits for Windows to start the program, for up to 300 seconds, then applies the configured close delay before handling its window. A timeout is logged explicitly, with **no fallback launch**, so a later Windows launch does not create a duplicate. "Launch now" can still start an absent program manually. Detection does not cover scheduled tasks, Startup-folder items, or indirect launches through third-party launchers, and does not change other programs' startup settings.
 
 **Q: A program in my list isn't being minimized automatically.**
 A: Make sure the program has "Close window after launch" enabled, and that WinTray was triggered with the `--autorun` flag (auto-start does this automatically). If the program starts slowly, try increasing the retry seconds setting.

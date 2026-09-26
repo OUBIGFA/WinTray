@@ -85,10 +85,18 @@ func Run(args []string) int {
 		logger.Warn(fmt.Sprintf("load settings failed; defaults kept in memory: %v", settingsErr))
 	}
 
-	registrar := startup.NewRegistrar()
+	registrar := startup.NewRegistrar(appName)
+	logon := newLatestOnly(func(s config.Settings) { ensureRunAtLogon(registrar, s, logger) })
+	// Let a registration change requested just before exit reach the system.
+	defer logon.Wait()
 	return runMainSession(args, settings, sessionServices{
 		store: store, logger: logger, activationName: activationEvent,
-		setRunAtLogon: func(s config.Settings) { ensureRunAtLogon(registrar, s, logger) },
+		setRunAtLogon: logon.Request,
+		removeLogon: func() error {
+			// Queued saves run first so none of them re-creates the task.
+			logon.Wait()
+			return registrar.Remove()
+		},
 	})
 }
 
@@ -97,6 +105,7 @@ type sessionServices struct {
 	logger         *logging.Logger
 	activationName string
 	setRunAtLogon  func(config.Settings)
+	removeLogon    func() error
 }
 
 // runMainSession owns UI, startup workers and hosted icons for one instance.
@@ -118,6 +127,7 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 		cancelLaunches()
 		launchWG.Wait()
 		host.RestoreAll()
+		trayController.Dispose()
 	}()
 
 	// Keep pumping UI messages while outstanding work is cancelled and hidden
@@ -258,6 +268,30 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 		requestExit()
 	}
 
+	removeLogon := func() {
+		if quitting || services.removeLogon == nil {
+			return
+		}
+		m := i18n.For(safeLanguage(mainWindow))
+		if walk.MsgBox(mainWindow.Native(), m.RemoveLogonTaskTitle, m.RemoveLogonTaskConfirmBody, walk.MsgBoxYesNo|walk.MsgBoxIconWarning) != walk.DlgCmdYes {
+			return
+		}
+		// Turning the switch off first keeps the next start from registering
+		// the task again.
+		mainWindow.TurnOffRunAtLogon()
+		launchWG.Add(1)
+		go func() {
+			defer launchWG.Done()
+			if removeErr := services.removeLogon(); removeErr != nil {
+				logger.Warn(fmt.Sprintf("remove logon task failed: %v", removeErr))
+				mainWindow.ShowError(m.RemoveLogonTaskTitle, fmt.Sprintf(m.RemoveLogonTaskFailedBody, removeErr))
+				return
+			}
+			logger.Info("logon task and Run entry removed on request")
+			mainWindow.ShowInfo(m.RemoveLogonTaskTitle, m.RemoveLogonTaskDoneBody)
+		}()
+	}
+
 	var err error
 	mainWindow, err = ui.NewMainWindow(settings, ui.Callbacks{
 		OnSave: func(s config.Settings) {
@@ -279,6 +313,7 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 			}
 		},
 		OnCleanupRestore: cleanupAndRestore,
+		OnRemoveLogon:    removeLogon,
 		OnLaunchNow: func(entry config.ManagedAppEntry) {
 			if quitting || state.startupPending {
 				return
@@ -370,20 +405,38 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 
 	services.setRunAtLogon(settings)
 
-	trayController, err = tray.New(
-		mainWindow.Native(),
-		openSettings,
-		runSilently,
-		requestExit,
-		settings.Language,
-		!state.hideMainIcon(settings.ExitAfterManagedAppsCompleted),
-	)
-	if err != nil {
-		logger.Error(fmt.Sprintf("create tray failed: %v", err))
-		emitFatalWithLog(settings.Language, "failed to create system tray", err)
-		return 1
+	createTray := func() error {
+		current := mainWindow.Settings()
+		c, trayErr := tray.New(
+			mainWindow.Native(),
+			openSettings,
+			runSilently,
+			requestExit,
+			current.Language,
+			!state.hideMainIcon(current.ExitAfterManagedAppsCompleted),
+		)
+		if trayErr == nil {
+			trayController = c
+		}
+		return trayErr
 	}
-	defer trayController.Dispose()
+	if err = createTray(); err != nil {
+		if !state.autorun {
+			logger.Error(fmt.Sprintf("create tray failed: %v", err))
+			emitFatalWithLog(settings.Language, "failed to create system tray", err)
+			return 1
+		}
+		// The logon task can start WinTray before Explorer's taskbar exists.
+		// Managed apps are handled meanwhile; the icon follows once it can.
+		logger.Warn(fmt.Sprintf("create tray failed at logon, retrying: %v", err))
+		launchWG.Add(1)
+		go func() {
+			defer launchWG.Done()
+			retryMainTray(launchCtx, mainWindow, logger, func() bool {
+				return quitting || trayController != nil
+			}, createTray)
+		}()
+	}
 
 	if state.settingsOpen {
 		mainWindow.ShowMainWindow()
@@ -454,17 +507,57 @@ func hostedFromResult(entry config.ManagedAppEntry, result orchestrator.Result) 
 	}, true
 }
 
+// retryMainTray keeps trying to create WinTray's own icon on the UI thread
+// until done reports it exists or is no longer wanted.
+func retryMainTray(ctx context.Context, mainWindow *ui.MainWindow, logger *logging.Logger, done func() bool, create func() error) {
+	for attempt := 2; attempt <= hostAddAttempts; attempt++ {
+		timer := time.NewTimer(hostAddDelay)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		}
+		result := make(chan bool, 1)
+		mainWindow.Synchronize(func() {
+			if done() {
+				result <- true
+				return
+			}
+			err := create()
+			if err == nil {
+				logger.Info(fmt.Sprintf("tray created on attempt %d", attempt))
+			} else if attempt == hostAddAttempts {
+				logger.Error(fmt.Sprintf("create tray failed after %d attempts: %v", attempt, err))
+			}
+			result <- err == nil
+		})
+		select {
+		case ok := <-result:
+			if ok {
+				return
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
 func ensureRunAtLogon(registrar *startup.Registrar, settings config.Settings, logger *logging.Logger) {
 	exePath, err := os.Executable()
 	if err != nil || exePath == "" {
 		logger.Warn("unable to resolve executable path for run-at-logon")
 		return
 	}
-	command := fmt.Sprintf("\"%s\" --autorun", exePath)
+	args := "--autorun"
 	if settings.StartMinimizedToTray {
-		command = fmt.Sprintf("\"%s\" --background --autorun", exePath)
+		args = "--background --autorun"
 	}
-	if err = registrar.SetEnabled(appName, command, settings.RunAtLogon); err != nil {
+	taskErr, err := registrar.Apply(exePath, args, settings.RunAtLogon)
+	if taskErr != nil && err == nil {
+		logger.Warn(fmt.Sprintf("logon task unavailable, using the Run registry entry instead (Windows starts it later): %v", taskErr))
+	}
+	if err != nil {
 		logger.Warn(fmt.Sprintf("set run-at-logon failed: %v", err))
 	}
 }
