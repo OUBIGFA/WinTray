@@ -88,7 +88,7 @@ func TestMainWindowInteractions(t *testing.T) {
 				if w.managedHint.Text() != zh.ManagedListHint {
 					t.Errorf("startup list hint = %q", w.managedHint.Text())
 				}
-				if !w.editor.Visible() || w.editor.Enabled() || w.launchNowBtn.Enabled() || w.argsEdit.Enabled() || w.appEnabled.Enabled() || w.trayBoxEnabled.Enabled() {
+				if !w.editor.Visible() || w.editor.Enabled() || w.launchNowBtn.Enabled() || w.argsEdit.Enabled() || w.appEnabled.Enabled() {
 					t.Error("without a selection the program editor must not be editable")
 				}
 				if w.appName.Text() != "" || w.appPath.Text() != "" || w.argsEdit.Text() != "" || w.delayEdit.Text() != "0" || !w.modeTray.Checked() || w.appEnabled.Checked() {
@@ -103,11 +103,11 @@ func TestMainWindowInteractions(t *testing.T) {
 				if w.logonNotice.Visible() || w.settingsView.Visible() {
 					t.Error("the program list must open without the sign-in notice or the settings page")
 				}
-				if w.trayBoxEnabled.Checked() || w.trayBoxTitle.Text() != zh.TrayBoxHomeTitle || w.trayBoxRow.Parent() != w.editor || w.trayBoxRow.Bounds().X != 0 {
-					t.Error("tray collection must be off and placed in the right editor by default")
+				if w.managedList.Columns().Len() != 3 || w.managedList.Columns().At(1).Title() != zh.TrayBoxHomeTitle || w.managedListModel.rows[0].Collected || trayCheckColumns[w.managedList.Handle()] == nil {
+					t.Error("the tray icon column must be present and unchecked by default")
 				}
-				if w.trayBoxRow.Bounds().Y < w.modeLabel.Parent().Bounds().Y+w.modeLabel.Parent().Bounds().Height || w.delayBlock.Bounds().Y < w.trayBoxRow.Bounds().Y+w.trayBoxRow.Bounds().Height {
-					t.Error("tray collection must appear between start mode and close delay")
+				if w.delayBlock.Parent() != w.modeLabel.Parent() || w.scheduleRow.Parent().Bounds().Y < w.modeLabel.Parent().Bounds().Y+w.modeLabel.Parent().Bounds().Height || w.scheduleEnabled.Text() != zh.ManagedSchedule {
+					t.Error("the close delay must sit below the start modes, followed by a checkbox labelled custom timing")
 				}
 				w.managedList.SetCurrentIndex(0)
 			})
@@ -128,6 +128,8 @@ func TestMainWindowInteractions(t *testing.T) {
 				}
 				checkWindowLayout(t, w)
 				captureTestWindow(t, w, "programs-zh")
+				win.SendMessage(trayCheckColumns[w.managedList.Handle()].view, win.LVM_SETHOTITEM, 2, 0)
+				captureTestWindow(t, w, "programs-tray-hover")
 				if !w.editor.Visible() || w.appName.Text() != "Cloud Drive" || w.appPath.Text() != settings.ManagedApps[0].ExePath {
 					t.Error("selection did not populate the editor")
 				}
@@ -135,21 +137,41 @@ func TestMainWindowInteractions(t *testing.T) {
 					t.Error("the editor must show the program's start settings")
 				}
 				before := saves
-				click(w.trayBoxEnabled)
-				if !w.trayBoxEnabled.Checked() || !w.settings.ManagedApps[0].CollectTrayIcon || w.settings.ManagedApps[1].CollectTrayIcon || saves != before+1 {
-					t.Error("tray icon collection must save only the selected program")
+				clickTrayCell(t, w, 0)
+				if !w.managedListModel.rows[0].Collected || !w.settings.ManagedApps[0].CollectTrayIcon || w.settings.ManagedApps[1].CollectTrayIcon || saves != before+1 {
+					t.Errorf("tray toggle: row=%+v collected=%v script=%v saves=%d want=%d", w.managedListModel.rows[0], w.settings.ManagedApps[0].CollectTrayIcon, w.settings.ManagedApps[1].CollectTrayIcon, saves, before+1)
 				}
+				captureTestWindow(t, w, "programs-tray-checked")
 				w.managedList.SetCurrentIndex(1)
-				if w.trayBoxEnabled.Checked() || w.trayBoxEnabled.Enabled() {
+				if w.managedListModel.rows[1].Collected || w.managedListModel.rows[1].CanCollect {
 					t.Error("script programs must not offer tray icon collection")
 				}
-				w.managedList.SetCurrentIndex(0)
-				if !w.trayBoxEnabled.Checked() {
-					t.Error("returning to the selected program must restore its checkbox state")
+				clickTrayCell(t, w, 1)
+				if w.settings.ManagedApps[1].CollectTrayIcon || saves != before+1 {
+					t.Errorf("script click: collected=%v saves=%d want=%d", w.settings.ManagedApps[1].CollectTrayIcon, saves, before+1)
 				}
-				click(w.trayBoxEnabled)
-				if w.trayBoxEnabled.Checked() || w.settings.ManagedApps[0].CollectTrayIcon || saves != before+2 {
-					t.Error("deselecting tray icon collection must save only the selected program")
+				w.managedList.SetCurrentIndex(0)
+				clickTrayCell(t, w, 0)
+				if w.managedListModel.rows[0].Collected || w.settings.ManagedApps[0].CollectTrayIcon || saves != before+2 {
+					t.Errorf("tray deselect: row=%+v collected=%v saves=%d want=%d", w.managedListModel.rows[0], w.settings.ManagedApps[0].CollectTrayIcon, saves, before+2)
+				}
+				if w.scheduleEnabled.Bounds().X != w.appEnabled.Bounds().X || w.scheduleEnabled.Text() != zh.ManagedSchedule || w.scheduleBlock.Enabled() {
+					t.Error("custom timing must align with the sign-in checkbox and start disabled")
+				}
+				click(w.scheduleEnabled)
+				if !w.settings.ManagedApps[0].Schedule.Enabled || !w.scheduleBlock.Enabled() {
+					t.Error("custom timing toggle must enable the time fields")
+				}
+				w.startDelayEdit.SetText("30")
+				w.startDelayEdit.SendMessage(win.WM_KEYDOWN, win.VK_RETURN, 0)
+				w.autoExitEdit.SetText("0")
+				w.autoExitEdit.SendMessage(win.WM_KEYDOWN, win.VK_RETURN, 0)
+				if w.settings.ManagedApps[0].Schedule.StartDelayMinutes != 30 || w.settings.ManagedApps[0].Schedule.AutoExitMinutes != 0 {
+					t.Error("custom timing must save the start delay and zero-means-never exit")
+				}
+				click(w.scheduleEnabled)
+				if w.settings.ManagedApps[0].Schedule.Enabled || w.scheduleBlock.Enabled() {
+					t.Error("turning custom timing off must disable its fields")
 				}
 				// Each setting starts at the left edge of the editor, with its
 				// name above its control.
@@ -171,7 +193,7 @@ func TestMainWindowInteractions(t *testing.T) {
 						t.Errorf("close delay %q saved as %d, want %d", tc.text, got, tc.want)
 					}
 				}
-				if w.managedListModel.Value(0, 1) != fmt.Sprintf(zh.ManagedAutoHideDelayed, 30) {
+				if w.managedListModel.Value(0, 2) != fmt.Sprintf(zh.ManagedAutoHideDelayed, 30) {
 					t.Error("the row must show the close delay")
 				}
 				w.argsEdit.SetFocus()
@@ -189,11 +211,11 @@ func TestMainWindowInteractions(t *testing.T) {
 				if !app.LaunchHiddenInBackground || app.TrayBehavior.AutoMinimizeAndHideOnLaunch || w.modeTray.Checked() {
 					t.Error("choosing Run hidden must replace closing to the tray")
 				}
-				if w.delayBlock.Visible() || w.modeHint.Text() != zh.ManagedLaunchHiddenHint || w.managedListModel.Value(0, 1) != zh.ManagedLaunchHidden {
+				if !w.delayBlock.Visible() || w.delayBlock.Enabled() || w.modeHint.Text() != zh.ManagedLaunchHiddenHint || w.managedListModel.Value(0, 2) != zh.ManagedLaunchHidden {
 					t.Error("the mode hint, close delay and row must follow the chosen mode")
 				}
 				click(w.appEnabled)
-				if w.settings.ManagedApps[0].RunOnStartup || w.managedListModel.Checked(0) || w.managedListModel.Value(0, 1) != zh.ManagedListParamPausedTemplate {
+				if w.settings.ManagedApps[0].RunOnStartup || w.managedListModel.Checked(0) || w.managedListModel.Value(0, 2) != zh.ManagedListParamPausedTemplate {
 					t.Error("switching sign-in off must update the program and its row")
 				}
 				if w.managedList.CurrentIndex() != 0 {
@@ -218,6 +240,38 @@ func TestMainWindowInteractions(t *testing.T) {
 				}
 				if saves != before {
 					t.Error("checking for updates must not change settings")
+				}
+				w.mw.SetSize(walk.Size{Width: 1200, Height: 780})
+			})
+			step(func() {
+				listPane := w.managedList.Parent().Bounds()
+				divider := w.programsBody.Children().At(2).Bounds()
+				detail := w.detailPane.Bounds()
+				if listPane.Width <= baseList.Width || detail.Width != baseDetail.Width || detail.X <= baseDetail.X || detail.X+detail.Width != w.programsBody.ClientBounds().Width {
+					t.Errorf("widening must grow only the list and anchor the editor: list=%+v detail=%+v body=%+v", listPane, detail, w.programsBody.ClientBounds())
+				}
+				if divider.X-listPane.X-listPane.Width != programsDividerGap || detail.X-divider.X-divider.Width != programsDividerGap {
+					t.Error("resizing must preserve both divider gaps")
+				}
+				checkWindowLayout(t, w)
+				w.mw.SetSize(walk.Size{Width: 1500, Height: 780})
+			})
+			step(func() {
+				listPane := w.managedList.Parent().Bounds()
+				detail := w.detailPane.Bounds()
+				if listPane.Width <= baseList.Width || detail.Width != baseDetail.Width || detail.X+detail.Width != w.programsBody.ClientBounds().Width {
+					t.Errorf("wide window displaced the editor: list=%+v detail=%+v body=%+v", listPane, detail, w.programsBody.ClientBounds())
+				}
+				if w.managedList.Columns().At(0).Width() != 170 || w.managedList.Columns().At(1).Width() != 112 {
+					t.Error("resizing must not enlarge the fixed name and tray columns")
+				}
+				checkWindowLayout(t, w)
+				captureTestWindow(t, w, "programs-zh-wide")
+				w.mw.SetSize(walk.Size{Width: 1040, Height: 780})
+			})
+			step(func() {
+				if w.detailPane.Bounds().Width != baseDetail.Width || w.detailPane.Bounds().X != baseDetail.X {
+					t.Error("shrinking must restore the original editor position")
 				}
 				click(w.settingsBtn)
 			})
@@ -266,9 +320,10 @@ func TestMainWindowInteractions(t *testing.T) {
 				if w.checkUpdateBtn.Enabled() || w.checkUpdateBtn.Text() != en.CheckUpdateBusy {
 					t.Error("changing language must translate and preserve an in-flight update check")
 				}
-				if w.argsHint.Text() != en.ManagedArgsHint || w.trayBoxTitle.Text() != en.TrayBoxHomeTitle {
-					t.Errorf("English home copy did not update: args=%q box=%q", w.argsHint.Text(), w.trayBoxTitle.Text())
+				if w.argsHint.Text() != en.ManagedArgsHint || w.managedList.Columns().At(1).Title() != en.TrayBoxHomeTitle {
+					t.Errorf("English home copy did not update: args=%q box=%q", w.argsHint.Text(), w.managedList.Columns().At(1).Title())
 				}
+				w.managedList.SetCurrentIndex(0)
 				click(w.settingsBtn)
 			})
 			step(func() {
@@ -300,8 +355,8 @@ func TestMainWindowInteractions(t *testing.T) {
 					t.Error("the update button must allow a new check after completion")
 				}
 				w.SetCheckUpdateBusy(false)
-				if w.managedList.CurrentIndex() != 0 || w.managedListModel.Value(0, 1) != en.ManagedListParamPausedTemplate {
-					t.Error("the settings page must preserve the selection, and the language change translate the row")
+				if w.managedList.CurrentIndex() != 0 || w.managedListModel.Value(0, 2) != en.ManagedListParamPausedTemplate {
+					t.Errorf("the settings page must preserve the selection and translate the row: index=%d saved=%d mode=%q want=%q", w.managedList.CurrentIndex(), w.pageSelectedProgram, w.managedListModel.Value(0, 2), en.ManagedListParamPausedTemplate)
 				}
 				if !w.logonNotice.Visible() {
 					t.Error("the program list must warn while WinTray does not run at sign-in")
@@ -476,12 +531,12 @@ func TestCloseDelayRowGeometry(t *testing.T) {
 				edit := w.delayEdit.Bounds()
 				unit := w.delayUnit.Bounds()
 				gap := unit.X - (edit.X + edit.Width)
-				if w.delayEdit.Text() != "20" || row.Y < lbl.Y+lbl.Height {
-					t.Error("the close delay must show its value below its label")
+				if w.delayEdit.Text() != "20" || !w.delayBlock.Enabled() || lbl.Y < row.Y || edit.X < lbl.X+lbl.Width {
+					t.Error("the close delay must show its value next to its label")
 				}
 				// Spacing is 8 at 96 DPI; allow generous DPI headroom but fail
 				// on the hundreds of pixels the default centering inserts.
-				if edit.X > 1 || gap < -1 || gap > 40 {
+				if edit.X-(lbl.X+lbl.Width) > 40 || gap < -1 || gap > 40 {
 					t.Errorf("close-delay editor and unit drifted apart: edit=%+v gap=%d", edit, gap)
 				}
 				captureTestWindow(t, w, "delay-row")
@@ -633,6 +688,30 @@ func TestBlankAreaClickLeavesEditor(t *testing.T) {
 	w.Run()
 }
 
+// clickTrayCell uses the native cell rect to exercise the tray-column hit test.
+func clickTrayCell(t *testing.T, w *MainWindow, row int) {
+	t.Helper()
+	for child := win.GetWindow(w.managedList.Handle(), win.GW_CHILD); child != 0; child = win.GetWindow(child, win.GW_HWNDNEXT) {
+		var bounds win.RECT
+		if !win.GetClientRect(child, &bounds) || bounds.Right <= 0 {
+			continue
+		}
+		rect := win.RECT{Top: 1, Left: win.LVIR_BOUNDS}
+		if win.SendMessage(child, win.LVM_GETSUBITEMRECT, uintptr(row), uintptr(unsafe.Pointer(&rect))) == 0 {
+			t.Fatalf("cannot locate tray cell in row %d", row)
+		}
+		x, y := (rect.Left+rect.Right)/2, (rect.Top+rect.Bottom)/2
+		if rect.Right <= rect.Left || rect.Bottom <= rect.Top {
+			// Walk may expose the row before Windows has measured its cell.
+			x = int32(w.managedList.IntFrom96DPI(w.managedList.Columns().At(0).Width() + 56))
+			y = int32(w.managedList.IntFrom96DPI(24 + row*30 + 15))
+		}
+		w.onManagedListMouseDown(int(x), int(y), walk.LeftButton)
+		return
+	}
+	t.Fatal("list row view is missing")
+}
+
 // discardStaleMessages empties what RequestExplicitClose leaves on a pooled OS
 // thread: messages for the destroyed window and the WM_QUIT that only surfaces
 // behind them. The next window on the thread would otherwise end its loop
@@ -730,10 +809,10 @@ func checkWindowLayout(t *testing.T, w *MainWindow) {
 			}
 		}
 	}
-	for _, box := range []*walk.CheckBox{w.appEnabled, w.trayBoxEnabled, w.runAtLogon, w.hideAtLogon, w.exitOnDone} {
+	for _, box := range []*walk.CheckBox{w.appEnabled, w.scheduleEnabled, w.runAtLogon, w.hideAtLogon, w.exitOnDone} {
 		clipped("check box", box, box.Text())
 	}
-	for _, button := range []*walk.RadioButton{w.modeTray, w.modeNormal, w.modeHidden} {
+	for _, button := range []*walk.RadioButton{w.modeTray, w.modeNormal, w.modeTask, w.modeHidden} {
 		clipped("start mode", button, button.Text())
 	}
 }

@@ -220,3 +220,94 @@ func TestStartupRechecksAfterBaselineBeforeLaunching(t *testing.T) {
 		t.Fatalf("result=%+v processes=%v, want adoption after baseline scan", got, startupTestPIDs(entry.ExePath))
 	}
 }
+
+// A task-mode entry is launched by its own logon task: WinTray only observes
+// it, and never probes the Run entries or starts a second instance.
+func TestLogonTaskEntryWaitsForTaskLaunchAndNeverLaunchesItself(t *testing.T) {
+	entry := startupTestEntry(t)
+	entry.LaunchViaLogonTask = true
+	svc := NewService(&testEnumerator{}, &testManager{}, &testLogger{})
+	svc.externalStartupWait = 3 * time.Second
+	svc.externalStartupLookup = func(string) (string, error) {
+		t.Fatal("a task-launched entry must not probe Windows startup entries")
+		return "", nil
+	}
+	checked := make(chan struct{})
+	started := make(chan *exec.Cmd, 1)
+	failed := make(chan error, 1)
+	go func() {
+		close(checked)
+		time.Sleep(300 * time.Millisecond)
+		cmd, err := startProcess(entry.ExePath, entry.Args, launchNoWindow)
+		if err != nil {
+			failed <- err
+			return
+		}
+		started <- cmd
+	}()
+	<-checked
+	got := svc.StartAndManage(context.Background(), entry, 2)
+	var cmd *exec.Cmd
+	select {
+	case cmd = <-started:
+	case err := <-failed:
+		t.Fatal(err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("task-launched process was never started")
+	}
+	defer cmd.Process.Release()
+	pids := startupTestPIDs(entry.ExePath)
+	if len(pids) != 1 || pids[0] != uint32(cmd.Process.Pid) {
+		t.Fatalf("running processes = %v, want only the task's process %d", pids, cmd.Process.Pid)
+	}
+	// The window is left alone: no handling is configured for a task entry.
+	if got.Code != ResultAlreadyRunningSkipped || !got.Managed {
+		t.Fatalf("result=%+v, want the running program adopted without window handling", got)
+	}
+}
+
+func TestLogonTaskEntryTimeoutLeavesNoProcess(t *testing.T) {
+	entry := startupTestEntry(t)
+	entry.LaunchViaLogonTask = true
+	svc := NewService(&testEnumerator{}, &testManager{}, &testLogger{})
+	svc.externalStartupWait = 50 * time.Millisecond
+	svc.externalStartupLookup = func(string) (string, error) {
+		t.Fatal("a task-launched entry must not probe Windows startup entries")
+		return "", nil
+	}
+	got := svc.StartAndManage(context.Background(), entry, 0)
+	if got.Managed || got.Code != ResultExternalStartupTimeout {
+		t.Fatalf("result=%+v, want an explicit timeout for the task launch", got)
+	}
+	if pids := startupTestPIDs(entry.ExePath); len(pids) != 0 {
+		t.Fatalf("WinTray launched a fallback process: %v", pids)
+	}
+}
+
+func TestManagedQueueAdoptsTaskEntryAlreadyStartedByItsTask(t *testing.T) {
+	entry := startupTestEntry(t)
+	entry.LaunchViaLogonTask = true
+	svc := NewService(&testEnumerator{}, &testManager{}, &testLogger{})
+	svc.externalStartupLookup = func(string) (string, error) {
+		t.Fatal("a task-launched entry must not probe Windows startup entries")
+		return "", nil
+	}
+	// The task already started the program, as it would at sign-in.
+	cmd, err := startProcess(entry.ExePath, entry.Args, launchNoWindow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cmd.Process.Release()
+	settings := config.Settings{
+		RunAtLogon:             true,
+		StartupIntervalSeconds: 0,
+		ManagedApps:            []config.ManagedAppEntry{entry},
+	}
+	results := svc.StartManagedApps(context.Background(), settings, nil)
+	if len(results) != 1 || results[0].Code != ResultAlreadyRunningSkipped || !results[0].Managed {
+		t.Fatalf("results=%+v, want the task-launched program adopted", results)
+	}
+	if pids := startupTestPIDs(entry.ExePath); len(pids) != 1 {
+		t.Fatalf("running processes = %v, want the task's single instance", pids)
+	}
+}

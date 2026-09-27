@@ -27,11 +27,7 @@ type runSource struct {
 // inside another program's arguments is not proof that Windows will start it.
 // This is read-only; WinTray never takes ownership of another app's Run entry.
 func FindEnabledRunEntry(exePath string) (string, error) {
-	return findEnabledRunEntry(exePath, []runSource{
-		{registry.CURRENT_USER, runKeyPath, registry.WOW64_64KEY, startupApprovedPath + `\Run`, `HKCU\Run`},
-		{registry.LOCAL_MACHINE, runKeyPath, registry.WOW64_64KEY, startupApprovedPath + `\Run`, `HKLM\Run`},
-		{registry.LOCAL_MACHINE, runKeyPath, registry.WOW64_32KEY, startupApprovedPath + `\Run32`, `HKLM\Run32`},
-	})
+	return findEnabledRunEntry(exePath, standardRunSources())
 }
 
 func findEnabledRunEntry(exePath string, sources []runSource) (string, error) {
@@ -108,31 +104,9 @@ func runCommandMatches(command, exePath string) bool {
 }
 
 func runEntryApproved(root registry.Key, path, name string) (bool, error) {
-	// StartupApproved is in the native Explorer view even for Run32 entries.
-	key, err := registry.OpenKey(root, path, registry.QUERY_VALUE|registry.WOW64_64KEY)
-	if errors.Is(err, registry.ErrNotExist) {
-		return true, nil // absent approval means enabled, not disabled
-	}
+	value, err := readApproval(root, path, name)
 	if err != nil {
 		return false, err
 	}
-	defer key.Close()
-	data, _, err := key.GetBinaryValue(name)
-	if errors.Is(err, registry.ErrNotExist) {
-		return true, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	if len(data) >= 12 {
-		switch data[0] {
-		case 2, 6:
-			return true, nil
-		case 3, 7:
-			return false, nil
-		}
-	}
-	// An unreadable/unknown state is not evidence that no external launch is
-	// pending. Surface it instead of risking a second process.
-	return false, fmt.Errorf("unknown StartupApproved state %x", data)
+	return approvalEnabled(value)
 }

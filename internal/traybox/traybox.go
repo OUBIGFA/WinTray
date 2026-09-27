@@ -1,44 +1,73 @@
-// Package traybox moves other programs' notification-area icons off the
-// taskbar and reaches them again from WinTray's own tray menu.
+// Package traybox collects other programs' notification-area icons into
+// WinTray's own tray menu.
 //
-// Windows 11 no longer exposes the notification area as a toolbar, and
-// intercepting Shell_NotifyIcon would require injecting code into Explorer.
-// The box relies on documented behaviour instead:
-//   - HKCU\Control Panel\NotifyIconSettings lists every icon Explorer has
-//     seen, with its program path, its uID and a PNG snapshot. Its IsPromoted
-//     value is the "show in taskbar" switch of the Settings app; clearing it
-//     moves the icon into the system's hidden-icons flyout.
-//   - Shell_NotifyIconGetRect finds the window that owns an icon and where
-//     the icon is on screen, so a click can be delivered to it.
+// Shell_NotifyIcon delivers every icon request to the top-most window of
+// class Shell_TrayWnd. While programs are selected, the box owns such a window
+// above Explorer's taskbar, as alternative shells and status bars do: every
+// request is passed on to Explorer unchanged, except that icons of selected
+// programs are marked hidden, so they appear neither on the taskbar nor in the
+// hidden-icons flyout. The box keeps each such icon's current image, tooltip
+// and callback message, which is what WinTray's menu shows and uses to click
+// the icon on the program's behalf.
 //
-// Icons stay in the system flyout while WinTray is not running, so nothing is
-// lost when it exits.
+// Hidden icons are shown again when a program is deselected or WinTray exits.
 package traybox
 
 import (
+	"image"
 	"path/filepath"
 	"strings"
 )
 
-// Icon is one entry of the notification-area settings.
+// Icon is the current state of one collected notification-area icon.
 type Icon struct {
-	ExePath  string
-	UID      uint32
-	Tooltip  string
-	Snapshot []byte
-	// Promoted reports whether the icon is shown on the taskbar rather than
-	// in the hidden-icons flyout.
-	Promoted bool
+	ExePath string
+	Tooltip string
+	// Image is the icon as the program last set it, or nil when the program
+	// has not supplied one yet.
+	Image *image.NRGBA
+
+	// owner and uid address the program's callback message.
+	key      iconID
+	owner    uint32
+	uid      uint32
+	callback uint32
+	version  uint32
 }
 
-// Action is what a click from the box does to an icon.
+// iconID identifies an icon as Shell_NotifyIcon does: by its GUID when the
+// program registered one, otherwise by owner window and uID.
+type iconID struct {
+	hwnd uint32
+	uid  uint32
+	guid [16]byte
+}
+
+func idOf(d trayData) iconID {
+	if d.usesGUID() {
+		return iconID{guid: d.GUID}
+	}
+	return iconID{hwnd: d.HWnd, uid: d.UID}
+}
+
+// Action is what a click from the menu does to an icon.
 type Action int
 
 const (
+	// ActionClick is a left click, which usually opens the program.
 	ActionClick Action = iota
-	ActionDoubleClick
+	// ActionRightClick opens the program's own tray menu.
 	ActionRightClick
+	// ActionDoubleClick delivers the native double-click gesture. It is
+	// explicit, never guessed by sending extra clicks after a single click.
+	ActionDoubleClick
 )
+
+// SameIcon compares native registration identity across live snapshots. An
+// open menu must not target the next icon when one before it is removed.
+func (i Icon) SameIcon(other Icon) bool {
+	return i.key == other.key && strings.EqualFold(i.ExePath, other.ExePath)
+}
 
 // DisplayName prefers the icon's first tooltip line, falling back to the
 // program's file name.
@@ -50,6 +79,9 @@ func (i Icon) DisplayName() string {
 	return strings.TrimSuffix(base, filepath.Ext(base))
 }
 
+// Clickable reports whether the program asked to be told about clicks.
+func (i Icon) Clickable() bool { return i.callback != 0 }
+
 // Contains reports whether paths lists exePath. Windows paths compare
 // case-insensitively.
 func Contains(paths []string, exePath string) bool {
@@ -59,19 +91,4 @@ func Contains(paths []string, exePath string) bool {
 		}
 	}
 	return false
-}
-
-// Toggle adds exePath to paths or removes it, returning the new list and
-// whether the path is now included.
-func Toggle(paths []string, exePath string) ([]string, bool) {
-	out := make([]string, 0, len(paths)+1)
-	for _, p := range paths {
-		if !strings.EqualFold(p, exePath) {
-			out = append(out, p)
-		}
-	}
-	if len(out) < len(paths) {
-		return out, false
-	}
-	return append(out, exePath), true
 }

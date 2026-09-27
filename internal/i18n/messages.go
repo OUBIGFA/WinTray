@@ -56,6 +56,13 @@ type Messages struct {
 	ManagedModeLabel               string
 	ManagedLaunchOnly              string
 	ManagedLaunchOnlyHint          string
+	ManagedTaskLaunch              string
+	ManagedTaskLaunchHint          string
+	ManagedTaskLaunchTip           string
+	ManagedTaskArgsHint            string
+	ManagedTaskLaunchNowHint       string
+	ManagedTaskFailedTitle         string
+	ManagedTaskFailedBody          string
 	ManagedAutoHide                string
 	ManagedAutoHideHint            string
 	ManagedAutoHideTip             string
@@ -63,6 +70,15 @@ type Messages struct {
 	ManagedCloseDelay              string
 	ManagedCloseDelayHint          string
 	ManagedCloseDelayInvalid       string
+	ManagedSchedule                string
+	ManagedScheduleEnabled         string
+	ManagedScheduleStart           string
+	ManagedScheduleStartUnit       string
+	ManagedScheduleExit            string
+	ManagedScheduleExitUnit        string
+	ManagedScheduleHint            string
+	ManagedScheduleInvalid         string
+	ManagedScheduleTag             string
 	ManagedLaunchHidden            string
 	ManagedLaunchHiddenHint        string
 	ManagedLaunchNow               string
@@ -94,6 +110,9 @@ type Messages struct {
 	TrayBoxHomeTitle               string
 	TrayBoxHomeHint                string
 	TrayBoxFailedTitle             string
+	TrayBoxIconGoneBody            string
+	TrayBoxNotClickableBody        string
+	TrayBoxClickFailedBody         string
 	HostedShowWindow               string
 	HostedHideWindow               string
 	HostedQuitProgram              string
@@ -139,11 +158,11 @@ var zhCN = Messages{
 	OpenSettings:                   "更多功能",
 	BackToPrograms:                 "← 返回",
 	SettingsTitle:                  "设置",
-	LogonOffNotice:                 "WinTray 没有设置开机自启动，下面的程序不会在开机时自动启动",
+	LogonOffNotice:                 "WinTray 未开启开机启动；不再安排列表任务，程序自身的自启仍会保留或恢复",
 	LogonOffEnable:                 "开启",
 	SettingsStartupTitle:           "开机启动",
 	RunAtLogon:                     "开机时自动运行 WinTray",
-	RunAtLogonHint:                 "关闭后，开机启动项里的程序也不会自动启动",
+	RunAtLogonHint:                 "关闭后不再由 WinTray 安排启动；程序自身的自启会保留或恢复",
 	StartHidden:                    "开机时不弹出 WinTray 窗口",
 	ExitOnDone:                     "开机任务完成后自动退出 WinTray",
 	ExitOnDoneHint:                 "如果还有命令行程序在用 WinTray 提供的托盘图标，会等它们都退出后再退出",
@@ -157,21 +176,28 @@ var zhCN = Messages{
 	SecondsUnit:                    "秒",
 	LanguageLabel:                  "语言 / Language",
 	ManagedListTitle:               "开机启动项",
-	ManagedListHint:                "勾选开启任务，未选则暂停",
+	ManagedListHint:                "程序名称列勾选开机启动，托盘收纳列勾选收纳图标",
 	ManagedListEmpty:               "还没有添加程序",
 	ManagedListEmptyHint:           "添加开机时想自动启动的程序，WinTray 会依次启动它们，并按你的设置收进托盘或在后台运行",
-	ManagedColumnName:              "程序",
-	ManagedColumnRule:              "启动方式",
+	ManagedColumnName:              "程序名称",
+	ManagedColumnRule:              "启动动作",
 	BrowseProgram:                  "更换…",
 	BrowseProgramHint:              "换成另一个程序文件",
 	ManagedAppArgs:                 "启动参数（可选）",
 	ManagedArgsHint:                "适用于 .exe 程序及 .bat、.cmd、.ps1、.py 等脚本",
 	ManagedArgsPlaceholder:         "例如 --minimized",
 	ManagedEnabled:                 "开机后自动启动此程序",
-	ManagedEnabledHint:             "取消勾选后，开机时会跳过它；仍可随时点“立即启动”",
+	ManagedEnabledHint:             "取消后仅停止 WinTray 的启动安排，程序自身的自启会保留或恢复",
 	ManagedModeLabel:               "启动方式",
 	ManagedLaunchOnly:              "正常启动",
 	ManagedLaunchOnlyHint:          "只负责启动，窗口保持原样",
+	ManagedTaskLaunch:              "开机即启动",
+	ManagedTaskLaunchHint:          "优先沿用原自启的参数、静默和权限，已有登录任务直接复用；没有原自启时按本页配置创建任务",
+	ManagedTaskLaunchTip:           "不经过普通自启队列；仅支持 .exe；新建管理员任务首次需确认，已有任务的权限和延迟保持原样",
+	ManagedTaskArgsHint:            "仅在没有原自启入口时使用这里的参数；已有入口仍沿用程序自己的自启参数",
+	ManagedTaskLaunchNowHint:       "运行同一个已注册的登录任务以验证效果；需先保存成功，程序已运行时不会再次启动",
+	ManagedTaskFailedTitle:         "开机即启动未完成",
+	ManagedTaskFailedBody:          "%s\r\n\r\n未恢复的原自启状态会保留备份；请处理原因后再次保存设置，不要直接删除 WinTray 数据目录",
 	ManagedAutoHide:                "收进托盘",
 	ManagedAutoHideHint:            "启动后自动关闭主窗口，程序继续在托盘运行；适合 QQ、微信等带托盘图标的程序；命令行程序会由 WinTray 提供托盘图标",
 	ManagedAutoHideTip:             "WinTray 会向主窗口发送关闭消息（WM_CLOSE）；没有托盘图标的普通程序可能会因此退出",
@@ -179,6 +205,15 @@ var zhCN = Messages{
 	ManagedCloseDelay:              "收起前等待",
 	ManagedCloseDelayHint:          "先弹出登录窗口的程序（如 QQ）建议设为 10–15 秒，0 表示立即收起",
 	ManagedCloseDelayInvalid:       "收起前等待时间必须是 0 到 600 之间的整数",
+	ManagedSchedule:                "自定义时间",
+	ManagedScheduleEnabled:         "启用",
+	ManagedScheduleStart:           "开机后",
+	ManagedScheduleStartUnit:       "分钟启动",
+	ManagedScheduleExit:            "运行",
+	ManagedScheduleExitUnit:        "分钟后退出",
+	ManagedScheduleHint:            "适合签到类程序：错开开机高峰再启动，运行满时长后彻底结束（含子进程）；退出时间为 0 表示不自动退出",
+	ManagedScheduleInvalid:         "时间必须是 0 到 1440 之间的整数（分钟）",
+	ManagedScheduleTag:             "%s · 定时",
 	ManagedLaunchHidden:            "后台启动",
 	ManagedLaunchHiddenHint:        "不弹出任何窗口，直接在后台运行；适合 .bat、.ps1、.py 等脚本和命令行工具",
 	ManagedLaunchNow:               "立即启动",
@@ -207,9 +242,12 @@ var zhCN = Messages{
 	TrayOpenSettings:               "打开 WinTray",
 	TrayExit:                       "退出 WinTray",
 	TrayToolTip:                    "WinTray",
-	TrayBoxHomeTitle:               "托盘图标收纳",
-	TrayBoxHomeHint:                "将此程序的托盘图标收进 WinTray 菜单；点击菜单中的程序图标可打开程序",
+	TrayBoxHomeTitle:               "托盘收纳",
+	TrayBoxHomeHint:                "将此程序的托盘图标从任务栏收进 WinTray 菜单；在菜单中左键单击等同单击原图标，右键打开程序自己的托盘菜单",
 	TrayBoxFailedTitle:             "托盘图标收纳",
+	TrayBoxIconGoneBody:            "%s 的托盘图标已不存在，程序可能已经退出",
+	TrayBoxNotClickableBody:        "%s 的托盘图标不响应点击",
+	TrayBoxClickFailedBody:         "无法把点击交给 %s：%v",
 	HostedShowWindow:               "显示窗口",
 	HostedHideWindow:               "隐藏窗口",
 	HostedQuitProgram:              "退出 %s",
@@ -260,11 +298,11 @@ var enUS = Messages{
 	OpenSettings:                   "More Features",
 	BackToPrograms:                 "← Back",
 	SettingsTitle:                  "Settings",
-	LogonOffNotice:                 "WinTray isn't set to run at sign-in, so the programs below won't start automatically",
+	LogonOffNotice:                 "WinTray startup is off; list tasks are not scheduled, and apps' own startup remains or is restored",
 	LogonOffEnable:                 "Turn On",
 	SettingsStartupTitle:           "Sign-in",
 	RunAtLogon:                     "Run WinTray at sign-in",
-	RunAtLogonHint:                 "When off, your startup programs won't start automatically either",
+	RunAtLogonHint:                 "Stops WinTray's launch scheduling; apps' own startup remains or is restored",
 	StartHidden:                    "Don't show the WinTray window at sign-in",
 	ExitOnDone:                     "Exit WinTray when sign-in tasks finish",
 	ExitOnDoneHint:                 "If console programs still use tray icons from WinTray, it waits until they all exit",
@@ -278,21 +316,28 @@ var enUS = Messages{
 	SecondsUnit:                    "seconds",
 	LanguageLabel:                  "Language / 语言",
 	ManagedListTitle:               "Startup programs",
-	ManagedListHint:                "Check to enable, uncheck to pause",
+	ManagedListHint:                "Check a program to start it at sign-in; check Tray icon to collect its icon",
 	ManagedListEmpty:               "No programs yet",
 	ManagedListEmptyHint:           "Add the programs you want to start at sign-in; WinTray starts them one by one and can close them to the tray or run them in the background",
-	ManagedColumnName:              "Program",
-	ManagedColumnRule:              "How it starts",
+	ManagedColumnName:              "Program name",
+	ManagedColumnRule:              "Start action",
 	BrowseProgram:                  "Change…",
 	BrowseProgramHint:              "Use a different program file",
 	ManagedAppArgs:                 "Arguments (optional)",
 	ManagedArgsHint:                "For .exe programs and scripts such as .bat, .cmd, .ps1 and .py",
 	ManagedArgsPlaceholder:         "Example: --minimized",
 	ManagedEnabled:                 "Start this program at sign-in",
-	ManagedEnabledHint:             "When unchecked, it's skipped at sign-in; you can still use Launch Now",
+	ManagedEnabledHint:             "Stops only WinTray's launch scheduling; the app's own startup remains or is restored",
 	ManagedModeLabel:               "How it starts",
 	ManagedLaunchOnly:              "Start normally",
 	ManagedLaunchOnlyHint:          "Just starts the program and leaves its window as is",
+	ManagedTaskLaunch:              "Launch at boot",
+	ManagedTaskLaunchHint:          "Preserves original startup arguments, silent behavior and privileges; reuses native tasks, or creates a task from these settings when no startup entry exists",
+	ManagedTaskLaunchTip:           "Bypasses the normal startup queue; .exe only; creating an elevated task needs confirmation, while existing task privileges and delays stay unchanged",
+	ManagedTaskArgsHint:            "Used only when no original startup entry exists; otherwise the app's own startup arguments are preserved",
+	ManagedTaskLaunchNowHint:       "Runs the same registered logon task after settings are saved; does not relaunch an already running program",
+	ManagedTaskFailedTitle:         "Launch at boot not applied",
+	ManagedTaskFailedBody:          "%s\r\n\r\nUnrestored startup states remain backed up; resolve the issue and save settings again, and do not delete the WinTray data directory directly",
 	ManagedAutoHide:                "Close to tray",
 	ManagedAutoHideHint:            "Closes the main window after launch; the program keeps running in the tray; best for apps with a tray icon, such as QQ or WeChat; WinTray adds tray icons for console programs",
 	ManagedAutoHideTip:             "WinTray sends WM_CLOSE to the main window; apps without a tray icon may exit",
@@ -300,6 +345,15 @@ var enUS = Messages{
 	ManagedCloseDelay:              "Wait before closing",
 	ManagedCloseDelayHint:          "Programs that show a sign-in window first (such as QQ) need about 10–15 seconds; 0 closes right away",
 	ManagedCloseDelayInvalid:       "The wait must be a whole number from 0 to 600",
+	ManagedSchedule:                "Custom timing",
+	ManagedScheduleEnabled:         "On",
+	ManagedScheduleStart:           "Start",
+	ManagedScheduleStartUnit:       "min after sign-in",
+	ManagedScheduleExit:            "Quit after",
+	ManagedScheduleExitUnit:        "min",
+	ManagedScheduleHint:            "For check-in tools: starts after the sign-in rush and is ended for good, child processes included, once it has run that long; 0 never quits it",
+	ManagedScheduleInvalid:         "Times must be whole minutes from 0 to 1440",
+	ManagedScheduleTag:             "%s · timed",
 	ManagedLaunchHidden:            "Run in background",
 	ManagedLaunchHiddenHint:        "Runs in the background without showing any window; best for scripts (.bat, .ps1, .py) and command-line tools",
 	ManagedLaunchNow:               "Launch Now",
@@ -328,9 +382,12 @@ var enUS = Messages{
 	TrayOpenSettings:               "Open WinTray",
 	TrayExit:                       "Exit WinTray",
 	TrayToolTip:                    "WinTray",
-	TrayBoxHomeTitle:               "Collect tray icon",
-	TrayBoxHomeHint:                "Collect this program's tray icon in WinTray's menu; select its icon there to open the program",
+	TrayBoxHomeTitle:               "Tray icon",
+	TrayBoxHomeHint:                "Move this program's tray icon off the taskbar into WinTray's menu; left-click its entry to click the icon, right-click it for the program's own tray menu",
 	TrayBoxFailedTitle:             "Collected tray icons",
+	TrayBoxIconGoneBody:            "The tray icon of %s is gone; the program may have exited",
+	TrayBoxNotClickableBody:        "The tray icon of %s does not respond to clicks",
+	TrayBoxClickFailedBody:         "Could not pass the click to %s: %v",
 	HostedShowWindow:               "Show Window",
 	HostedHideWindow:               "Hide Window",
 	HostedQuitProgram:              "Quit %s",
@@ -399,9 +456,20 @@ func FormatManagedListItem(language string, app config.ManagedAppEntry) string {
 }
 
 func FormatManagedParam(language string, app config.ManagedAppEntry) string {
+	param := formatManagedMode(language, app)
+	if app.RunOnStartup && app.Schedule.Enabled {
+		return fmt.Sprintf(For(language).ManagedScheduleTag, param)
+	}
+	return param
+}
+
+func formatManagedMode(language string, app config.ManagedAppEntry) string {
 	msg := For(language)
 	if !app.RunOnStartup {
 		return msg.ManagedListParamPausedTemplate
+	}
+	if app.LaunchViaLogonTask {
+		return msg.ManagedTaskLaunch
 	}
 	if app.LaunchHiddenInBackground {
 		return msg.ManagedLaunchHidden

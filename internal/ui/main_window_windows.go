@@ -41,8 +41,9 @@ type MainWindow struct {
 	checkingUpdate bool
 	// onSettingsPage tracks the current page itself: while the window is
 	// hidden, all of its children report themselves as invisible.
-	onSettingsPage     bool
-	settingsFitPending bool
+	onSettingsPage      bool
+	pageSelectedProgram int
+	settingsFitPending  bool
 
 	headerRow     *walk.Composite
 	backBtn       *walk.PushButton
@@ -55,9 +56,6 @@ type MainWindow struct {
 	logonNotice      *walk.Composite
 	logonNoticeText  *walk.Label
 	enableLogonBtn   *walk.PushButton
-	trayBoxRow       *walk.Composite
-	trayBoxTitle     *walk.Label
-	trayBoxEnabled   *walk.CheckBox
 	programsBody     *walk.Composite
 	managedTitle     *walk.Label
 	managedHint      *walk.Label
@@ -79,14 +77,25 @@ type MainWindow struct {
 	appEnabledHint   *walk.TextLabel
 	modeLabel        *walk.Label
 	modeTray         *walk.RadioButton
-	modeNormal       *walk.RadioButton
 	modeHidden       *walk.RadioButton
+	modeTask         *walk.RadioButton
+	modeNormal       *walk.RadioButton
 	modeHint         *walk.TextLabel
 	delayBlock       *walk.Composite
 	delayLabel       *walk.Label
 	delayEdit        *walk.LineEdit
 	delayUnit        *walk.Label
 	delayHint        *walk.TextLabel
+	scheduleRow      *walk.Composite
+	scheduleEnabled  *walk.CheckBox
+	scheduleBlock    *walk.Composite
+	scheduleStart    *walk.Label
+	startDelayEdit   *walk.LineEdit
+	startDelayUnit   *walk.Label
+	scheduleExit     *walk.Label
+	autoExitEdit     *walk.LineEdit
+	autoExitUnit     *walk.Label
+	scheduleHint     *walk.TextLabel
 	argsLabel        *walk.Label
 	argsEdit         *walk.LineEdit
 	argsHint         *walk.TextLabel
@@ -223,10 +232,17 @@ func (w *MainWindow) showSettings(show bool) {
 	wasSuspended := w.mw.Suspended()
 	w.mw.SetSuspended(true)
 	defer w.mw.SetSuspended(wasSuspended)
+	wasOnSettings := w.onSettingsPage
 	w.onSettingsPage = show
+	if show {
+		w.pageSelectedProgram = w.managedList.CurrentIndex()
+	}
 	w.headerRow.SetVisible(!show)
 	w.programsView.SetVisible(!show)
 	w.settingsView.SetVisible(show)
+	if !show && wasOnSettings && w.pageSelectedProgram >= 0 && w.pageSelectedProgram < len(w.settings.ManagedApps) {
+		w.managedList.SetCurrentIndex(w.pageSelectedProgram)
+	}
 	w.applyPageTitle()
 	if show && w.mw.Visible() {
 		w.settingsFitPending = true
@@ -395,10 +411,10 @@ func (w *MainWindow) SetCollectedTrayIcon(id string, on bool) {
 	for i := range w.settings.ManagedApps {
 		if w.settings.ManagedApps[i].ID == id {
 			w.settings.ManagedApps[i].CollectTrayIcon = on
+			w.updateManagedRow(i)
 			break
 		}
 	}
-	w.syncManagedEditor()
 }
 
 func (w *MainWindow) Settings() config.Settings {

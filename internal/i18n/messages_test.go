@@ -33,6 +33,7 @@ func TestFormatManagedRules(t *testing.T) {
 	languages := []struct {
 		language        string
 		launchOnly      string
+		taskLaunch      string
 		autoHide        string
 		autoHideDelayed string
 		hidden          string
@@ -41,6 +42,7 @@ func TestFormatManagedRules(t *testing.T) {
 		{
 			language:        "zh-CN",
 			launchOnly:      "正常启动",
+			taskLaunch:      "开机即启动",
 			autoHide:        "收进托盘",
 			autoHideDelayed: "收进托盘（等 30 秒）",
 			hidden:          "后台启动",
@@ -49,6 +51,7 @@ func TestFormatManagedRules(t *testing.T) {
 		{
 			language:        "en-US",
 			launchOnly:      "Start normally",
+			taskLaunch:      "Launch at boot",
 			autoHide:        "Close to tray",
 			autoHideDelayed: "Close to tray (after 30 s)",
 			hidden:          "Run in background",
@@ -57,6 +60,7 @@ func TestFormatManagedRules(t *testing.T) {
 		{
 			language:        "unknown",
 			launchOnly:      "正常启动",
+			taskLaunch:      "开机即启动",
 			autoHide:        "收进托盘",
 			autoHideDelayed: "收进托盘（等 30 秒）",
 			hidden:          "后台启动",
@@ -71,10 +75,12 @@ func TestFormatManagedRules(t *testing.T) {
 				runOnStartup bool
 				launchHidden bool
 				autoHide     bool
+				viaTask      bool
 				closeDelay   int
 				want         string
 			}{
 				{name: "launch_only", runOnStartup: true, want: lang.launchOnly},
+				{name: "logon_task", runOnStartup: true, viaTask: true, want: lang.taskLaunch},
 				{name: "close_window", runOnStartup: true, autoHide: true, want: lang.autoHide},
 				{name: "close_window_delayed", runOnStartup: true, autoHide: true, closeDelay: 30, want: lang.autoHideDelayed},
 				{name: "delay_without_close_window", runOnStartup: true, closeDelay: 30, want: lang.launchOnly},
@@ -85,6 +91,7 @@ func TestFormatManagedRules(t *testing.T) {
 				{name: "paused", want: lang.paused},
 				{name: "paused_overrides_close", autoHide: true, want: lang.paused},
 				{name: "paused_overrides_hidden", launchHidden: true, want: lang.paused},
+				{name: "paused_overrides_task", viaTask: true, want: lang.paused},
 				{name: "paused_overrides_both", launchHidden: true, autoHide: true, want: lang.paused},
 			}
 			for _, exePath := range []string{"test.exe", "test.bat"} {
@@ -94,6 +101,7 @@ func TestFormatManagedRules(t *testing.T) {
 							Name:                     "Example app",
 							ExePath:                  exePath,
 							RunOnStartup:             state.runOnStartup,
+							LaunchViaLogonTask:       state.viaTask,
 							LaunchHiddenInBackground: state.launchHidden,
 							TrayBehavior: config.TrayBehavior{
 								AutoMinimizeAndHideOnLaunch: state.autoHide,

@@ -283,6 +283,76 @@ func TestMigrate_NormalizesLanguageAndRetryBounds(t *testing.T) {
 	}
 }
 
+func TestMigrate_ClearsTaskLaunchOutsideItsFlags(t *testing.T) {
+	input := Settings{
+		SchemaVersion: 3,
+		Language:      "zh-CN",
+		ManagedApps: []ManagedAppEntry{
+			{
+				Name: "Script", ExePath: `C:\Scripts\run.ps1`, RunOnStartup: true,
+				LaunchViaLogonTask: true, TrayBehavior: TrayBehavior{AutoMinimizeAndHideOnLaunch: true},
+			},
+			{
+				Name: "Exe", ExePath: `C:\Apps\One.exe`, RunOnStartup: true,
+				LaunchViaLogonTask: true, LaunchHiddenInBackground: true,
+				TrayBehavior: TrayBehavior{AutoMinimizeAndHideOnLaunch: true},
+			},
+		},
+	}
+
+	got := migrate(input)
+
+	// The task's action launches the file as is; a script would show its
+	// console window, so a script cannot keep the task mode.
+	if got.ManagedApps[0].LaunchViaLogonTask {
+		t.Errorf("script kept the logon task mode")
+	}
+	// A task-launched program runs outside WinTray, so none of WinTray's
+	// launch modes can stay set next to it.
+	if !got.ManagedApps[1].LaunchViaLogonTask || got.ManagedApps[1].LaunchHiddenInBackground || got.ManagedApps[1].TrayBehavior.AutoMinimizeAndHideOnLaunch {
+		t.Errorf("exe flags = %+v, want only the logon task mode", got.ManagedApps[1])
+	}
+}
+
+func TestLogonTaskAppsOrderAndDelays(t *testing.T) {
+	settings := Settings{
+		StartupIntervalSeconds: 5,
+		ManagedApps: []ManagedAppEntry{
+			{ID: "1", Name: "First", ExePath: `C:\Apps\One.exe`, RunOnStartup: true, LaunchViaLogonTask: true},
+			{ID: "2", Name: "WinTray launched", ExePath: `C:\Apps\Other.exe`, RunOnStartup: true},
+			{ID: "3", Name: "Paused", ExePath: `C:\Apps\Paused.exe`, RunOnStartup: false, LaunchViaLogonTask: true},
+			{ID: "4", Name: "Second", ExePath: `C:\Apps\Two.exe`, RunOnStartup: true, LaunchViaLogonTask: true},
+		},
+	}
+
+	got := LogonTaskApps(settings)
+	if len(got) != 2 {
+		t.Fatalf("task apps = %d, want 2 (paused entries get no task)", len(got))
+	}
+	if got[0].Entry.ID != "1" || got[1].Entry.ID != "4" {
+		t.Fatalf("task app order = %q, %q; want list order", got[0].Entry.ID, got[1].Entry.ID)
+	}
+	// The first task starts the base delay after sign-in, each later one one
+	// interval behind; WinTray-launched entries do not consume a slot.
+	if want := LogonTaskBaseDelaySeconds; got[0].DelaySeconds != want {
+		t.Errorf("first delay = %d, want %d", got[0].DelaySeconds, want)
+	}
+	if want := LogonTaskBaseDelaySeconds + 5; got[1].DelaySeconds != want {
+		t.Errorf("second delay = %d, want %d", got[1].DelaySeconds, want)
+	}
+}
+
+func TestLogonTaskDelaySecondsClampsInterval(t *testing.T) {
+	for _, tc := range []struct {
+		interval int
+		want     int
+	}{{-3, LogonTaskBaseDelaySeconds}, {0, LogonTaskBaseDelaySeconds}, {999, LogonTaskBaseDelaySeconds + 120}} {
+		if got := LogonTaskDelaySeconds(1, tc.interval); got != tc.want {
+			t.Errorf("LogonTaskDelaySeconds(1, %d) = %d, want %d", tc.interval, got, tc.want)
+		}
+	}
+}
+
 func TestLoadWithError_ReadsCloseDelaySecondsFromTrayBehavior(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
 	data := `{"schemaVersion":3,"language":"zh-CN","managedApps":[` +
@@ -362,17 +432,5 @@ func TestCollectedTrayIconPathsFiltersScriptsAndDuplicateExecutables(t *testing.
 	paths := CollectedTrayIconPaths(s)
 	if len(paths) != 1 || paths[0] != s.ManagedApps[0].ExePath {
 		t.Fatalf("collected icon paths = %v", paths)
-	}
-}
-
-func TestLoadWithError_MigratesGlobalTrayCollectionByExecutable(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "settings.json")
-	data := `{"schemaVersion":3,"language":"zh-CN","trayBoxEnabled":true,"trayBoxApps":["C:\\Apps\\One.exe","C:\\Apps\\Absent.exe"],"managedApps":[{"id":"a","exePath":"c:\\apps\\ONE.exe"},{"id":"b","exePath":"C:\\Apps\\Two.exe"}]}`
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	got, err := NewStore(path).LoadWithError()
-	if err != nil || !got.ManagedApps[0].CollectTrayIcon || got.ManagedApps[1].CollectTrayIcon || !got.TrayBoxEnabled || len(got.TrayBoxApps) != 2 {
-		t.Fatalf("legacy migration = %+v, %v", got, err)
 	}
 }

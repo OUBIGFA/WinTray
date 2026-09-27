@@ -2,80 +2,70 @@
 
 package traybox
 
-import (
-	"errors"
-)
+import "strings"
 
-// Box manages icons for programs explicitly selected in WinTray's program list.
-// Its callbacks and state changes run on the UI thread.
+// Box collects the tray icons of the programs selected in WinTray's list.
+// Its methods run on the UI thread.
 type Box struct {
-	selfPath       string
-	paths          func() []string
-	updatePromoted func(string, bool, func() error) error
-	updatePaths    func([]string, bool, func() error) error
+	selfPath string
+	logger   Logger
+	paths    []string
+	listener *listener
+	config   listenerConfig
 }
 
-func NewBox(selfPath string, paths func() []string) *Box {
-	return &Box{selfPath: selfPath, paths: paths, updatePromoted: updatePromoted, updatePaths: updatePromotedPaths}
-}
-
-func (b *Box) HasSelection() bool { return len(b.paths()) != 0 }
-
-// SetSelected updates the system icon setting before committing the matching
-// program's checkbox. On failure, the prior icon setting is restored.
-func (b *Box) SetSelected(exePath string, selected bool, commit func() error) error {
-	return b.updatePromoted(exePath, !selected, commit)
-}
-
-type View struct {
-	Boxed []Located
-	Err   error
-}
-
-// Apply hides selected programs' icons again after they start or update.
-func (b *Box) Apply() error {
-	var errs []error
-	for _, p := range b.paths() {
-		errs = append(errs, SetPromoted(p, false))
+func NewBox(selfPath string, logger Logger) *Box {
+	return &Box{
+		selfPath: selfPath,
+		logger:   logger,
+		config:   listenerConfig{className: trayWindowClass, target: explorerTray, raise: true},
 	}
-	return errors.Join(errs...)
 }
 
-func (b *Box) View() View {
-	if !b.HasSelection() {
-		return View{}
-	}
-	applyErr := b.Apply()
-	if errors.Is(applyErr, ErrUnsupported) {
-		return View{Err: applyErr}
-	}
-	icons, err := ReadIcons()
-	if err != nil {
-		return View{Err: err}
-	}
-	v := View{Err: applyErr}
-	selected := b.paths()
-	for _, icon := range Locate(icons, b.selfPath) {
-		if Contains(selected, icon.ExePath) {
-			v.Boxed = append(v.Boxed, icon)
+func (b *Box) HasSelection() bool { return len(b.paths) != 0 }
+
+// SetPaths collects the icons of exactly these programs. Icons of programs
+// no longer listed are shown in the notification area again. On failure the
+// previous selection stays in effect.
+func (b *Box) SetPaths(paths []string) error {
+	var selected []string
+	for _, p := range paths {
+		if p != "" && !strings.EqualFold(p, b.selfPath) && !Contains(selected, p) {
+			selected = append(selected, p)
 		}
 	}
-	return v
+	switch {
+	case len(selected) == 0:
+		if b.listener != nil {
+			if err := b.listener.stop(); err != nil {
+				return err
+			}
+			b.listener = nil
+			b.logger.Info("tray box: stopped")
+		}
+	case b.listener == nil:
+		l, err := startListener(b.config, b.selfPath, selected, b.logger)
+		if err != nil {
+			return err
+		}
+		b.listener = l
+		b.logger.Info("tray box: started")
+	default:
+		b.listener.setPaths(selected)
+	}
+	b.paths = selected
+	return nil
 }
 
-// Release restores selected programs' icons before resetting WinTray's data.
-func (b *Box) Release() error {
-	if !b.HasSelection() {
+// Icons lists the collected icons that are currently shown.
+func (b *Box) Icons() []Icon {
+	if b.listener == nil {
 		return nil
 	}
-	return b.updatePaths(b.paths(), true, nil)
+	return b.listener.snapshot()
 }
 
-// RestorePaths restores icons selected by the previous global tray-box setting.
-// The caller must persist its removal only after this succeeds.
-func RestorePaths(paths []string) error {
-	if len(paths) == 0 {
-		return nil
-	}
-	return updatePromotedPaths(paths, true, nil)
+// Close shows every collected icon in the notification area again.
+func (b *Box) Close() error {
+	return b.SetPaths(nil)
 }

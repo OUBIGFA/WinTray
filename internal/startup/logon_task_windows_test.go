@@ -55,6 +55,7 @@ func TestTaskUpToDateReadsBothEncodingsAndRejectsDisabled(t *testing.T) {
 // the definition must be accepted without administrator rights and a second
 // Sync must recognise the registered task instead of re-creating it.
 func TestLogonTaskRegistersWithSchtasks(t *testing.T) {
+	requireSchtasks(t)
 	task, err := NewLogonTask()
 	if err != nil {
 		t.Fatal(err)

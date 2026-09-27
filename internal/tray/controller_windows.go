@@ -3,6 +3,7 @@
 package tray
 
 import (
+	"errors"
 	"fmt"
 	"syscall"
 	"unsafe"
@@ -101,13 +102,11 @@ func (c *Controller) showContextMenu() {
 	defer win.DestroyMenu(hMenu)
 
 	msg := i18n.For(c.language)
-	var view traybox.View
+	var icons []traybox.Icon
+	var bitmaps []win.HBITMAP
 	if c.box != nil && c.box.HasSelection() {
-		view = c.box.View()
-		if view.Err != nil {
-			c.logger.Warn(fmt.Sprintf("tray box: %v", view.Err))
-		}
-		bitmaps := c.appendBox(hMenu, view, msg)
+		icons = c.box.Icons()
+		bitmaps = appendBox(hMenu, icons)
 		defer func() {
 			for _, b := range bitmaps {
 				win.DeleteObject(win.HGDIOBJ(b))
@@ -128,19 +127,27 @@ func (c *Controller) showContextMenu() {
 	}
 
 	flags := uint32(win.TPM_NOANIMATION | win.TPM_RETURNCMD | win.TPM_RIGHTBUTTON)
-	actionID := win.TrackPopupMenuEx(
-		hMenu,
-		flags,
-		point.X,
-		point.Y,
-		hwnd,
-		nil,
-	)
+	var actionID win.BOOL
+	rightClicked := trackBoxRightClicks(hwnd, func() {
+		if c.box != nil && refreshBoxMenu(hMenu, icons, bitmaps, c.box.Icons()) {
+			redrawOpenBoxMenu()
+		}
+	}, func() {
+		actionID = win.TrackPopupMenuEx(hMenu, flags, point.X, point.Y, hwnd, nil)
+	})
 	// Required by the Windows tray-menu contract after TrackPopupMenuEx.
 	win.PostMessage(hwnd, win.WM_NULL, 0, 0)
 
+	if rightClicked != 0 {
+		c.runBoxAction(icons, rightClicked, traybox.ActionRightClick)
+		return
+	}
 	if id := uint32(actionID); id >= trayBoxedBase && id < trayIDLimit {
-		c.runBoxAction(view, id)
+		action := traybox.ActionClick
+		if win.GetKeyState(win.VK_SHIFT) < 0 {
+			action = traybox.ActionDoubleClick
+		}
+		c.runBoxAction(icons, id, action)
 		return
 	}
 	switch uint32(actionID) {
@@ -154,61 +161,76 @@ func (c *Controller) showContextMenu() {
 		}
 	case trayActionExit:
 		if c.exitApp != nil && !c.exitRequested {
-			c.exitRequested = true
+			// The app may decline exit if collected icons cannot be restored.
+			// Dispose marks the controller closed only once exit is accepted.
 			c.exitApp()
 		}
 	}
 }
 
-// appendBox lists only icons selected in the program editor. Their bitmaps
-// must outlive the menu.
-func (c *Controller) appendBox(hMenu win.HMENU, view traybox.View, msg i18n.Messages) []win.HBITMAP {
+// appendBox lists the collected icons with their current images. The
+// bitmaps must outlive the menu.
+func appendBox(hMenu win.HMENU, icons []traybox.Icon) []win.HBITMAP {
 	var bitmaps []win.HBITMAP
 	iconSize := int(win.GetSystemMetrics(win.SM_CXSMICON))
-	bitmapOf := func(icon traybox.Icon) win.HBITMAP {
-		b, err := traybox.MenuBitmap(icon.Snapshot, iconSize)
-		if err != nil {
-			return 0
-		}
-		bitmaps = append(bitmaps, b)
-		return b
-	}
-
-	for i, l := range view.Boxed {
+	for i, icon := range icons {
 		id := uint32(trayBoxedBase + i)
 		if id >= trayIDLimit {
 			break
 		}
-		appendTrayMenuItem(hMenu, menuItem{id: id, text: l.DisplayName(), bitmap: bitmapOf(l.Icon)})
+		item := menuItem{id: id, text: icon.DisplayName(), disabled: !icon.Clickable()}
+		b, _ := traybox.MenuBitmap(icon.Image, iconSize)
+		bitmaps = append(bitmaps, b) // one slot per row, including blank frames
+		item.bitmap = b
+		appendTrayMenuItem(hMenu, item)
 	}
-	if len(view.Boxed) > 0 {
+	if len(icons) > 0 {
 		appendTrayMenuItem(hMenu, menuItem{separator: true})
 	}
 	return bitmaps
 }
 
-// runBoxAction opens a selected program from its icon in WinTray's menu.
-func (c *Controller) runBoxAction(view traybox.View, id uint32) {
+// runBoxAction clicks a collected icon on the user's behalf.
+func (c *Controller) runBoxAction(icons []traybox.Icon, id uint32, action traybox.Action) {
 	i := int(id - trayBoxedBase)
-	if i >= len(view.Boxed) {
+	if i < 0 || i >= len(icons) {
 		return
 	}
-	icon := view.Boxed[i]
-	// Opening the hidden-icons flyout takes a moment; the UI thread
-	// must keep pumping meanwhile.
-	go func() {
-		if err := traybox.Activate(icon, traybox.ActionDoubleClick); err != nil {
-			c.logger.Warn(fmt.Sprintf("tray box click failed: %s %v", icon.ExePath, err))
-			c.window.Synchronize(func() { c.showBoxError(err) })
+	icon := icons[i]
+	// Registration, version and callback may change while the menu is open.
+	// Deliver only to the current native icon, never the stale snapshot.
+	if c.box != nil {
+		found := false
+		for _, current := range c.box.Icons() {
+			if icon.SameIcon(current) {
+				icon, found = current, true
+				break
+			}
 		}
-	}()
+		if !found {
+			c.showBoxError(icon, traybox.ErrIconGone)
+			return
+		}
+	}
+	if err := traybox.Activate(icon, action); err != nil {
+		c.logger.Warn(fmt.Sprintf("tray box click failed: %s %v", icon.ExePath, err))
+		c.showBoxError(icon, err)
+	}
 }
 
-func (c *Controller) showBoxError(err error) {
+func (c *Controller) showBoxError(icon traybox.Icon, err error) {
 	if c.exitRequested {
 		return
 	}
-	walk.MsgBox(c.window, i18n.For(c.language).TrayBoxFailedTitle, err.Error(), walk.MsgBoxIconWarning)
+	msg := i18n.For(c.language)
+	body := fmt.Sprintf(msg.TrayBoxClickFailedBody, icon.DisplayName(), err)
+	switch {
+	case errors.Is(err, traybox.ErrIconGone):
+		body = fmt.Sprintf(msg.TrayBoxIconGoneBody, icon.DisplayName())
+	case errors.Is(err, traybox.ErrNotClickable):
+		body = fmt.Sprintf(msg.TrayBoxNotClickableBody, icon.DisplayName())
+	}
+	walk.MsgBox(c.window, msg.TrayBoxFailedTitle, body, walk.MsgBoxIconWarning)
 }
 
 type menuItem struct {
@@ -276,6 +298,7 @@ func (c *Controller) Dispose() {
 	if c == nil || c.notifyIcon == nil {
 		return
 	}
+	c.exitRequested = true
 	disposeNotifyIcon(c.notifyIcon)
 	c.notifyIcon = nil
 }

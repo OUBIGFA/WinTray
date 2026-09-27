@@ -137,25 +137,27 @@ func migrate(settings Settings) Settings {
 	if settings.ManagedApps == nil {
 		settings.ManagedApps = make([]ManagedAppEntry, 0)
 	}
-	if settings.TrayBoxApps == nil {
-		settings.TrayBoxApps = make([]string, 0)
-	}
-	if settings.TrayBoxEnabled {
-		for i := range settings.ManagedApps {
-			app := &settings.ManagedApps[i]
-			if strings.EqualFold(filepath.Ext(app.ExePath), ".exe") && containsPath(settings.TrayBoxApps, app.ExePath) {
-				app.CollectTrayIcon = true
-			}
-		}
-	}
 	for i := range settings.ManagedApps {
 		if settings.ManagedApps[i].Name == "" {
 			settings.ManagedApps[i].Name = "New App"
+		}
+		// System startup preserves the original program's window behaviour;
+		// WinTray's hidden/close-to-tray launch modes must not override it.
+		// Scripts still use the explicit script launch modes, not migration.
+		if settings.ManagedApps[i].LaunchViaLogonTask {
+			if !strings.EqualFold(filepath.Ext(settings.ManagedApps[i].ExePath), ".exe") {
+				settings.ManagedApps[i].LaunchViaLogonTask = false
+			}
+			settings.ManagedApps[i].LaunchHiddenInBackground = false
+			settings.ManagedApps[i].TrayBehavior.AutoMinimizeAndHideOnLaunch = false
 		}
 		if settings.ManagedApps[i].LaunchHiddenInBackground {
 			settings.ManagedApps[i].TrayBehavior.AutoMinimizeAndHideOnLaunch = false
 		}
 		settings.ManagedApps[i].TrayBehavior.CloseDelaySeconds = ClampCloseDelaySeconds(settings.ManagedApps[i].TrayBehavior.CloseDelaySeconds)
+		schedule := &settings.ManagedApps[i].Schedule
+		schedule.StartDelayMinutes = ClampScheduleMinutes(schedule.StartDelayMinutes)
+		schedule.AutoExitMinutes = ClampScheduleMinutes(schedule.AutoExitMinutes)
 	}
 	return settings
 }

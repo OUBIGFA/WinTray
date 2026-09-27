@@ -20,12 +20,18 @@ import (
 // top-level window it opens afterwards.
 // windowOptional treats window handling as best effort: a program that never
 // opens a window (background scripts) still counts as a successful launch.
+// externalOwned marks an entry whose launch belongs to the logon task WinTray
+// registered for it: WinTray must never launch it, only wait for the task to
+// do so; externalWait bounds that wait.
 type startOptions struct {
 	hideProcessWindow      bool
 	hideConsoleWindow      bool
 	manageWindow           bool
 	windowOptional         bool
 	respectExternalStartup bool
+	externalOwned          bool
+	externalWait           time.Duration
+	launchViaTask          bool
 	turn                   *startupTurn
 }
 
@@ -41,11 +47,19 @@ func (o startOptions) launchMode() launchMode {
 }
 
 func managedStartOptions(entry config.ManagedAppEntry) startOptions {
-	return startOptions{
+	opts := startOptions{
 		respectExternalStartup: true,
 		hideProcessWindow:      entry.LaunchHiddenInBackground,
 		manageWindow:           !entry.LaunchHiddenInBackground && entry.TrayBehavior.AutoMinimizeAndHideOnLaunch,
+		externalOwned:          entry.LaunchViaLogonTask,
 	}
+	// A task-launched program runs outside WinTray: no launch mode of
+	// WinTray's own can apply to it, and its window is left alone.
+	if opts.externalOwned {
+		opts.hideProcessWindow = false
+		opts.manageWindow = false
+	}
+	return opts
 }
 
 func (s *Service) StartAndManage(ctx context.Context, entry config.ManagedAppEntry, retrySeconds int) Result {
@@ -57,6 +71,9 @@ func (s *Service) StartAndManage(ctx context.Context, entry config.ManagedAppEnt
 // handling is best effort here: the launch itself already succeeded, so it must
 // not be reported as a failure.
 func (s *Service) StartNow(ctx context.Context, entry config.ManagedAppEntry, retrySeconds int) Result {
+	if entry.LaunchViaLogonTask {
+		return s.start(ctx, entry, retrySeconds, startOptions{windowOptional: true, launchViaTask: true})
+	}
 	return s.start(ctx, entry, retrySeconds, startOptions{
 		hideProcessWindow: entry.LaunchHiddenInBackground,
 		manageWindow:      !entry.LaunchHiddenInBackground && entry.TrayBehavior.AutoMinimizeAndHideOnLaunch,
@@ -87,23 +104,36 @@ func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retry
 	consoleProgram := opts.manageWindow && consoleExecutableCheck(entry.ExePath)
 
 	running := s.hasExistingManagedProcess(expectedPath, expectedName) || s.hasExistingManagedWindow(expectedPath, expectedName)
-	if !running && opts.respectExternalStartup {
+	externalSource, externalWait := "", time.Duration(0)
+	if opts.externalOwned {
+		// WinTray registered a logon task for this program; the launch
+		// belongs to it however Windows startup is set up, so no Run entry
+		// needs probing and WinTray must never launch a second instance.
+		externalSource = "logon task"
+		externalWait = opts.externalWait
+		if externalWait <= 0 {
+			externalWait = s.externalStartupWait
+		}
+	} else if !running && opts.respectExternalStartup {
 		source, err := s.externalStartupLookup(entry.ExePath)
 		if err != nil {
 			s.logger.Error(fmt.Sprintf("startup check failed: %s err=%v (not launching to avoid a duplicate)", entry.Name, err))
 			return Result{AppName: entry.Name, Code: ResultStartupCheckFailed, Message: "startup check failed"}
 		}
 		if source != "" {
-			opts.turn.finish(false)
-			s.logger.Info(fmt.Sprintf("external startup owns launch: %s source=%s wait=%s", entry.Name, source, s.externalStartupWait))
-			running = s.waitForExternalStartup(ctx, expectedPath, expectedName)
-			if ctx.Err() != nil {
-				return cancelledResult(entry)
-			}
-			if !running {
-				s.logger.Warn(fmt.Sprintf("external startup timed out: %s source=%s (no fallback launch to avoid a duplicate)", entry.Name, source))
-				return Result{AppName: entry.Name, Code: ResultExternalStartupTimeout, Message: "external startup timeout"}
-			}
+			externalSource, externalWait = source, s.externalStartupWait
+		}
+	}
+	if !running && externalSource != "" {
+		opts.turn.finish(false)
+		s.logger.Info(fmt.Sprintf("external startup owns launch: %s source=%s wait=%s", entry.Name, externalSource, externalWait))
+		running = s.waitForExternalStartup(ctx, expectedPath, expectedName, externalWait)
+		if ctx.Err() != nil {
+			return cancelledResult(entry)
+		}
+		if !running {
+			s.logger.Warn(fmt.Sprintf("external startup timed out: %s source=%s (no fallback launch to avoid a duplicate)", entry.Name, externalSource))
+			return Result{AppName: entry.Name, Code: ResultExternalStartupTimeout, Message: "external startup timeout"}
 		}
 	}
 	if running {
@@ -132,6 +162,21 @@ func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retry
 
 	if ctx.Err() != nil {
 		return cancelledResult(entry)
+	}
+	if opts.launchViaTask {
+		if err := s.logonTaskLaunch(entry); err != nil {
+			s.logger.Error(fmt.Sprintf("original startup task failed: %s err=%v", entry.Name, err))
+			return Result{AppName: entry.Name, Code: ResultProcessStartFailed, Message: err.Error()}
+		}
+		// schtasks /Run only confirms submission. Observe the actual process
+		// before reporting success; never compensate with a bare exe launch.
+		if !s.waitForExternalStartup(ctx, expectedPath, expectedName, s.logonTaskLaunchWait) {
+			if ctx.Err() != nil {
+				return cancelledResult(entry)
+			}
+			return Result{AppName: entry.Name, Code: ResultExternalStartupTimeout, Message: "original startup task did not start the process"}
+		}
+		return startedResult(entry, opts)
 	}
 	cmd, err := startProcess(entry.ExePath, entry.Args, opts.launchMode())
 	opts.turn.finish(err == nil)
@@ -167,8 +212,10 @@ func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retry
 // waitForExternalStartup observes a registered launch; it must never fall back
 // to launching itself, even after timeout. Windows may defer Run entries longer
 // than any fixed grace period, and QQ permits more than one main instance.
-func (s *Service) waitForExternalStartup(ctx context.Context, expectedPath, expectedName string) bool {
-	waitCtx, cancel := context.WithTimeout(ctx, s.externalStartupWait)
+// wait bounds the observation, covering the delay a program's own logon task
+// was registered with plus some margin for slow process creation.
+func (s *Service) waitForExternalStartup(ctx context.Context, expectedPath, expectedName string, wait time.Duration) bool {
+	waitCtx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
 	for waitCtx.Err() == nil {
 		if s.hasExistingManagedProcess(expectedPath, expectedName) || s.hasExistingManagedWindow(expectedPath, expectedName) {

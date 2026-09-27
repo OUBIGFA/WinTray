@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"strings"
 )
@@ -12,12 +13,51 @@ const MaxCloseDelaySeconds = 600
 const (
 	DefaultStartupIntervalSeconds = 3
 	MaxStartupIntervalSeconds     = 120
+	// LogonTaskBaseDelaySeconds is how long after sign-in the first
+	// task-launched program starts. WinTray's own logon task has no delay, so
+	// WinTray is up and watching for programs before the first one appears.
+	LogonTaskBaseDelaySeconds = 10
 )
 
 // ClampStartupIntervalSeconds bounds spacing between launches. Zero disables
 // the wait, but entries are still started in list order.
 func ClampStartupIntervalSeconds(seconds int) int {
 	return min(max(seconds, 0), MaxStartupIntervalSeconds)
+}
+
+// LogonTaskDelaySeconds spaces task-launched programs: the first one starts
+// LogonTaskBaseDelaySeconds after sign-in, each later one one interval after
+// the previous. Task Scheduler owns the clock, so the order holds even when
+// WinTray itself starts late.
+func LogonTaskDelaySeconds(taskIndex, intervalSeconds int) int {
+	return LogonTaskBaseDelaySeconds + taskIndex*ClampStartupIntervalSeconds(intervalSeconds)
+}
+
+// LogonTaskApp pairs an enabled task-launched entry with the delay its logon
+// task uses at sign-in.
+type LogonTaskApp struct {
+	Entry        ManagedAppEntry
+	DelaySeconds int
+}
+
+// LogonTaskApps returns the enabled task-launched entries in list order with
+// the delay each one's logon task uses. Entries paused for sign-in get no
+// task, so Windows cannot start them behind WinTray's back.
+func LogonTaskApps(settings Settings) []LogonTaskApp {
+	apps := make([]LogonTaskApp, 0)
+	index := 0
+	for i := range settings.ManagedApps {
+		entry := settings.ManagedApps[i]
+		if !entry.RunOnStartup || !entry.LaunchViaLogonTask {
+			continue
+		}
+		apps = append(apps, LogonTaskApp{
+			Entry:        entry,
+			DelaySeconds: max(LogonTaskDelaySeconds(index, settings.StartupIntervalSeconds), ScheduledStartDelaySeconds(entry)),
+		})
+		index++
+	}
+	return apps
 }
 
 type TrayBehavior struct {
@@ -33,15 +73,78 @@ type TrayBehavior struct {
 	CloseDelaySeconds int `json:"closeDelaySeconds"`
 }
 
+const (
+	// MaxScheduleMinutes bounds both scheduled times: a day.
+	MaxScheduleMinutes = 1440
+	// DefaultAutoExitMinutes is the run time offered when a schedule is
+	// first switched on.
+	DefaultAutoExitMinutes = 30
+)
+
+// Schedule suits programs that only need to run for a while, such as daily
+// check-in tools: they start some minutes after sign-in, out of the way of
+// the programs that matter then, and are ended once they have run long enough.
+// Like a task's "stop the task if it runs longer than" setting, the run time
+// counts from the creation of the program's process and ends it for good.
+type Schedule struct {
+	Enabled bool `json:"enabled"`
+	// StartDelayMinutes counts from sign-in.
+	StartDelayMinutes int `json:"startDelayMinutes"`
+	// AutoExitMinutes is how long the program may run; 0 never ends it.
+	AutoExitMinutes int `json:"autoExitMinutes"`
+}
+
+// ClampScheduleMinutes keeps a scheduled time inside the supported range.
+func ClampScheduleMinutes(minutes int) int {
+	return min(max(minutes, 0), MaxScheduleMinutes)
+}
+
+// ScheduledStartDelaySeconds is how long after sign-in the entry may start.
+func ScheduledStartDelaySeconds(entry ManagedAppEntry) int {
+	if !entry.Schedule.Enabled {
+		return 0
+	}
+	return ClampScheduleMinutes(entry.Schedule.StartDelayMinutes) * 60
+}
+
+// ScheduledRunLimit returns how many minutes the entry's program may run, or
+// 0 when it is never ended.
+func ScheduledRunLimit(entry ManagedAppEntry) int {
+	if !entry.Schedule.Enabled {
+		return 0
+	}
+	return ClampScheduleMinutes(entry.Schedule.AutoExitMinutes)
+}
+
 type ManagedAppEntry struct {
-	ID                       string       `json:"id"`
-	Name                     string       `json:"name"`
-	ExePath                  string       `json:"exePath"`
-	Args                     string       `json:"args"`
-	RunOnStartup             bool         `json:"runOnStartup"`
-	CollectTrayIcon          bool         `json:"collectTrayIcon"`
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	ExePath         string `json:"exePath"`
+	Args            string `json:"args"`
+	RunOnStartup    bool   `json:"runOnStartup"`
+	CollectTrayIcon bool   `json:"collectTrayIcon"`
+	// LaunchViaLogonTask replaces only the sign-in trigger. It reuses an app's
+	// native task, or migrates its original user startup entry without changing
+	// arguments, window behaviour or privileges. If no original entry exists,
+	// it registers the configured executable and arguments. WinTray observes
+	// task launches rather than starting a second instance.
+	// Disabling this mode releases the task and restores migrated triggers.
+	LaunchViaLogonTask       bool         `json:"launchViaLogonTask"`
 	LaunchHiddenInBackground bool         `json:"launchHiddenInBackground"`
 	TrayBehavior             TrayBehavior `json:"trayBehavior"`
+	Schedule                 Schedule     `json:"schedule"`
+}
+
+// UnmarshalJSON gives entries saved before schedules existed the default run
+// time, so switching a schedule on starts from it rather than from "never".
+func (e *ManagedAppEntry) UnmarshalJSON(b []byte) error {
+	type plain ManagedAppEntry
+	decoded := plain{Schedule: Schedule{AutoExitMinutes: DefaultAutoExitMinutes}}
+	if err := json.Unmarshal(b, &decoded); err != nil {
+		return err
+	}
+	*e = ManagedAppEntry(decoded)
+	return nil
 }
 
 type Settings struct {
@@ -53,9 +156,6 @@ type Settings struct {
 	CloseWindowRetrySeconds       int               `json:"closeWindowRetrySeconds"`
 	StartupIntervalSeconds        int               `json:"startupIntervalSeconds"`
 	ManagedApps                   []ManagedAppEntry `json:"managedApps"`
-	// Legacy settings from the first tray-box prototype. Reconciled at startup.
-	TrayBoxEnabled bool     `json:"trayBoxEnabled,omitempty"`
-	TrayBoxApps    []string `json:"trayBoxApps,omitempty"`
 }
 
 func CollectedTrayIconPaths(settings Settings) []string {
@@ -102,6 +202,5 @@ func DefaultSettings() Settings {
 		CloseWindowRetrySeconds:       10,
 		StartupIntervalSeconds:        DefaultStartupIntervalSeconds,
 		ManagedApps:                   make([]ManagedAppEntry, 0),
-		TrayBoxApps:                   make([]string, 0),
 	}
 }

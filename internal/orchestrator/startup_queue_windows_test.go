@@ -192,6 +192,103 @@ func TestStartupQueueRechecksBeforeLaunchingAfterInterval(t *testing.T) {
 	queueProcessStart(t, second)
 }
 
+func TestScheduledStartsShareStartupInterval(t *testing.T) {
+	first := queueTestEntry(t, "scheduled first")
+	second := queueTestEntry(t, "scheduled second")
+	for _, entry := range []*config.ManagedAppEntry{&first, &second} {
+		entry.Schedule = config.Schedule{Enabled: true, StartDelayMinutes: 1}
+	}
+	old := logonTimeLookup
+	logonTimeLookup = func() (time.Time, error) { return time.Now().Add(-time.Minute), nil }
+	defer func() { logonTimeLookup = old }()
+	settings := config.DefaultSettings()
+	settings.StartupIntervalSeconds = 1
+	settings.ManagedApps = []config.ManagedAppEntry{first, second}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	results := queueTestService().StartManagedApps(ctx, settings, nil)
+	for i, result := range results {
+		if result.Code != ResultStartedHidden {
+			t.Fatalf("result %d = %+v", i, result)
+		}
+	}
+	a := queueProcessStart(t, first)
+	b := queueProcessStart(t, second)
+	if gap := a.Sub(b); gap < time.Second && gap > -time.Second {
+		t.Fatalf("scheduled processes started %s apart, want >= 1s", gap)
+	}
+}
+
+func TestImmediateAndScheduledStartsShareStartupInterval(t *testing.T) {
+	first := queueTestEntry(t, "immediate")
+	second := queueTestEntry(t, "scheduled")
+	second.Schedule = config.Schedule{Enabled: true, StartDelayMinutes: 1}
+	old := logonTimeLookup
+	logonTimeLookup = func() (time.Time, error) { return time.Now().Add(-time.Minute), nil }
+	defer func() { logonTimeLookup = old }()
+	settings := config.DefaultSettings()
+	settings.StartupIntervalSeconds = 1
+	settings.ManagedApps = []config.ManagedAppEntry{first, second}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	results := queueTestService().StartManagedApps(ctx, settings, nil)
+	if len(results) != 2 || results[0].Code != ResultStartedHidden || results[1].Code != ResultStartedHidden {
+		t.Fatalf("mixed startup results = %+v", results)
+	}
+	gap := queueProcessStart(t, second).Sub(queueProcessStart(t, first))
+	if gap < time.Second {
+		t.Fatalf("scheduled start followed immediate start by %s, want >= 1s", gap)
+	}
+}
+
+func TestScheduledStartUsesSignInTimeWhenWinTrayStartsLate(t *testing.T) {
+	entry := queueTestEntry(t, "late startup")
+	entry.Schedule = config.Schedule{Enabled: true, StartDelayMinutes: 1}
+	old := logonTimeLookup
+	logonTimeLookup = func() (time.Time, error) { return time.Now().Add(-2 * time.Minute), nil }
+	defer func() { logonTimeLookup = old }()
+	settings := config.DefaultSettings()
+	settings.ManagedApps = []config.ManagedAppEntry{entry}
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	results := queueTestService().StartManagedApps(ctx, settings, nil)
+	if len(results) != 1 || results[0].Code != ResultStartedHidden {
+		t.Fatalf("late startup did not launch overdue entry: %+v", results)
+	}
+	queueProcessStart(t, entry)
+}
+
+func TestScheduledStartWaitsOnlyRemainingSignInDelay(t *testing.T) {
+	entry := queueTestEntry(t, "remaining delay")
+	entry.Schedule = config.Schedule{Enabled: true, StartDelayMinutes: 1}
+	old := logonTimeLookup
+	logonTimeLookup = func() (time.Time, error) { return time.Now().Add(-59 * time.Second), nil }
+	defer func() { logonTimeLookup = old }()
+	settings := config.DefaultSettings()
+	settings.ManagedApps = []config.ManagedAppEntry{entry}
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	started := time.Now()
+	results := queueTestService().StartManagedApps(ctx, settings, nil)
+	if len(results) != 1 || results[0].Code != ResultStartedHidden {
+		t.Fatalf("remaining sign-in delay did not launch entry: %+v", results)
+	}
+	if elapsed := time.Since(started); elapsed < 800*time.Millisecond || elapsed > 3*time.Second {
+		t.Fatalf("remaining sign-in delay elapsed = %s, want about one second", elapsed)
+	}
+	queueProcessStart(t, entry)
+}
+
+func TestCurrentLogonTimeIsNotInFuture(t *testing.T) {
+	at, err := currentLogonTime()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if at.IsZero() || at.After(time.Now()) || at.Before(time.Now().Add(-365*24*time.Hour)) {
+		t.Fatalf("unexpected sign-in time: %s", at)
+	}
+}
+
 func TestStartupQueueZeroIntervalAndEmptyBatch(t *testing.T) {
 	settings := config.DefaultSettings()
 	settings.StartupIntervalSeconds = 0

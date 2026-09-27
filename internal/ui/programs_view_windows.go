@@ -5,9 +5,11 @@ package ui
 import (
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
+	"unsafe"
 
 	"github.com/lxn/walk"
 	"github.com/lxn/win"
@@ -17,19 +19,24 @@ import (
 	"wintray/internal/version"
 )
 
-// startMode is what happens to a program's window once it has started. Each
-// mode is one combination of the stored flags; a hidden launch takes
-// precedence over closing the window, as it does when programs are launched.
+// startMode is what happens to a program once it has started. Each mode is
+// one combination of the stored flags; a hidden launch takes precedence over
+// closing the window, as it does when programs are launched. The system
+// start mode is the exception: the program's own logon task launches it
+// outside WinTray, so no window handling of WinTray's applies to it.
 type startMode int
 
 const (
-	startNormal startMode = iota
-	startToTray
+	startToTray startMode = iota
 	startHidden
+	startTask
+	startNormal
 )
 
 func startModeOf(app config.ManagedAppEntry) startMode {
 	switch {
+	case app.LaunchViaLogonTask:
+		return startTask
 	case app.LaunchHiddenInBackground:
 		return startHidden
 	case app.TrayBehavior.AutoMinimizeAndHideOnLaunch:
@@ -40,14 +47,15 @@ func startModeOf(app config.ManagedAppEntry) startMode {
 }
 
 func (m startMode) applyTo(app *config.ManagedAppEntry) {
+	app.LaunchViaLogonTask = m == startTask
 	app.LaunchHiddenInBackground = m == startHidden
 	app.TrayBehavior.AutoMinimizeAndHideOnLaunch = m == startToTray
 }
 
 const (
-	programsListPaneWidth = 424
-	programsDetailWidth   = 523
-	programsDividerGap    = 14
+	programsListPaneMinWidth = 400
+	programsDetailWidth      = 523
+	programsDividerGap       = 14
 )
 
 // buildProgramsView lays out the page people open WinTray for: the programs
@@ -81,14 +89,10 @@ func (w *MainWindow) buildProgramsView() error {
 	if err = w.buildDetailPane(w.programsBody); err != nil {
 		return err
 	}
-	// Keep the list and editor at their reference widths even when nothing is
-	// selected. Both have a small, equal gap from the divider.
+	// The editor stays against the right content edge; the list takes any
+	// extra width when the user resizes the window.
 	layout := w.programsBody.Layout().(*walk.BoxLayout)
-	listPane.SetMinMaxSize(walk.Size{Width: programsListPaneWidth}, walk.Size{Width: programsListPaneWidth})
-	w.detailPane.SetMinMaxSize(walk.Size{Width: programsDetailWidth}, walk.Size{Width: programsDetailWidth})
-	// The editor is the reference layout. Keeping the full row width prevents
-	// the right pane from moving when selection changes or content is hidden.
-	layout.SetStretchFactor(listPane, 0)
+	layout.SetStretchFactor(listPane, 1)
 	layout.SetStretchFactor(w.detailPane, 0)
 	if err = w.buildEmptyState(view); err != nil {
 		return err
@@ -127,42 +131,6 @@ func (w *MainWindow) buildLogonNotice(parent walk.Container) error {
 	return err
 }
 
-func (w *MainWindow) buildTrayBoxToggle(parent walk.Container) error {
-	row, err := newRow(parent, 12)
-	if err != nil {
-		return err
-	}
-	w.trayBoxRow = row
-	if w.trayBoxTitle, err = newFieldLabel(row); err != nil {
-		return err
-	}
-	if w.trayBoxEnabled, err = walk.NewCheckBox(row); err != nil {
-		return err
-	}
-	w.trayBoxEnabled.CheckedChanged().Attach(func() {
-		if w.updatingEditor {
-			return
-		}
-		app, _, ok := w.selectedManagedApp()
-		if !ok || app.CollectTrayIcon == w.trayBoxEnabled.Checked() {
-			return
-		}
-		on := w.trayBoxEnabled.Checked()
-		if w.callbacks.OnToggleTrayBox != nil {
-			if toggleErr := w.callbacks.OnToggleTrayBox(app.ID, on); toggleErr != nil {
-				w.updatingEditor = true
-				w.trayBoxEnabled.SetChecked(app.CollectTrayIcon)
-				w.updatingEditor = false
-				walk.MsgBox(w.mw, i18n.For(w.settings.Language).TrayBoxFailedTitle, toggleErr.Error(), walk.MsgBoxIconWarning)
-			}
-			return
-		}
-		app.CollectTrayIcon = on
-		w.save()
-	})
-	return nil
-}
-
 func (w *MainWindow) buildListPane(parent walk.Container) (*walk.Composite, error) {
 	pane, err := newColumn(parent, 8)
 	if err != nil {
@@ -196,7 +164,7 @@ func (w *MainWindow) buildListPane(parent walk.Container) (*walk.Composite, erro
 	}
 	list.SetMinMaxSize(walk.Size{Width: 280, Height: 160}, walk.Size{})
 	list.SetColumnsOrderable(false)
-	if err = list.SetHeaderHidden(true); err != nil {
+	if err = list.SetHeaderHidden(false); err != nil {
 		return nil, err
 	}
 	list.SetGridlines(false)
@@ -207,10 +175,10 @@ func (w *MainWindow) buildListPane(parent walk.Container) (*walk.Composite, erro
 		return nil, err
 	}
 	list.SetCheckBoxes(true)
-	for _, width := range []int{220, 160} {
+	for _, width := range []int{170, 112, 145} {
 		column := walk.NewTableViewColumn()
 		column.SetWidth(width)
-		_ = column.SetAlignment(walk.AlignNear)
+		_ = column.SetAlignment(walk.AlignCenter)
 		if err = list.Columns().Add(column); err != nil {
 			return nil, err
 		}
@@ -220,18 +188,56 @@ func (w *MainWindow) buildListPane(parent walk.Container) (*walk.Composite, erro
 		return nil, err
 	}
 	w.managedListModel = model
+	if err = installTrayCheckColumn(list, model); err != nil {
+		return nil, err
+	}
 	list.CurrentIndexChanged().Attach(w.syncManagedEditor)
-	list.SizeChanged().Attach(w.resizeManagedColumns)
+	list.MouseUp().Attach(w.onManagedListMouseDown)
 	w.managedList = list
-	pane.SetMinMaxSize(walk.Size{Width: programsListPaneWidth}, walk.Size{Width: programsListPaneWidth})
+	pane.SetMinMaxSize(walk.Size{Width: programsListPaneMinWidth}, walk.Size{})
 	return pane, nil
 }
 
-func (w *MainWindow) resizeManagedColumns() {
-	// TableView column widths use logical pixels, as does ClientBounds. The
-	// name gets a little over half; the start mode fills the remainder.
-	width := w.managedList.ClientBounds().Width
-	w.managedList.Columns().At(0).SetWidth(max(150, width*56/100))
+// The TableView routes native list-view clicks through MouseUp.
+// Hit-test that child so the tray toggle belongs only to its own column.
+func (w *MainWindow) onManagedListMouseDown(x, y int, button walk.MouseButton) {
+	if button != walk.LeftButton {
+		return
+	}
+	var listView win.HWND
+	for child := win.GetWindow(w.managedList.Handle(), win.GW_CHILD); child != 0; child = win.GetWindow(child, win.GW_HWNDNEXT) {
+		var bounds win.RECT
+		if win.GetClientRect(child, &bounds) && bounds.Right > 0 {
+			listView = child
+			break
+		}
+	}
+	if listView == 0 {
+		return
+	}
+	hit := win.LVHITTESTINFO{Pt: win.POINT{X: int32(x), Y: int32(y)}}
+	win.SendMessage(listView, win.LVM_SUBITEMHITTEST, 0, uintptr(unsafe.Pointer(&hit)))
+	runtime.KeepAlive(&hit)
+	if hit.ISubItem != 1 || hit.IItem < 0 || hit.Flags&win.LVHT_ONITEM == 0 {
+		return
+	}
+	idx := int(hit.IItem)
+	if idx >= len(w.settings.ManagedApps) {
+		return
+	}
+	app := &w.settings.ManagedApps[idx]
+	if !strings.EqualFold(filepath.Ext(app.ExePath), ".exe") {
+		return
+	}
+	if w.callbacks.OnToggleTrayBox != nil {
+		if err := w.callbacks.OnToggleTrayBox(app.ID, !app.CollectTrayIcon); err != nil {
+			walk.MsgBox(w.mw, i18n.For(w.settings.Language).TrayBoxFailedTitle, err.Error(), walk.MsgBoxIconWarning)
+		}
+		return
+	}
+	app.CollectTrayIcon = !app.CollectTrayIcon
+	w.updateManagedRow(idx)
+	w.save()
 }
 
 func (w *MainWindow) buildDetailPane(parent walk.Container) error {
@@ -260,10 +266,7 @@ func (w *MainWindow) buildDetailPane(parent walk.Container) error {
 	if err = w.buildStartMode(w.editor); err != nil {
 		return err
 	}
-	if err = w.buildTrayBoxToggle(w.editor); err != nil {
-		return err
-	}
-	if err = w.buildCloseDelay(w.editor); err != nil {
+	if err = w.buildSchedule(w.editor); err != nil {
 		return err
 	}
 	if err = w.buildArguments(w.editor); err != nil {
@@ -357,8 +360,8 @@ func (w *MainWindow) buildIdentity(parent walk.Container) error {
 	return err
 }
 
-// buildStartMode offers the three start modes as one choice, described in
-// words below it, instead of check boxes that exclude each other.
+// buildStartMode offers the start modes as one choice, described in words
+// below it, instead of check boxes that exclude each other.
 func (w *MainWindow) buildStartMode(parent walk.Container) error {
 	block, err := newColumn(parent, fieldSpacing)
 	if err != nil {
@@ -373,7 +376,7 @@ func (w *MainWindow) buildStartMode(parent walk.Container) error {
 	}
 	// The buttons get a composite of their own: radio buttons form one group
 	// while they are adjacent siblings, and arrow keys then cycle through
-	// exactly these three.
+	// exactly these four.
 	choices, err := newRow(row, 24)
 	if err != nil {
 		return err
@@ -384,14 +387,19 @@ func (w *MainWindow) buildStartMode(parent walk.Container) error {
 	if w.modeHidden, err = w.newModeButton(choices, startHidden); err != nil {
 		return err
 	}
+	if w.modeTask, err = w.newModeButton(choices, startTask); err != nil {
+		return err
+	}
 	if w.modeNormal, err = w.newModeButton(choices, startNormal); err != nil {
 		return err
 	}
 	if _, err = walk.NewHSpacer(row); err != nil {
 		return err
 	}
-	w.modeHint, err = newWrappedHint(block)
-	return err
+	if w.modeHint, err = newWrappedHint(block); err != nil {
+		return err
+	}
+	return w.buildCloseDelay(block)
 }
 
 func (w *MainWindow) newModeButton(parent walk.Container, mode startMode) (*walk.RadioButton, error) {
@@ -407,18 +415,18 @@ func (w *MainWindow) newModeButton(parent walk.Container, mode startMode) (*walk
 	return button, nil
 }
 
-// buildCloseDelay is only shown for programs closed to the tray, the one mode
-// it applies to.
+// buildCloseDelay sits under the start modes and can only be edited for
+// programs closed to the tray, the one mode it applies to.
 func (w *MainWindow) buildCloseDelay(parent walk.Container) error {
 	var err error
-	if w.delayBlock, err = newColumn(parent, fieldSpacing); err != nil {
-		return err
-	}
-	if w.delayLabel, err = newFieldLabel(w.delayBlock); err != nil {
+	if w.delayBlock, err = newIndentedColumn(parent, optionIndent, fieldSpacing); err != nil {
 		return err
 	}
 	row, err := newRow(w.delayBlock, 8)
 	if err != nil {
+		return err
+	}
+	if w.delayLabel, err = newFieldLabel(row); err != nil {
 		return err
 	}
 	if w.delayEdit, w.delayUnit, err = newNumberEdit(row); err != nil {
@@ -456,6 +464,99 @@ func (w *MainWindow) buildCloseDelay(parent walk.Container) error {
 		w.save()
 	})
 	return nil
+}
+
+// optionIndent sets options that only apply with the setting above them in
+// from its left edge.
+const optionIndent = 20
+
+// buildSchedule offers a start delay after sign-in and a run time after which
+// the program is ended, both editable only once the schedule is switched on.
+func (w *MainWindow) buildSchedule(parent walk.Container) error {
+	block, err := newColumn(parent, fieldSpacing)
+	if err != nil {
+		return err
+	}
+	if w.scheduleRow, err = newRow(block, 12); err != nil {
+		return err
+	}
+	if w.scheduleEnabled, err = walk.NewCheckBox(w.scheduleRow); err != nil {
+		return err
+	}
+	if _, err = walk.NewHSpacer(w.scheduleRow); err != nil {
+		return err
+	}
+	w.scheduleEnabled.CheckedChanged().Attach(func() {
+		w.scheduleBlock.SetEnabled(w.scheduleEnabled.Checked())
+		if w.updatingEditor {
+			return
+		}
+		app, idx, ok := w.selectedManagedApp()
+		if !ok || app.Schedule.Enabled == w.scheduleEnabled.Checked() {
+			return
+		}
+		app.Schedule.Enabled = w.scheduleEnabled.Checked()
+		w.updateManagedRow(idx)
+		w.save()
+	})
+	if w.scheduleBlock, err = newIndentedColumn(block, optionIndent, fieldSpacing); err != nil {
+		return err
+	}
+	row, err := newRow(w.scheduleBlock, 8)
+	if err != nil {
+		return err
+	}
+	if w.scheduleStart, err = newHint(row); err != nil {
+		return err
+	}
+	if w.startDelayEdit, w.startDelayUnit, err = newNumberEdit(row); err != nil {
+		return err
+	}
+	if _, err = walk.NewHSpacerFixed(row, 16); err != nil {
+		return err
+	}
+	if w.scheduleExit, err = newHint(row); err != nil {
+		return err
+	}
+	if w.autoExitEdit, w.autoExitUnit, err = newNumberEdit(row); err != nil {
+		return err
+	}
+	if _, err = walk.NewHSpacer(row); err != nil {
+		return err
+	}
+	if w.scheduleHint, err = newWrappedHint(w.scheduleBlock); err != nil {
+		return err
+	}
+	w.attachScheduleMinutes(w.startDelayEdit, func(s *config.Schedule) *int { return &s.StartDelayMinutes })
+	w.attachScheduleMinutes(w.autoExitEdit, func(s *config.Schedule) *int { return &s.AutoExitMinutes })
+	return nil
+}
+
+// attachScheduleMinutes saves one scheduled time when its editor is left.
+func (w *MainWindow) attachScheduleMinutes(edit *walk.LineEdit, field func(*config.Schedule) *int) {
+	edit.EditingFinished().Attach(func() {
+		if w.updatingEditor {
+			return
+		}
+		app, idx, ok := w.selectedManagedApp()
+		if !ok {
+			return
+		}
+		stored := field(&app.Schedule)
+		v, convErr := strconv.Atoi(strings.TrimSpace(edit.Text()))
+		if convErr != nil {
+			walk.MsgBox(w.mw, w.mw.Title(), i18n.For(w.settings.Language).ManagedScheduleInvalid, walk.MsgBoxIconWarning)
+			v = *stored
+		}
+		v = config.ClampScheduleMinutes(v)
+		edit.SetText(strconv.Itoa(v))
+		if v == *stored {
+			return
+		}
+		*stored = v
+		w.updateManagedRow(idx)
+		w.save()
+	})
 }
 
 func (w *MainWindow) buildArguments(parent walk.Container) error {
@@ -591,9 +692,6 @@ func (w *MainWindow) buildFooter(parent walk.Container) error {
 func (w *MainWindow) applyProgramsLanguage(msg i18n.Messages) {
 	w.logonNoticeText.SetText(msg.LogonOffNotice)
 	w.enableLogonBtn.SetText(msg.LogonOffEnable)
-	w.trayBoxTitle.SetText(msg.TrayBoxHomeTitle)
-	w.trayBoxEnabled.SetToolTipText(msg.TrayBoxHomeHint)
-	_ = w.trayBoxEnabled.Accessibility().SetName(msg.TrayBoxHomeTitle)
 	w.managedTitle.SetText(msg.ManagedListTitle)
 	w.managedHint.SetText(msg.ManagedListHint)
 	for _, button := range []*walk.PushButton{w.addProgramBtn, w.emptyAddBtn} {
@@ -612,11 +710,21 @@ func (w *MainWindow) applyProgramsLanguage(msg i18n.Messages) {
 	w.modeLabel.SetText(msg.ManagedModeLabel)
 	w.modeTray.SetText(msg.ManagedAutoHide)
 	w.modeTray.SetToolTipText(msg.ManagedAutoHideTip)
+	w.modeTask.SetText(msg.ManagedTaskLaunch)
+	w.modeTask.SetToolTipText(msg.ManagedTaskLaunchTip)
 	w.modeNormal.SetText(msg.ManagedLaunchOnly)
 	w.modeHidden.SetText(msg.ManagedLaunchHidden)
 	w.delayLabel.SetText(msg.ManagedCloseDelay)
 	w.delayUnit.SetText(msg.SecondsUnit)
 	w.delayHint.SetText(msg.ManagedCloseDelayHint)
+	w.scheduleEnabled.SetText(msg.ManagedSchedule)
+	w.scheduleEnabled.SetToolTipText(msg.ManagedSchedule)
+	_ = w.scheduleEnabled.Accessibility().SetName(msg.ManagedSchedule)
+	w.scheduleStart.SetText(msg.ManagedScheduleStart)
+	w.startDelayUnit.SetText(msg.ManagedScheduleStartUnit)
+	w.scheduleExit.SetText(msg.ManagedScheduleExit)
+	w.autoExitUnit.SetText(msg.ManagedScheduleExitUnit)
+	w.scheduleHint.SetText(msg.ManagedScheduleHint)
 	w.argsLabel.SetText(msg.ManagedAppArgs)
 	w.argsHint.SetText(msg.ManagedArgsHint)
 	w.argsEdit.SetCueBanner(msg.ManagedArgsPlaceholder)
@@ -629,7 +737,8 @@ func (w *MainWindow) applyProgramsLanguage(msg i18n.Messages) {
 	w.silentBtn.SetToolTipText(msg.RunSilentlyHint)
 	w.exitBtn.SetText(msg.ExitApp)
 	w.managedList.Columns().At(0).SetTitle(msg.ManagedColumnName)
-	w.managedList.Columns().At(1).SetTitle(msg.ManagedColumnRule)
+	w.managedList.Columns().At(1).SetTitle(msg.TrayBoxHomeTitle)
+	w.managedList.Columns().At(2).SetTitle(msg.ManagedColumnRule)
 }
 
 func (w *MainWindow) onCheckUpdate() {
@@ -715,6 +824,7 @@ func (w *MainWindow) onAddProgram() {
 			RunOnStartup:             true,
 			LaunchHiddenInBackground: launchHiddenByDefault,
 			TrayBehavior:             config.TrayBehavior{AutoMinimizeAndHideOnLaunch: !launchHiddenByDefault},
+			Schedule:                 config.Schedule{AutoExitMinutes: config.DefaultAutoExitMinutes},
 		})
 	}
 	w.refreshManagedList()
@@ -826,18 +936,30 @@ func (w *MainWindow) showStartMode(mode startMode) {
 		w.modeHint.SetText(msg.ManagedAutoHideHint)
 	case startHidden:
 		w.modeHint.SetText(msg.ManagedLaunchHiddenHint)
+	case startTask:
+		w.modeHint.SetText(msg.ManagedTaskLaunchHint)
 	default:
 		w.modeHint.SetText(msg.ManagedLaunchOnlyHint)
 	}
-	w.delayBlock.SetVisible(mode == startToTray)
+	w.argsEdit.SetReadOnly(false)
+	if mode == startTask {
+		w.argsHint.SetText(msg.ManagedTaskArgsHint)
+		w.launchNowBtn.SetToolTipText(msg.ManagedTaskLaunchNowHint)
+	} else {
+		w.argsHint.SetText(msg.ManagedArgsHint)
+		w.launchNowBtn.SetToolTipText(msg.ManagedLaunchNowHint)
+	}
+	w.delayBlock.SetEnabled(mode == startToTray)
 }
 
 func (w *MainWindow) managedRow(app config.ManagedAppEntry) managedListRow {
 	return managedListRow{
-		Name:    app.Name,
-		Path:    app.ExePath,
-		Mode:    i18n.FormatManagedParam(w.settings.Language, app),
-		Enabled: app.RunOnStartup,
+		Name:       app.Name,
+		Path:       app.ExePath,
+		Mode:       i18n.FormatManagedParam(w.settings.Language, app),
+		Enabled:    app.RunOnStartup,
+		Collected:  app.CollectTrayIcon,
+		CanCollect: strings.EqualFold(filepath.Ext(app.ExePath), ".exe"),
 	}
 }
 
@@ -885,9 +1007,10 @@ func (w *MainWindow) syncManagedEditor() {
 
 	w.editor.SetEnabled(ok)
 	if ok {
-		w.trayBoxEnabled.SetEnabled(strings.EqualFold(filepath.Ext(app.ExePath), ".exe"))
+		isExe := strings.EqualFold(filepath.Ext(app.ExePath), ".exe")
+		w.modeTask.SetEnabled(isExe)
 	} else {
-		w.trayBoxEnabled.SetEnabled(false)
+		w.modeTask.SetEnabled(false)
 	}
 	w.browseLink.SetEnabled(ok)
 	w.browseLink.SetVisible(ok)
@@ -896,26 +1019,34 @@ func (w *MainWindow) syncManagedEditor() {
 		w.appName.SetText("")
 		w.appPath.SetText("")
 		w.appEnabled.SetChecked(false)
-		w.trayBoxEnabled.SetChecked(false)
 		w.modeTray.SetChecked(true)
 		w.modeNormal.SetChecked(false)
 		w.modeHidden.SetChecked(false)
+		w.modeTask.SetChecked(false)
 		w.showStartMode(startToTray)
 		w.argsEdit.SetText("")
 		w.delayEdit.SetText("0")
+		w.scheduleEnabled.SetChecked(false)
+		w.scheduleBlock.SetEnabled(false)
+		w.startDelayEdit.SetText("0")
+		w.autoExitEdit.SetText(strconv.Itoa(config.DefaultAutoExitMinutes))
 		return
 	}
 
 	w.appName.SetText(app.Name)
 	w.appPath.SetText(app.ExePath)
 	w.appEnabled.SetChecked(app.RunOnStartup)
-	w.trayBoxEnabled.SetChecked(app.CollectTrayIcon)
 	mode := startModeOf(*app)
 	w.modeTray.SetChecked(mode == startToTray)
 	w.modeNormal.SetChecked(mode == startNormal)
 	w.modeHidden.SetChecked(mode == startHidden)
+	w.modeTask.SetChecked(mode == startTask)
 	w.showStartMode(mode)
 	w.delayEdit.SetText(strconv.Itoa(app.TrayBehavior.CloseDelaySeconds))
+	w.scheduleEnabled.SetChecked(app.Schedule.Enabled)
+	w.scheduleBlock.SetEnabled(app.Schedule.Enabled)
+	w.startDelayEdit.SetText(strconv.Itoa(app.Schedule.StartDelayMinutes))
+	w.autoExitEdit.SetText(strconv.Itoa(app.Schedule.AutoExitMinutes))
 	w.argsEdit.SetText(app.Args)
 }
 

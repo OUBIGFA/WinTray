@@ -7,12 +7,11 @@ import (
 	"strings"
 
 	"wintray/internal/config"
-	"wintray/internal/traybox"
 )
 
-// traySelectionChange changes one managed program, but only changes the
-// system icon when no other selected entry still refers to that executable.
-func traySelectionChange(current config.Settings, id string, on bool) (config.Settings, string, bool, bool, error) {
+// traySelectionChange returns the settings with one program's tray icon
+// collected or released, without changing the settings passed in.
+func traySelectionChange(current config.Settings, id string, on bool) (config.Settings, error) {
 	next := current
 	next.ManagedApps = slices.Clone(current.ManagedApps)
 	for i := range next.ManagedApps {
@@ -21,13 +20,10 @@ func traySelectionChange(current config.Settings, id string, on bool) (config.Se
 			continue
 		}
 		if on && !strings.EqualFold(filepath.Ext(app.ExePath), ".exe") {
-			return current, "", false, false, fmt.Errorf("tray icon collection requires an .exe program")
+			return current, fmt.Errorf("tray icon collection requires an .exe program")
 		}
-		path := app.ExePath
-		wasSelected := traybox.Contains(config.CollectedTrayIconPaths(current), path)
 		app.CollectTrayIcon = on
-		isSelected := traybox.Contains(config.CollectedTrayIconPaths(next), path)
-		return next, path, wasSelected, isSelected, nil
+		return next, nil
 	}
-	return current, "", false, false, fmt.Errorf("program %q is no longer in the list", id)
+	return current, fmt.Errorf("program %q is no longer in the list", id)
 }

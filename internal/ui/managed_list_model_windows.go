@@ -5,10 +5,12 @@ package ui
 import "github.com/lxn/walk"
 
 type managedListRow struct {
-	Name    string
-	Path    string
-	Mode    string
-	Enabled bool
+	Name       string
+	Path       string
+	Mode       string
+	Enabled    bool
+	Collected  bool
+	CanCollect bool
 }
 
 // managedListTableModel shows each program with its own icon and a check box
@@ -35,6 +37,8 @@ func (m *managedListTableModel) Value(row, col int) any {
 	case 0:
 		return m.rows[row].Name
 	case 1:
+		return ""
+	case 2:
 		return m.rows[row].Mode
 	default:
 		return ""
@@ -66,7 +70,11 @@ func (m *managedListTableModel) Image(row int) any {
 }
 
 func (m *managedListTableModel) StyleCell(style *walk.CellStyle) {
-	if row := style.Row(); row >= 0 && row < len(m.rows) && !m.rows[row].Enabled {
+	row := style.Row()
+	if row < 0 || row >= len(m.rows) {
+		return
+	}
+	if !m.rows[row].Enabled {
 		style.TextColor = secondaryColor
 	}
 }

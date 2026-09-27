@@ -45,7 +45,7 @@ func TestTrayMenuActionsDoNotReopenMenu(t *testing.T) {
 
 	var opened, silent, exited atomic.Int32
 	var shown, popupCount atomic.Int32
-	box := traybox.NewBox("", func() []string { return nil })
+	box := traybox.NewBox("", nil)
 	controller, err := tray.New(w.Native(), func() {
 		opened.Add(1)
 		w.ShowMainWindow()
@@ -70,8 +70,10 @@ func TestTrayMenuActionsDoNotReopenMenu(t *testing.T) {
 
 	w.mw.Starting().Attach(func() {
 		go func() {
-			items := []uintptr{trayMenuOpenSettings, trayMenuRunSilently, trayMenuExit}
-			counts := []*atomic.Int32{&opened, &silent, &exited}
+			// The exit callback deliberately does not dispose the controller:
+			// a declined exit (for example a failed icon restore) must be retryable.
+			items := []uintptr{trayMenuOpenSettings, trayMenuRunSilently, trayMenuExit, trayMenuExit}
+			counts := []*atomic.Int32{&opened, &silent, &exited, &exited}
 			for i, item := range items {
 				win.PostMessage(hwnd, win.WM_APP, 0, win.WM_RBUTTONUP)
 				menu := waitForPopupMenu(uint32(os.Getpid()), 2*time.Second)
@@ -84,7 +86,11 @@ func TestTrayMenuActionsDoNotReopenMenu(t *testing.T) {
 					return
 				}
 				selectTrayMenuItem(menu, item)
-				if !waitForCount(counts[i], 1, 2*time.Second) {
+				want := int32(1)
+				if i == 3 {
+					want = 2
+				}
+				if !waitForCount(counts[i], want, 2*time.Second) {
 					reportTrayMenuFailure(failure, "tray action callback did not run", w)
 					return
 				}
@@ -106,8 +112,8 @@ func TestTrayMenuActionsDoNotReopenMenu(t *testing.T) {
 		t.Error(message)
 	default:
 	}
-	if opened.Load() != 1 || silent.Load() != 1 || exited.Load() != 1 {
-		t.Errorf("tray callbacks open=%d silent=%d exit=%d, want 1/1/1", opened.Load(), silent.Load(), exited.Load())
+	if opened.Load() != 1 || silent.Load() != 1 || exited.Load() != 2 {
+		t.Errorf("tray callbacks open=%d silent=%d exit=%d, want 1/1/2", opened.Load(), silent.Load(), exited.Load())
 	}
 	if shown.Load() == 0 {
 		t.Error("tray open settings did not show the settings window")

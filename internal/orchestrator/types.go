@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"time"
 
+	"wintray/internal/config"
 	"wintray/internal/startup"
 )
 
@@ -63,12 +64,16 @@ type Service struct {
 	// Instance-local probes keep tests isolated from the user's startup setup.
 	externalStartupLookup func(string) (string, error)
 	externalStartupWait   time.Duration
+	logonTaskLaunch       func(config.ManagedAppEntry) error
+	logonTaskLaunchWait   time.Duration
 }
 
 func NewService(enumerator WindowEnumerator, manager WindowManager, logger Logger) *Service {
 	return &Service{
 		enumerator: enumerator, manager: manager, logger: logger,
 		externalStartupLookup: startup.FindEnabledRunEntry,
+		logonTaskLaunch:       startup.LaunchAppTaskNow,
+		logonTaskLaunchWait:   30 * time.Second,
 		// WinTray's logon task runs before Explorer works through its Run
 		// queue one entry at a time, so a late entry may take minutes.
 		externalStartupWait: 300 * time.Second,

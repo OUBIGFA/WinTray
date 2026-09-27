@@ -3,57 +3,57 @@
 package tray
 
 import (
-	"bytes"
 	"image"
 	"image/color"
-	"image/png"
 	"testing"
 	"unsafe"
 
 	"github.com/lxn/win"
-	"wintray/internal/i18n"
 	"wintray/internal/traybox"
 )
 
 func TestCollectedIconsAreDirectMenuCommandsWithOwnBitmaps(t *testing.T) {
-	snapshot := func(c color.NRGBA) []byte {
+	solid := func(c color.NRGBA) *image.NRGBA {
 		img := image.NewNRGBA(image.Rect(0, 0, 16, 16))
 		for y := 0; y < 16; y++ {
 			for x := 0; x < 16; x++ {
 				img.SetNRGBA(x, y, c)
 			}
 		}
-		var data bytes.Buffer
-		if err := png.Encode(&data, img); err != nil {
-			t.Fatal(err)
-		}
-		return data.Bytes()
+		return img
 	}
-	view := traybox.View{Boxed: []traybox.Located{
-		{Icon: traybox.Icon{ExePath: `C:\Apps\One.exe`, Tooltip: "First", Snapshot: snapshot(color.NRGBA{R: 255, A: 255})}},
-		{Icon: traybox.Icon{ExePath: `C:\Apps\Two.exe`, Tooltip: "Second", Snapshot: snapshot(color.NRGBA{G: 255, A: 255})}},
-	}}
+	icons := []traybox.Icon{
+		{ExePath: `C:\Apps\One.exe`, Tooltip: "First", Image: solid(color.NRGBA{R: 255, A: 255})},
+		{ExePath: `C:\Apps\Two.exe`, Tooltip: "Second", Image: solid(color.NRGBA{G: 255, A: 255})},
+		// A program that has not set an image yet still gets an entry.
+		{ExePath: `C:\Apps\Three.exe`},
+	}
 	menu := win.CreatePopupMenu()
 	if menu == 0 {
 		t.Fatal("CreatePopupMenu failed")
 	}
 	defer win.DestroyMenu(menu)
-	bitmaps := new(Controller).appendBox(menu, view, i18n.For("en-US"))
+	bitmaps := appendBox(menu, icons)
 	defer func() {
 		for _, bitmap := range bitmaps {
 			win.DeleteObject(win.HGDIOBJ(bitmap))
 		}
 	}()
-	if len(bitmaps) != 2 || bitmaps[0] == 0 || bitmaps[1] == 0 || bitmaps[0] == bitmaps[1] {
+	if len(bitmaps) != 3 || bitmaps[2] != 0 || bitmaps[0] == 0 || bitmaps[1] == 0 || bitmaps[0] == bitmaps[1] {
 		t.Fatalf("program-specific icon bitmaps = %v", bitmaps)
 	}
-	if got := win.GetMenuItemCount(menu); got != 3 {
-		t.Fatalf("menu items = %d, want two direct commands and a separator", got)
+	if got := win.GetMenuItemCount(menu); got != 4 {
+		t.Fatalf("menu items = %d, want three direct commands and a separator", got)
 	}
-	for i, bitmap := range bitmaps {
-		info := win.MENUITEMINFO{CbSize: uint32(unsafe.Sizeof(win.MENUITEMINFO{})), FMask: win.MIIM_ID | win.MIIM_SUBMENU | win.MIIM_BITMAP}
-		if !win.GetMenuItemInfo(menu, uint32(i), win.BOOL(1), &info) || info.WID != uint32(trayBoxedBase+i) || info.HSubMenu != 0 || info.HbmpItem != bitmap {
+	want := []win.HBITMAP{bitmaps[0], bitmaps[1], 0}
+	for i := range icons {
+		info := win.MENUITEMINFO{CbSize: uint32(unsafe.Sizeof(win.MENUITEMINFO{})), FMask: win.MIIM_ID | win.MIIM_SUBMENU | win.MIIM_BITMAP | win.MIIM_STATE}
+		if !win.GetMenuItemInfo(menu, uint32(i), win.BOOL(1), &info) || info.WID != uint32(trayBoxedBase+i) || info.HSubMenu != 0 || info.HbmpItem != want[i] {
 			t.Errorf("entry %d is not a direct command with its own icon: %+v", i, info)
+		}
+		// None of these test icons registered a callback message.
+		if info.FState&win.MFS_DISABLED == 0 {
+			t.Errorf("entry %d without a callback message is enabled", i)
 		}
 	}
 }

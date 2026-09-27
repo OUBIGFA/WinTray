@@ -34,6 +34,9 @@ const (
 )
 
 func Run(args []string) int {
+	if code := runAppTaskHelper(args); code >= 0 {
+		return code
+	}
 	if isCleanupRestoreLaunch(args) {
 		if err := runCleanupRestoreHeadless(); err != nil {
 			return 1
@@ -88,11 +91,33 @@ func Run(args []string) int {
 
 	registrar := startup.NewRegistrar(appName)
 	logon := newLatestOnly(func(s config.Settings) { ensureRunAtLogon(registrar, s, logger) })
+	appTasks, appTasksErr := startup.NewAppTasks()
+	if appTasksErr != nil {
+		logger.Warn(fmt.Sprintf("program logon tasks unavailable: %v", appTasksErr))
+		appTasks = nil
+	}
+	if appTasks != nil {
+		appTasks.Log = logger.Info
+	}
+	appTaskWorker := newLatestOnly(func(r appTaskSyncRequest) { ensureAppTasks(appTasks, r, logger) })
 	// Let a registration change requested just before exit reach the system.
-	defer logon.Wait()
+	defer func() {
+		logon.Wait()
+		appTaskWorker.Wait()
+	}()
 	return runMainSession(args, settings, sessionServices{
 		store: store, logger: logger, activationName: activationEvent,
 		setRunAtLogon: logon.Request,
+		syncAppTasks: func(r appTaskSyncRequest) {
+			appTaskWorker.Request(r.snapshot())
+		},
+		restoreAppStartup: func() error {
+			appTaskWorker.Wait()
+			if appTasks == nil {
+				return appTasksErr
+			}
+			return appTasks.Sync(config.Settings{}, true)
+		},
 		removeLogon: func() error {
 			// Queued saves run first so none of them re-creates the task.
 			logon.Wait()
@@ -101,32 +126,35 @@ func Run(args []string) int {
 	})
 }
 
+// appTaskSyncRequest carries what one program-task reconciliation needs: the
+// settings to apply and whether it may ask for one elevated confirmation.
+type appTaskSyncRequest struct {
+	settings      config.Settings
+	allowElevated bool
+	onError       func(error)
+}
+
+func (r appTaskSyncRequest) snapshot() appTaskSyncRequest {
+	// The UI edits this slice in place while reconciliation runs in the
+	// background; a shallow Settings copy is not a stable startup request.
+	r.settings.ManagedApps = append([]config.ManagedAppEntry(nil), r.settings.ManagedApps...)
+	return r
+}
+
 type sessionServices struct {
-	store          *config.Store
-	logger         *logging.Logger
-	activationName string
-	setRunAtLogon  func(config.Settings)
-	removeLogon    func() error
+	store             *config.Store
+	logger            *logging.Logger
+	activationName    string
+	setRunAtLogon     func(config.Settings)
+	syncAppTasks      func(appTaskSyncRequest)
+	restoreAppStartup func() error
+	removeLogon       func() error
 }
 
 // runMainSession owns UI, startup workers and hosted icons for one instance.
 // Registry registration and data paths are supplied by the composition root.
 func runMainSession(args []string, settings config.Settings, services sessionServices) int {
 	store, logger := services.store, services.logger
-	if settings.TrayBoxEnabled || len(settings.TrayBoxApps) != 0 {
-		if err := traybox.RestorePaths(settings.TrayBoxApps); err != nil && !errors.Is(err, traybox.ErrUnsupported) {
-			logger.Error(fmt.Sprintf("restore legacy tray icon selections failed: %v", err))
-			emitFatalWithLog(settings.Language, "failed to migrate tray icon settings", err)
-			return 1
-		}
-		settings.TrayBoxEnabled = false
-		settings.TrayBoxApps = nil
-		if err := store.Save(settings); err != nil {
-			logger.Error(fmt.Sprintf("save migrated tray icon settings failed: %v", err))
-			emitFatalWithLog(settings.Language, "failed to save tray icon settings", err)
-			return 1
-		}
-	}
 	enumerator := orchestrator.NewWin32WindowEnumerator()
 	manager := orchestrator.NewWin32WindowManager()
 	orch := orchestrator.NewService(enumerator, manager, logger)
@@ -135,7 +163,8 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 	var trayController *tray.Controller
 	var mainWindow *ui.MainWindow
 	host := tray.NewHost(settings.Language, logger, orchestrator.FindConsoleWindow)
-	var box *traybox.Box
+	selfPath, _ := os.Executable()
+	box := traybox.NewBox(selfPath, logger)
 	state := residencyState{autorun: isAutorunLaunch(args), startupPending: isAutorunLaunch(args)}
 	state.settingsOpen = shouldShowMainWindowForSettings(args, settings)
 	quitting := false
@@ -144,12 +173,20 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 		launchWG.Wait()
 		host.RestoreAll()
 		trayController.Dispose()
+		if err := box.Close(); err != nil {
+			logger.Warn(fmt.Sprintf("restore collected tray icons on shutdown failed: %v", err))
+		}
 	}()
 
 	// Keep pumping UI messages while outstanding work is cancelled and hidden
 	// windows are recovered. Closing the message loop first loses hand-offs.
 	requestExit := func() {
 		if quitting {
+			return
+		}
+		if err := box.Close(); err != nil {
+			logger.Warn(fmt.Sprintf("restore collected tray icons before exit failed: %v", err))
+			mainWindow.ShowError(i18n.For(safeLanguage(mainWindow)).TrayBoxFailedTitle, err.Error())
 			return
 		}
 		quitting = true
@@ -179,12 +216,23 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 			requestExit()
 		}
 	}
-	selfPath, _ := os.Executable()
-	// These callbacks run on the UI thread, after mainWindow is created.
-	box = traybox.NewBox(selfPath, func() []string {
-		return config.CollectedTrayIconPaths(mainWindow.Settings())
-	})
 	host.SetOnEmpty(applyResidency)
+	// refreshRunLimits ends programs past their scheduled run time and keeps
+	// WinTray while others still have to be ended. It returns when to look
+	// again.
+	refreshRunLimits := func() time.Duration {
+		wait := runLimitPoll
+		if quitting || mainWindow == nil {
+			return wait
+		}
+		check := orch.EndOverduePrograms(mainWindow.Settings().ManagedApps, time.Now())
+		state.runLimitsPending = check.Running > 0
+		if !check.Next.IsZero() {
+			wait = min(wait, max(time.Until(check.Next), time.Second))
+		}
+		applyResidency()
+		return wait
+	}
 	openSettings := func() {
 		if quitting {
 			return
@@ -274,13 +322,22 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 			return
 		}
 
-		if resetErr := resetSettings(store, box.Release); resetErr != nil {
+		// Restore migrated startup states before any backup/settings data can
+		// be erased. A failed restore must leave the recovery journal intact.
+		if services.restoreAppStartup != nil {
+			if restoreErr := services.restoreAppStartup(); restoreErr != nil {
+				mainWindow.ShowError(m.CleanupFailedTitle, fmt.Sprintf(m.CleanupFailedBody, restoreErr))
+				return
+			}
+		}
+		if resetErr := resetSettings(store, func() error { return box.SetPaths(nil) }); resetErr != nil {
 			logger.Warn(fmt.Sprintf("reset settings failed: %v", resetErr))
 			mainWindow.ShowError(m.CleanupFailedTitle, fmt.Sprintf(m.CleanupFailedBody, resetErr))
 			return
 		}
 
-		services.setRunAtLogon(config.DefaultSettings())
+		services.setRunAtLogon(config.Settings{RunAtLogon: false})
+		services.syncAppTasks(appTaskSyncRequest{settings: config.Settings{}, allowElevated: true})
 		if scheduleErr := scheduleAppDataCleanupOnExit(); scheduleErr != nil {
 			mainWindow.ShowError(m.CleanupFailedTitle, fmt.Sprintf(m.CleanupFailedBody, scheduleErr))
 			return
@@ -319,8 +376,19 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 		OnSave: func(s config.Settings) {
 			if saveErr := store.Save(s); saveErr != nil {
 				logger.Warn(fmt.Sprintf("save settings failed: %v", saveErr))
+				mainWindow.ShowError(i18n.For(s.Language).WindowTitle, saveErr.Error())
+				return // do not migrate system startup from unpersisted settings
 			}
 			services.setRunAtLogon(s)
+			// A task change made in the UI may ask for one elevated
+			// confirmation; the background sync at startup never does.
+			services.syncAppTasks(appTaskSyncRequest{
+				settings: s, allowElevated: true,
+				onError: func(err error) {
+					m := i18n.For(s.Language)
+					mainWindow.ShowError(m.ManagedTaskFailedTitle, fmt.Sprintf(m.ManagedTaskFailedBody, err))
+				},
+			})
 			if trayController != nil {
 				trayController.SetLanguage(s.Language)
 			}
@@ -329,22 +397,24 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 		},
 		OnToggleTrayBox: func(id string, on bool) error {
 			before := mainWindow.Settings()
-			next, path, wasSelected, isSelected, err := traySelectionChange(before, id, on)
+			next, err := traySelectionChange(before, id, on)
 			if err != nil {
 				return err
 			}
-			commit := func() error {
-				if err := store.Save(next); err != nil {
-					return err
+			// Collect or release the icons first; a failed save hands the
+			// previous selection back to the box.
+			if err := box.SetPaths(config.CollectedTrayIconPaths(next)); err != nil {
+				return err
+			}
+			if err := store.Save(next); err != nil {
+				if restoreErr := box.SetPaths(config.CollectedTrayIconPaths(before)); restoreErr != nil {
+					logger.Warn(fmt.Sprintf("restore tray box selection failed: %v", restoreErr))
 				}
-				mainWindow.SetCollectedTrayIcon(id, on)
-				applyResidency()
-				return nil
+				return err
 			}
-			if wasSelected == isSelected {
-				return commit()
-			}
-			return box.SetSelected(path, isSelected, commit)
+			mainWindow.SetCollectedTrayIcon(id, on)
+			applyResidency()
+			return nil
 		},
 		OnOpenLogs: func() {
 			if openErr := openLogLocation(); openErr != nil {
@@ -445,9 +515,14 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 	}
 
 	services.setRunAtLogon(settings)
+	// Heal program tasks without prompting: a task missing an elevated
+	// confirmation waits for the next save, which is allowed to ask for one.
+	services.syncAppTasks(appTaskSyncRequest{settings: settings, allowElevated: false})
 
-	if applyErr := box.Apply(); applyErr != nil && !errors.Is(applyErr, traybox.ErrUnsupported) {
-		logger.Warn(fmt.Sprintf("hide boxed tray icons failed: %v", applyErr))
+	// Collect icons before programs are launched, so their icons never
+	// appear on the taskbar.
+	if boxErr := box.SetPaths(config.CollectedTrayIconPaths(settings)); boxErr != nil {
+		logger.Warn(fmt.Sprintf("collect tray icons failed: %v", boxErr))
 	}
 
 	createTray := func() error {
@@ -503,13 +578,44 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 				mainWindow.Synchronize(func() {
 					state.startupPending = false
 					mainWindow.SetLaunchNowBusy(false)
-					applyResidency()
+					// Programs just started may have a run time to wait for.
+					refreshRunLimits()
 				})
 			}()
 		})
 	}
 
+	launchWG.Add(1)
+	go func() {
+		defer launchWG.Done()
+		wait := time.Duration(0)
+		for waitContext(launchCtx, wait) {
+			next := make(chan time.Duration, 1)
+			mainWindow.Synchronize(func() { next <- refreshRunLimits() })
+			select {
+			case wait = <-next:
+			case <-launchCtx.Done():
+				return
+			}
+		}
+	}()
+
 	return mainWindow.Run()
+}
+
+// runLimitPoll is how often running programs are checked against their
+// scheduled run time when none is due sooner.
+const runLimitPoll = 30 * time.Second
+
+func waitContext(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
 }
 
 // runManagedApps hands hidden windows to their hosts as soon as each task
@@ -609,6 +715,68 @@ func ensureRunAtLogon(registrar *startup.Registrar, settings config.Settings, lo
 	}
 }
 
+// ensureAppTasks reconciles the per-program logon tasks with the settings of
+// one request. Failures land in the log; a declined elevation keeps the task
+// missing until the next save asks again.
+func ensureAppTasks(tasks *startup.AppTasks, request appTaskSyncRequest, logger *logging.Logger) {
+	var err error
+	if tasks == nil {
+		err = errors.New("program logon tasks are unavailable")
+	} else {
+		err = tasks.Sync(request.settings, request.allowElevated)
+	}
+	if err != nil {
+		logger.Warn(fmt.Sprintf("program logon tasks sync: %v", err))
+		if request.onError != nil {
+			request.onError(err)
+		}
+	}
+}
+
+// runAppTaskHelper runs the elevated one-shot instances that register or
+// remove one program task after the user has confirmed an elevation prompt.
+// It reports -1 when args belong to none of them.
+func runAppTaskHelper(args []string) int {
+	switch {
+	case len(args) == 3 && args[0] == startup.AppTaskHelperRegister:
+		if err := startup.RegisterAppTaskHeadless(args[1], args[2]); err != nil {
+			return 1
+		}
+		return 0
+	case len(args) == 3 && args[0] == startup.AppTaskHelperRun:
+		if err := startup.LaunchStartupRun(args[1], args[2]); err != nil {
+			logStartupHelperFailure(err)
+			return 1
+		}
+		return 0
+	case len(args) == 3 && args[0] == startup.AppTaskHelperShortcut:
+		if err := startup.LaunchStartupShortcut(args[1], args[2]); err != nil {
+			logStartupHelperFailure(err)
+			return 1
+		}
+		return 0
+	case len(args) == 2 && args[0] == startup.AppTaskHelperDelete:
+		if err := startup.DeleteAppTaskHeadless(args[1]); err != nil {
+			return 1
+		}
+		return 0
+	}
+	return -1
+}
+
+func logStartupHelperFailure(cause error) {
+	dir, err := config.AppDirWithError()
+	if err != nil {
+		return
+	}
+	logger, err := logging.New(dir)
+	if err != nil {
+		return
+	}
+	defer logger.Close()
+	logger.Error(fmt.Sprintf("original startup helper failed: %v", cause))
+}
+
 func scheduleAppDataCleanupOnExit() error {
 	exePath, err := os.Executable()
 	if err != nil {
@@ -629,6 +797,24 @@ func runCleanupRestoreHeadless() error {
 		return err
 	}
 
+	return cleanupAppDataAfterRestore(appDir, func() error {
+		tasks, err := startup.NewAppTasks()
+		if err != nil {
+			return err
+		}
+		// The UI already requested any needed elevation before spawning us.
+		// A direct headless cleanup must fail safely rather than lose backups.
+		if err := tasks.Sync(config.Settings{}, false); err != nil {
+			return err
+		}
+		return startup.NewRegistrar(appName).Remove()
+	})
+}
+
+func cleanupAppDataAfterRestore(appDir string, restore func() error) error {
+	if err := restore(); err != nil {
+		return err
+	}
 	for attempt := 0; attempt < 30; attempt++ {
 		removeErr := os.RemoveAll(appDir)
 		if removeErr == nil {

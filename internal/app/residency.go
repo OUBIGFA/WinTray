@@ -20,6 +20,9 @@ type residencyState struct {
 	// silent is set when the user chooses background mode explicitly. It
 	// keeps hosted icons alive like the logon exit option, in any launch mode.
 	silent bool
+	// runLimitsPending is set while a program with a scheduled run time is
+	// running: only WinTray ends it, so WinTray stays until then.
+	runLimitsPending bool
 }
 
 func (s residencyState) hideMainIcon(exitAfterCompleted bool) bool {
@@ -27,5 +30,5 @@ func (s residencyState) hideMainIcon(exitAfterCompleted bool) bool {
 }
 
 func (s residencyState) shouldExit(exitAfterCompleted bool, hostedCount int) bool {
-	return s.hideMainIcon(exitAfterCompleted) && !s.startupPending && s.manualLaunches == 0 && hostedCount == 0
+	return s.hideMainIcon(exitAfterCompleted) && !s.startupPending && !s.runLimitsPending && s.manualLaunches == 0 && hostedCount == 0
 }

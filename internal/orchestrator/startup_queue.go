@@ -2,11 +2,26 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
 	"wintray/internal/config"
 )
+
+// logonTaskWaitMargin pads the wait for a task-launched program beyond its
+// scheduled delay, covering slow process creation. When the program is due
+// is the task's decision, not WinTray's. A variable so tests can shorten it.
+var logonTaskWaitMargin = 120 * time.Second
+
+// queuedStart carries one entry's launch decision made ahead of its turn.
+// A scheduled entry waits for its start delay outside the queue, so it holds
+// no turn from the programs behind it.
+type queuedStart struct {
+	entry        config.ManagedAppEntry
+	externalWait time.Duration
+	startDelay   time.Duration
+}
 
 // startupSequence owns the launch clock for one autorun batch. Only one task
 // may decide or perform a launch at a time; window handling continues in the
@@ -14,19 +29,30 @@ import (
 type startupSequence struct {
 	interval   time.Duration
 	nextLaunch time.Time
+	gate       chan struct{}
 }
 
 type startupTurn struct {
 	sequence *startupSequence
 	done     chan struct{}
 	once     sync.Once
+	acquired bool
 }
 
 func (t *startupTurn) wait(ctx context.Context) bool {
 	if ctx.Err() != nil {
 		return false
 	}
-	return t == nil || waitWithContext(ctx, time.Until(t.sequence.nextLaunch))
+	if t == nil {
+		return true
+	}
+	select {
+	case t.sequence.gate <- struct{}{}:
+		t.acquired = true
+	case <-ctx.Done():
+		return false
+	}
+	return waitWithContext(ctx, time.Until(t.sequence.nextLaunch))
 }
 
 // finish releases the next task, not the next window action. Failed/skipped
@@ -37,8 +63,11 @@ func (t *startupTurn) finish(started bool) {
 		return
 	}
 	t.once.Do(func() {
-		if started {
+		if started && t.acquired {
 			t.sequence.nextLaunch = time.Now().Add(t.sequence.interval)
+		}
+		if t.acquired {
+			<-t.sequence.gate
 		}
 		close(t.done)
 	})
@@ -51,29 +80,74 @@ func (t *startupTurn) finish(started bool) {
 // onResult is called concurrently as tasks finish, before the batch returns;
 // callers can hand hidden windows to a tray host immediately.
 func (s *Service) StartManagedApps(ctx context.Context, settings config.Settings, onResult func(config.ManagedAppEntry, Result)) []Result {
-	entries := make([]config.ManagedAppEntry, 0, len(settings.ManagedApps))
+	entries := make([]queuedStart, 0, len(settings.ManagedApps))
+	taskIndex := 0
 	for _, entry := range settings.ManagedApps {
-		if config.ShouldLaunchViaWinTray(entry) {
-			entries = append(entries, entry)
+		if !config.ShouldLaunchViaWinTray(entry) {
+			continue
 		}
+		queued := queuedStart{entry: entry}
+		if entry.LaunchViaLogonTask {
+			// Task Scheduler starts it at the delay the task was registered
+			// with (config.LogonTaskApps); the wait only needs to cover that
+			// delay plus a margin.
+			delay := max(config.LogonTaskDelaySeconds(taskIndex, settings.StartupIntervalSeconds), config.ScheduledStartDelaySeconds(entry))
+			taskIndex++
+			queued.externalWait = time.Duration(delay)*time.Second + logonTaskWaitMargin
+		} else {
+			queued.startDelay = time.Duration(config.ScheduledStartDelaySeconds(entry)) * time.Second
+		}
+		entries = append(entries, queued)
 	}
 	sequence := &startupSequence{
 		interval: time.Duration(config.ClampStartupIntervalSeconds(settings.StartupIntervalSeconds)) * time.Second,
+		gate:     make(chan struct{}, 1),
 	}
 	s.logger.Info("managed startup queue: interval=" + sequence.interval.String())
 	results := make([]Result, len(entries))
 	var wg sync.WaitGroup
-	for i, entry := range entries {
+	begin := time.Now()
+	for _, queued := range entries {
+		if queued.startDelay > 0 {
+			if logon, err := logonTimeLookup(); err == nil {
+				begin = logon
+			} else {
+				s.logger.Warn(fmt.Sprintf("sign-in time unavailable, using WinTray start for schedules: %v", err))
+			}
+			break
+		}
+	}
+	for i, queued := range entries {
+		if queued.startDelay > 0 {
+			turn := &startupTurn{sequence: sequence, done: make(chan struct{})}
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				s.logger.Info(fmt.Sprintf("scheduled start: %s in %s", queued.entry.Name, queued.startDelay))
+				result := cancelledResult(queued.entry)
+				if waitWithContext(ctx, time.Until(begin.Add(queued.startDelay))) {
+					opts := managedStartOptions(queued.entry)
+					opts.turn = turn
+					result = s.start(ctx, queued.entry, settings.CloseWindowRetrySeconds, opts)
+				}
+				results[i] = result
+				if onResult != nil {
+					onResult(queued.entry, result)
+				}
+			}()
+			continue
+		}
 		turn := &startupTurn{sequence: sequence, done: make(chan struct{})}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			opts := managedStartOptions(entry)
+			opts := managedStartOptions(queued.entry)
 			opts.turn = turn
-			result := s.start(ctx, entry, settings.CloseWindowRetrySeconds, opts)
+			opts.externalWait = queued.externalWait
+			result := s.start(ctx, queued.entry, settings.CloseWindowRetrySeconds, opts)
 			results[i] = result
 			if onResult != nil {
-				onResult(entry, result)
+				onResult(queued.entry, result)
 			}
 		}()
 		<-turn.done

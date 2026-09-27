@@ -37,6 +37,7 @@ Core use cases:
 - **Managed Program List**: Maintain any number of programs, each with independent behavior configuration
 - **Auto Start**: Registers a per-user logon task that starts WinTray right after sign-in; no administrator rights needed
 - **Close to Tray**: When configured in the program list, the sign-in task closes the target window while the program keeps running in the tray
+- **System Start**: Changes only the sign-in trigger, preserving original startup arguments, silent behavior and privileges; reuses existing logon tasks instead of launching twice
 - **Wait for a Window**: 0–120 seconds, for slow-starting programs whose window shows up late
 - **Wait Before Closing**: Each program can run for a set number of seconds before its window is closed, to skip login dialogs and other pre-launch popups (such as the new QQ)
 - **Staggered Startup**: Launch programs in list order, 3 seconds apart by default; adjust the interval from 0–120 seconds in Global Settings to reduce competing startup workloads
@@ -52,8 +53,8 @@ WinTray is **portable only** — no installation needed.
 
 Go to the [Releases](../../releases) page, download the latest `WinTray-Portable.zip`, extract it, and run `WinTray.exe` directly.
 
-- Configuration and logs are stored in `%LOCALAPPDATA%\WinTray\` with no registry dependencies
-- Exit WinTray first, then delete the folder to remove it completely
+- Configuration, logs and original-startup recovery backups are stored in `%LOCALAPPDATA%\WinTray\`
+- Before removing WinTray, use **Reset** in Settings to restore migrated startup states and remove WinTray tasks, then delete the program folder; do not delete a data directory that still contains recovery backups
 
 ---
 
@@ -68,22 +69,40 @@ WinTray supports adding the following program types to the managed list, automat
 | PowerShell script | `.ps1`          | Runs in the background by default                                             |
 | Python script     | `.py` / `.pyw`  | Runs in the background by default, invokes `python.exe` / `pythonw.exe`        |
 
-> Non-`.exe` scripts (`.bat` / `.cmd` / `.ps1` / `.py` / `.pyw`) default to "Run in background" when added and cannot use "Close to tray".
+> Non-`.exe` scripts (`.bat` / `.cmd` / `.ps1` / `.py` / `.pyw`) default to "Run in background" when added and cannot use "Close to tray" or "Launch at boot".
 
 > **Note:** Some applications contain multiple `.exe` files (launchers, updaters, etc.); pick the one that owns the main window, or "Close to tray" won't take effect.
 
 ### Per-Program Configuration Options
 
-- **How it starts**: **Start normally** (just starts the program, window untouched) / **Close to tray** (closes the main window after launch, the program keeps running in the tray) / **Run in background** (no window at all, best for scripts and command-line tools)
+- **How it starts**: **Launch at boot** (changes only the original sign-in trigger, preserving arguments, silent behavior and privileges; reuses existing tasks, and asks once when creating an elevated task) / **Start normally** (just starts the program, window untouched) / **Close to tray** (closes the main window after launch, the program keeps running in the tray) / **Run in background** (no window at all, best for scripts and command-line tools)
 - **Wait before closing**: Available with "Close to tray", 0–600 seconds — the window is closed only after the program has been running that long, skipping sign-in windows (10–15 seconds for the new QQ). Covers instances started by the program's own auto-start too
-- **Arguments**: Command-line arguments passed to the program
-- **Start this program at sign-in**: Uncheck it to pause the program, which is then skipped at sign-in; "Launch Now" remains available
+- **Arguments**: Arguments for normal/background/close-to-tray launches; launch at boot uses the original entry's arguments instead of overriding them with this field
+- **Start this program at sign-in**: Unchecking stops WinTray's launch scheduling; the program's own startup remains or is restored
 
 > Console programs without a tray icon of their own (such as `syncthing.exe` or `frpc.exe`) get a WinTray-hosted tray icon instead: left-click shows/hides the window, and the context menu can show, hide, stop hosting or quit the program.
 
+### System Start: Preserve Original Startup Settings
+
+- **Existing native logon task**: Reuse its actions, arguments, working directory, privileges, delay and conditions without creating another task. Karing's `Karing Autorun`, for example, already uses fast logon startup; legacy duplicate WinTray tasks are removed.
+- **User startup entries**: Supports `HKCU\Run` and `.lnk` files in the current user's Startup folder. Original values/files remain intact; a recoverable enable-state change prevents duplicate launches. A short-lived, headless WinTray helper opens the original entry, preserving application-controlled argument changes and shortcut working directory, show mode and administrator flags. The application's own startup option does not need to be turned off.
+- **Timing**: New tasks bypass Explorer's normal startup queue, with a 10-second base delay plus the list position multiplied by the global interval. Existing tasks retain their own delay and are not rescheduled.
+- **Privileges and safety**: Ordinary tasks need no elevation; creating an elevated task asks for confirmation. Missing, disabled, ambiguous or shared machine-wide entries produce an error rather than guessed silent flags, bare-executable fallback or blanket elevation. Use "Start normally" for programs without an original startup entry.
+- **Undo and test**: Switching modes, pausing/removing an entry or turning off WinTray startup removes its replacement task and restores only the original enable states it changed. Native application tasks are never deleted. "Launch Now" runs the same registered task after a successful save and does not relaunch or reveal an already running program.
+- **Recovery**: `startup-migrations.json` is saved before migration. Failures trigger rollback; unfinished restoration retains the backup and reports the cause. Later user changes to enable states are not overwritten.
+
 ### Collect Tray Icons
 
-Check "Collect tray icon" in a program's editor, below "How it starts", and its tray icon moves into WinTray's right-click menu, shown with its own icon and name; click the entry to open the program. Uncheck to restore. Requires Windows 11.
+Check the program's box in the list's **Tray icon** column to move its existing tray icons into WinTray's right-click menu. Requires Windows 11 and an `.exe` program.
+
+- Collected icons disappear from both the taskbar and the `^` hidden-icons flyout
+- The menu uses the program's current tray icon and tooltip name; changes such as online status appear the next time you open the menu
+- Left-click an entry to click the original icon; right-click it to open the program's own tray menu, with behavior determined by that program
+- Uncheck the option or exit WinTray normally to restore the original icons; while collecting icons, WinTray stays running and keeps its own tray icon available
+
+### Custom Timing
+
+Check **Custom timing** in the program editor to delay its launch by **0–1440 minutes** after sign-in (default **0**) and end it and its child processes after **0–1440 minutes** of running (default **30**). Set the exit time to **0** to leave it running. Both values are ignored while Custom timing is unchecked.
 
 ### Staggered Startup
 
@@ -99,6 +118,7 @@ The global **Delay between programs** sets the minimum gap between launches: **3
 | Tunnel scripts (frpc / SSH) running in background at startup | Add `.bat` / `.ps1`, set "Run in background"              |
 | Python crawler/service starting silently in background       | Add `.py`, set "Run in background"                        |
 | Auto-start only, no window handling                          | Add program, keep "Start normally"                        |
+| Administrator tools starting fast at sign-in                 | Add the `.exe`, set "How it starts" to "Launch at boot"     |
 
 ---
 
@@ -119,6 +139,7 @@ The source and release package support Windows only; cross-platform builds are n
 | Type          | Path                                   |
 | ------------- | -------------------------------------- |
 | Configuration | `%LOCALAPPDATA%\WinTray\settings.json` |
+| Startup recovery | `%LOCALAPPDATA%\WinTray\startup-migrations.json` |
 | Logs          | `%LOCALAPPDATA%\WinTray\wintray.log`   |
 
 ---
@@ -129,7 +150,7 @@ The source and release package support Windows only; cross-platform builds are n
 | ------------------- | ---------------------------------------------------------------- |
 | `--background`      | Start without showing the main window (used for auto-start)      |
 | `--autorun`         | Run the startup programs list (used by auto-start)               |
-| `--cleanup-restore` | Clear `%LOCALAPPDATA%\WinTray\` and exit                         |
+| `--cleanup-restore` | Restore original startup and remove WinTray tasks/data; prefer the Settings action |
 | `--host`            | Compatibility with older callers only; not needed by new launches |
 
 **Exit WinTray when sign-in tasks finish** (optional, in Settings): exits once the tasks are done; while tray icons are still in use it waits, and exits after the last one ends.
@@ -158,7 +179,7 @@ With "Exit WinTray when sign-in tasks finish" unchecked, WinTray keeps its own t
 A: Right-click WinTray's tray icon and select "Open WinTray", or run `WinTray.exe` again.
 
 **Q: How do I disable auto-start after it's been enabled?**
-A: Turn off "Run WinTray at sign-in" in the settings page; the logon task and registry entry are removed automatically.
+A: Turn off "Run WinTray at sign-in" in Settings. WinTray's task/startup entry and replacement program tasks are removed; applications' original startup remains or is restored, not disabled together with WinTray.
 
 **Q: The new QQ doesn't minimize to the tray; instead the login fails or QQ quits.**
 A: The new QQ shows a login window first and quits if it is closed too early. Set "Wait before closing" longer than the whole login (auto-login usually takes 15–30 seconds).
