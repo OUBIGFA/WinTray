@@ -84,29 +84,32 @@ WinTray supports adding the following program types to the managed list, automat
 
 ### System Start: Preserve Original Startup Settings
 
-- **Existing native logon task**: Reuse its actions, arguments, working directory, privileges, delay and conditions without creating another task. Karing's `Karing Autorun`, for example, already uses fast logon startup; legacy duplicate WinTray tasks are removed.
-- **User startup entries**: Supports `HKCU\Run` and `.lnk` files in the current user's Startup folder. Original values/files remain intact; a recoverable enable-state change prevents duplicate launches. A short-lived, headless WinTray helper opens the original entry, preserving application-controlled argument changes and shortcut working directory, show mode and administrator flags. The application's own startup option does not need to be turned off.
-- **Timing**: New tasks bypass Explorer's normal startup queue, with a 10-second base delay plus the list position multiplied by the global interval. Existing tasks retain their own delay and are not rescheduled.
-- **Privileges and safety**: Ordinary tasks need no elevation; creating an elevated task asks for confirmation. Missing, disabled, ambiguous or shared machine-wide entries produce an error rather than guessed silent flags, bare-executable fallback or blanket elevation. Use "Start normally" for programs without an original startup entry.
-- **Undo and test**: Switching modes, pausing/removing an entry or turning off WinTray startup removes its replacement task and restores only the original enable states it changed. Native application tasks are never deleted. "Launch Now" runs the same registered task after a successful save and does not relaunch or reveal an already running program.
-- **Recovery**: `startup-migrations.json` is saved before migration. Failures trigger rollback; unfinished restoration retains the backup and reports the cause. Later user changes to enable states are not overwritten.
+Only the startup trigger is replaced; the program's own startup configuration is left untouched.
+
+- **Reuse existing tasks**: The original logon task keeps its actions, arguments, working directory, privileges, delay and conditions — no second task is created (e.g. Karing's `Karing Autorun`). Duplicate tasks left by older WinTray versions are removed.
+- **User-level startup entries**: `HKCU\Run` and `.lnk` files in the Startup folder are supported. Original registry values and shortcuts stay intact; only a recoverable enable state is toggled to prevent double launches, so the program's own startup option can stay on.
+- **Timing**: New tasks bypass Explorer's startup queue, waiting 10 seconds after sign-in plus the list position times the global interval. Existing tasks keep their own delay.
+- **Privileges**: Ordinary tasks need no elevation; creating an elevated task asks once for confirmation.
+- **Errors instead of guesses**: Missing, disabled, ambiguous or machine-wide shared entries report an error rather than guessed silent flags, a bare-executable fallback or blanket elevation. Use "Start normally" for such programs.
+- **Undo**: Switching modes, pausing, removing an entry or turning off WinTray startup deletes the replacement task and restores only the enable states WinTray changed; the program's own task is never touched. "Launch Now" runs the same registered task (after a successful save) and does nothing if the program is already running.
+- **Rollback**: `startup-migrations.json` is saved before migration; on failure WinTray rolls back, keeps the backup and reports the cause, without overwriting later user changes.
 
 ### Collect Tray Icons
 
-Check the program's box in the list's **Tray icon** column to move its existing tray icons into WinTray's right-click menu. Requires Windows 11 and an `.exe` program.
+Check **Tray icon** in the program list to move the program's existing tray icons into WinTray's right-click menu. Requires Windows 11 and an `.exe` program.
 
-- Collected icons disappear from both the taskbar and the `^` hidden-icons flyout
-- The menu uses the program's current tray icon and tooltip name; changes such as online status appear the next time you open the menu
-- Left-click an entry to click the original icon; right-click it to open the program's own tray menu, with behavior determined by that program
-- Uncheck the option or exit WinTray normally to restore the original icons; while collecting icons, WinTray stays running and keeps its own tray icon available
+- The original icons disappear from the taskbar and the `^` hidden-icons flyout
+- Entries use the program's current icon and tooltip; status changes appear the next time you open the menu
+- Left-click acts as clicking the original icon; right-click opens the program's own tray menu (behavior set by that program)
+- Unchecking the option or exiting WinTray normally restores the icons; WinTray stays running while collecting so they remain reachable
 
 ### Custom Timing
 
-Check **Custom timing** in the program editor to delay its launch by **0–1440 minutes** after sign-in (default **0**) and end it and its child processes after **0–1440 minutes** of running (default **30**). Set the exit time to **0** to leave it running. Both values are ignored while Custom timing is unchecked.
+Check **Custom timing** to set two values: a **0–1440 minute** delay after sign-in (default **0**) and an auto-exit **0–1440 minutes** after launch that also ends child processes (default **30**; **0** disables it). Both are ignored while unchecked.
 
 ### Staggered Startup
 
-The global **Delay between programs** sets the minimum gap between launches: **3 seconds** by default, configurable from **0–120 seconds**. Launches follow list order, and "Launch Now" is unaffected.
+The global **Delay between programs** sets the minimum gap between launches — **3 seconds** by default, adjustable from **0–120 seconds**. Programs start in list order; "Launch Now" is unaffected.
 
 ### Common Use Cases
 
