@@ -13,10 +13,6 @@ const MaxCloseDelaySeconds = 600
 const (
 	DefaultStartupIntervalSeconds = 3
 	MaxStartupIntervalSeconds     = 120
-	// LogonTaskBaseDelaySeconds is how long after sign-in the first
-	// task-launched program starts. WinTray's own logon task has no delay, so
-	// WinTray is up and watching for programs before the first one appears.
-	LogonTaskBaseDelaySeconds = 10
 )
 
 // ClampStartupIntervalSeconds bounds spacing between launches. Zero disables
@@ -25,12 +21,12 @@ func ClampStartupIntervalSeconds(seconds int) int {
 	return min(max(seconds, 0), MaxStartupIntervalSeconds)
 }
 
-// LogonTaskDelaySeconds spaces task-launched programs: the first one starts
-// LogonTaskBaseDelaySeconds after sign-in, each later one one interval after
-// the previous. Task Scheduler owns the clock, so the order holds even when
-// WinTray itself starts late.
-func LogonTaskDelaySeconds(taskIndex, intervalSeconds int) int {
-	return LogonTaskBaseDelaySeconds + taskIndex*ClampStartupIntervalSeconds(intervalSeconds)
+// LogonTaskDelaySeconds is when a task-launched program starts after
+// sign-in. Launch at boot means at the moment of sign-in, like a native logon
+// task: no base delay and no staggering behind other programs. Only a start
+// delay the user scheduled explicitly holds it back.
+func LogonTaskDelaySeconds(entry ManagedAppEntry) int {
+	return ScheduledStartDelaySeconds(entry)
 }
 
 // LogonTaskApp pairs an enabled task-launched entry with the delay its logon
@@ -45,17 +41,12 @@ type LogonTaskApp struct {
 // task, so Windows cannot start them behind WinTray's back.
 func LogonTaskApps(settings Settings) []LogonTaskApp {
 	apps := make([]LogonTaskApp, 0)
-	index := 0
 	for i := range settings.ManagedApps {
 		entry := settings.ManagedApps[i]
 		if !entry.RunOnStartup || !entry.LaunchViaLogonTask {
 			continue
 		}
-		apps = append(apps, LogonTaskApp{
-			Entry:        entry,
-			DelaySeconds: max(LogonTaskDelaySeconds(index, settings.StartupIntervalSeconds), ScheduledStartDelaySeconds(entry)),
-		})
-		index++
+		apps = append(apps, LogonTaskApp{Entry: entry, DelaySeconds: LogonTaskDelaySeconds(entry)})
 	}
 	return apps
 }

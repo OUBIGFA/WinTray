@@ -54,35 +54,121 @@ func standardRunSources() []runSource {
 	}
 }
 
-// splitStartupCommand only separates the executable from the untouched argument
-// tail. Re-joining argv would change quoting for programs with their own parser.
-func splitStartupCommand(command string) (path, args string, err error) {
-	command = strings.TrimLeft(command, " \t")
-	if command == "" || strings.ContainsRune(command, 0) {
-		return "", "", errors.New("empty or invalid startup command")
+// errNotStartupTarget marks a startup command that launches some other
+// program; callers skip it silently.
+var errNotStartupTarget = errors.New("startup command launches another executable")
+
+// StartupCommandError reports an original startup command that mentions the
+// program but cannot be attributed to it exactly. Taking it over could start
+// a different executable or drop a wrapper's own behaviour, so it fails
+// closed. Unquoted is set when only missing quotes make it ambiguous: quoting
+// the executable path resolves it.
+type StartupCommandError struct {
+	Source   string
+	Unquoted bool
+}
+
+func (e *StartupCommandError) Error() string {
+	if e.Unquoted {
+		return e.Source + ": the original startup command is unquoted and its path contains spaces, so WinTray cannot identify it safely; quote the executable path of that startup entry"
 	}
-	end := 0
+	return e.Source + ": the original startup command starts the program through another program, so WinTray cannot take it over safely; use another launch mode for this program"
+}
+
+// ambiguousStartupCommand is the source-less form returned by
+// splitStartupCommandFor; callers attach the entry they read it from.
+type ambiguousStartupCommand struct{ unquoted bool }
+
+func (e ambiguousStartupCommand) Error() string {
+	return (&StartupCommandError{Source: "startup entry", Unquoted: e.unquoted}).Error()
+}
+
+func (e ambiguousStartupCommand) at(source string) error {
+	return &StartupCommandError{Source: source, Unquoted: e.unquoted}
+}
+
+// splitStartupCommandFor separates expected from the untouched argument tail
+// of command; re-joining argv would change quoting for programs with their own
+// parser. An unquoted path is resolved the way Windows resolves it: each
+// prefix ending before a space or tab is tried in turn, and the first one that
+// names an existing file is what runs. It returns errNotStartupTarget when
+// command launches another program, and an ambiguousStartupCommand when it
+// mentions expected but WinTray cannot prove that expected is what runs.
+func splitStartupCommandFor(command, expected string) (path, args string, err error) {
+	command = strings.TrimLeft(command, " \t")
+	path, args, err = locateStartupExecutable(command, expected)
+	if errors.Is(err, errNotStartupTarget) && strings.Contains(strings.ToLower(command), strings.ToLower(strings.Trim(strings.TrimSpace(expected), `"`))) {
+		// A wrapper (cmd /c, rundll32, a launcher) or an unrelated program
+		// taking expected as an argument must not become a bare launch.
+		return "", "", ambiguousStartupCommand{}
+	}
+	return path, args, err
+}
+
+func locateStartupExecutable(command, expected string) (path, args string, err error) {
+	if command == "" || strings.ContainsRune(command, 0) {
+		return "", "", errNotStartupTarget
+	}
 	if command[0] == '"' {
 		close := strings.IndexByte(command[1:], '"')
 		if close < 0 {
-			return "", "", errors.New("unclosed executable quote in startup command")
+			return "", "", errNotStartupTarget
 		}
-		end = close + 2
-		path = command[1 : end-1]
+		end := close + 2
 		if end < len(command) && command[end] != ' ' && command[end] != '\t' {
-			return "", "", errors.New("missing separator after startup executable")
+			return "", "", errNotStartupTarget
 		}
-	} else {
-		end = strings.IndexAny(command, " \t")
-		if end < 0 {
-			end = len(command)
+		path = command[1 : end-1]
+		if !sameExecutablePath(path, expected) {
+			return "", "", errNotStartupTarget
 		}
-		path = command[:end]
+		return path, strings.TrimLeft(command[end:], " \t"), nil
 	}
-	if !filepath.IsAbs(path) {
-		return "", "", errors.New("startup executable is not an absolute path")
+	blocked := false
+	for end := 0; end <= len(command); end++ {
+		if end < len(command) && command[end] != ' ' && command[end] != '\t' {
+			continue
+		}
+		candidate := command[:end]
+		if candidate == "" || strings.HasSuffix(candidate, " ") || strings.HasSuffix(candidate, "\t") {
+			continue // a run of separators yields no new candidate
+		}
+		if !filepath.IsAbs(candidate) {
+			// Windows searches its path for a relative name; whatever it
+			// finds is a wrapper at best, never provably expected.
+			return "", "", errNotStartupTarget
+		}
+		if sameExecutablePath(candidate, expected) {
+			if blocked {
+				return "", "", ambiguousStartupCommand{unquoted: true}
+			}
+			return candidate, strings.TrimLeft(command[end:], " \t"), nil
+		}
+		if !blocked && launchableFile(candidate) {
+			// Windows would start this shorter file instead. Keep looking
+			// only to tell a missing-quotes problem from another program.
+			blocked = true
+		}
 	}
-	return path, strings.TrimLeft(command[end:], " \t"), nil
+	return "", "", errNotStartupTarget
+}
+
+// launchableFile reports whether Windows could start candidate as the
+// executable of an unquoted command: the name itself, or, without an
+// extension, the name with one of the extensions it tries.
+func launchableFile(candidate string) bool {
+	names := []string{candidate}
+	if filepath.Ext(candidate) == "" {
+		for _, ext := range []string{".exe", ".com", ".bat", ".cmd"} {
+			names = append(names, candidate+ext)
+		}
+	}
+	for _, name := range names {
+		if info, err := os.Stat(name); err == nil && !info.IsDir() {
+			return true
+		}
+	}
+	return false
 }
 
 func readApproval(root registry.Key, path, name string) (approvalValue, error) {
@@ -182,14 +268,16 @@ func readRunStartupEntries(key registry.Key, source runSource, exePath string) (
 				return nil, err
 			}
 		}
-		path, args, parseErr := splitStartupCommand(command)
-		if parseErr != nil || !sameExecutablePath(path, exePath) {
-			// A target mentioned by a wrapper/unquoted ambiguous command is
-			// not safe to replace with a direct exe launch.
-			if strings.Contains(strings.ToLower(command), strings.ToLower(exePath)) {
-				return nil, fmt.Errorf("%s\\%s uses an indirect or ambiguous startup command; select its original launcher instead", source.label, name)
-			}
+		path, args, parseErr := splitStartupCommandFor(command, exePath)
+		if errors.Is(parseErr, errNotStartupTarget) {
 			continue
+		}
+		var ambiguous ambiguousStartupCommand
+		if errors.As(parseErr, &ambiguous) {
+			return nil, ambiguous.at(source.label + `\` + name)
+		}
+		if parseErr != nil {
+			return nil, parseErr
 		}
 		entry := startupEntry{
 			label: source.label + `\` + name, path: path, args: args, show: 1,

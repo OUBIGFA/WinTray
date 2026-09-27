@@ -5,10 +5,7 @@ package startup
 import (
 	"errors"
 	"fmt"
-	"path/filepath"
-	"strings"
 
-	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 )
 
@@ -92,15 +89,11 @@ func (s runSource) find(exePath string) (string, error) {
 	return "", nil
 }
 
+// runCommandMatches reports whether Windows starts exePath itself for command;
+// a wrapper or an ambiguous unquoted command is not proof that it does.
 func runCommandMatches(command, exePath string) bool {
-	args, err := windows.DecomposeCommandLine(strings.TrimSpace(command))
-	if err != nil || len(args) == 0 {
-		return false
-	}
-	expected := strings.Trim(strings.TrimSpace(exePath), `"`)
-	// Do not resolve a relative Run command against WinTray's working directory.
-	return filepath.IsAbs(args[0]) && filepath.IsAbs(expected) &&
-		strings.EqualFold(filepath.Clean(args[0]), filepath.Clean(expected))
+	_, _, err := splitStartupCommandFor(command, exePath)
+	return err == nil
 }
 
 func runEntryApproved(root registry.Key, path, name string) (bool, error) {

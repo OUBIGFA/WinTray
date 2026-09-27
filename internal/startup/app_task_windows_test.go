@@ -143,6 +143,11 @@ func TestAppTaskXMLCarriesDelayRunLevelAndFingerprint(t *testing.T) {
 	if !strings.Contains(xmlA, fpA) {
 		t.Fatalf("fingerprint %q missing from definition", fpA)
 	}
+	immediate := spec
+	immediate.delay = 0
+	if xmlNow, fpNow := appTaskXML("S-1-5-21-1", immediate); strings.Contains(xmlNow, "<Delay>") || fpNow == fpA {
+		t.Fatalf("an undelayed task must start at sign-in without a Delay element:\n%s", xmlNow)
+	}
 	elevated := spec
 	elevated.highest = true
 	if xml, _ := appTaskXML("S-1-5-21-1", elevated); !strings.Contains(xml, "<RunLevel>HighestAvailable</RunLevel>") {
@@ -260,8 +265,16 @@ func TestAppTasksSyncReconcilesWantedSet(t *testing.T) {
 	if err := tasks.Sync(settings, false); err != nil {
 		t.Fatalf("interval change: %v", err)
 	}
+	if got := fake.callNames("/Create"); len(got) != 0 {
+		t.Fatalf("changed interval created %v; launch at boot starts at sign-in, not staggered", got)
+	}
+	settings.ManagedApps[1].Schedule = config.Schedule{Enabled: true, StartDelayMinutes: 1}
+	fake.reset()
+	if err := tasks.Sync(settings, false); err != nil {
+		t.Fatalf("scheduled start change: %v", err)
+	}
 	if got := fake.callNames("/Create"); len(got) != 1 || got[0] != tasks.namePrefix+"2" {
-		t.Fatalf("changed interval created %v, want only the second task's delay changed", got)
+		t.Fatalf("scheduled start created %v, want only the second task's delay changed", got)
 	}
 
 	if err := tasks.Sync(config.Settings{RunAtLogon: false, StartupIntervalSeconds: 3}, false); err != nil {
@@ -374,7 +387,7 @@ func TestAppTasksRegistersWithSchtasks(t *testing.T) {
 		appName: "WinTray test app",
 		exePath: filepath.Join(os.Getenv("SystemRoot"), "System32", "cmd.exe"),
 		args:    "/c exit",
-		delay:   config.LogonTaskBaseDelaySeconds,
+		delay:   0, // launch at boot: no Delay element at all
 	}
 
 	if err := tasks.syncOne(spec, false); err != nil {

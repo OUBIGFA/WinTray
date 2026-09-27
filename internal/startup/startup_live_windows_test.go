@@ -36,6 +36,12 @@ func TestMain(m *testing.M) {
 		}
 		os.Exit(0)
 	}
+	if len(args) == 3 && args[0] == AppTaskHelperConfigured {
+		if err := LaunchConfigured(args[1], args[2]); err != nil {
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
 	if len(args) == 3 && args[0] == AppTaskHelperShortcut {
 		if err := LaunchStartupShortcut(args[1], args[2]); err != nil {
 			os.Exit(1)

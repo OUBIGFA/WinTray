@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"golang.org/x/sys/windows"
+
 	"wintray/internal/config"
 )
 
@@ -27,8 +29,13 @@ func TestProgramWithoutNativeStartupGetsItsOwnLogonTask(t *testing.T) {
 		t.Fatalf("actions: %+v", task.Actions)
 	}
 	action := task.Actions.Exec[0]
-	if action.Command != settings.ManagedApps[0].ExePath || action.Arguments != settings.ManagedApps[0].Args || action.WorkingDirectory != filepath.Dir(action.Command) || !task.logonFor(tasks.userSID) {
-		t.Fatalf("configured startup was lost: %+v", task)
+	// The task starts WinTray's helper, which waits for WinTray and then
+	// launches the configured command from the program's folder.
+	args, err := windows.DecomposeCommandLine(action.Arguments)
+	if err != nil || action.Command != tasks.selfExe || len(args) != 3 || args[0] != AppTaskHelperConfigured ||
+		args[1] != settings.ManagedApps[0].Args || args[2] != settings.ManagedApps[0].ExePath ||
+		action.WorkingDirectory != filepath.Dir(settings.ManagedApps[0].ExePath) || !task.logonFor(tasks.userSID) {
+		t.Fatalf("configured startup was lost: %+v args=%q err=%v", task, args, err)
 	}
 	state, err := loadMigrationState(tasks.statePath)
 	if err != nil || len(state.Apps) != 0 {

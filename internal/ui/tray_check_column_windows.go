@@ -31,17 +31,15 @@ type trayCheckColumn struct {
 	stateImages win.HIMAGELIST
 	width       int32
 	height      int32
+	// onToggle is called with the row whose tray cell was clicked.
+	onToggle func(row int)
 }
 
 // Reuse the first column's native checkbox images after the list has painted
 // each subitem. No cell background is drawn here, so hover and selection stay native.
-func installTrayCheckColumn(list *walk.TableView, model *managedListTableModel) error {
-	for child := win.GetWindow(list.Handle(), win.GW_CHILD); child != 0; child = win.GetWindow(child, win.GW_HWNDNEXT) {
-		images := win.HIMAGELIST(win.SendMessage(child, lvmGetImageList, win.LVSIL_STATE, 0))
-		if images == 0 {
-			continue
-		}
-		column := &trayCheckColumn{model: model, view: child, stateImages: images}
+func installTrayCheckColumn(list *walk.TableView, model *managedListTableModel, onToggle func(row int)) error {
+	if child, images := nativeRowView(list); child != 0 {
+		column := &trayCheckColumn{model: model, view: child, stateImages: images, onToggle: onToggle}
 		if ok, _, _ := imageListGetIconSize.Call(uintptr(images), uintptr(unsafe.Pointer(&column.width)), uintptr(unsafe.Pointer(&column.height))); ok == 0 || column.width <= 0 || column.height <= 0 {
 			return fmt.Errorf("get native checkbox size")
 		}
@@ -60,14 +58,36 @@ func installTrayCheckColumn(list *walk.TableView, model *managedListTableModel) 
 	return fmt.Errorf("native checkbox image list is unavailable")
 }
 
+// nativeRowView returns the list view that shows a check box TableView's rows,
+// with its check box images. Walk keeps a second one for frozen columns.
+func nativeRowView(list *walk.TableView) (win.HWND, win.HIMAGELIST) {
+	for child := win.GetWindow(list.Handle(), win.GW_CHILD); child != 0; child = win.GetWindow(child, win.GW_HWNDNEXT) {
+		if images := win.HIMAGELIST(win.SendMessage(child, lvmGetImageList, win.LVSIL_STATE, 0)); images != 0 {
+			return child, images
+		}
+	}
+	return 0, 0
+}
+
 func trayCheckColumnWndProc(hwnd, msg, wp uintptr, lp unsafe.Pointer, id, ref uintptr) uintptr {
 	result, _, _ := defSubclassProc.Call(hwnd, msg, wp, uintptr(lp))
 	column := trayCheckColumns[win.HWND(hwnd)]
 	if column == nil || uint32(msg) != win.WM_NOTIFY || lp == nil {
 		return result
 	}
+	header := (*win.NMHDR)(lp)
+	if header.HwndFrom != column.view {
+		return result
+	}
+	if header.Code == win.NM_CLICK {
+		// NM_CLICK arrives once the list view has finished its own mouse
+		// handling. A button-up message does not: the list view swallows it
+		// in its drag detection, so the first click of a pair was lost.
+		column.click((*win.NMITEMACTIVATE)(lp).PtAction)
+		return result
+	}
 	draw := (*win.NMLVCUSTOMDRAW)(lp)
-	if draw.Nmcd.Hdr.HwndFrom != column.view || draw.Nmcd.Hdr.Code != win.NM_CUSTOMDRAW || draw.ISubItem != 1 {
+	if header.Code != win.NM_CUSTOMDRAW || draw.ISubItem != 1 {
 		return result
 	}
 	switch draw.Nmcd.DwDrawStage {
@@ -88,4 +108,18 @@ func trayCheckColumnWndProc(hwnd, msg, wp uintptr, lp unsafe.Pointer, id, ref ui
 		win.ImageList_DrawEx(column.stateImages, index, draw.Nmcd.Hdc, x, y, column.width, column.height, win.CLR_DEFAULT, win.CLR_DEFAULT, win.ILD_TRANSPARENT)
 	}
 	return result
+}
+
+// click toggles the row under point when point is in the tray column.
+func (column *trayCheckColumn) click(point win.POINT) {
+	hit := win.LVHITTESTINFO{Pt: point}
+	win.SendMessage(column.view, win.LVM_SUBITEMHITTEST, 0, uintptr(unsafe.Pointer(&hit)))
+	runtime.KeepAlive(&hit)
+	row := int(hit.IItem)
+	if hit.ISubItem != 1 || row < 0 || row >= len(column.model.rows) || hit.Flags&win.LVHT_ONITEM == 0 || !column.model.rows[row].CanCollect {
+		return
+	}
+	if column.onToggle != nil {
+		column.onToggle(row)
+	}
 }

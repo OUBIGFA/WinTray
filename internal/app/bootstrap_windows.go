@@ -31,7 +31,14 @@ const (
 	appName            = "WinTray"
 	singleInstanceName = "WinTray_SingleInstance"
 	activationEvent    = "WinTray_ShowMainWindow"
+	// readyMarker exists while a WinTray session is up and collecting tray
+	// icons. Program logon tasks wait for it before launching.
+	readyMarker = "WinTray_Ready"
 )
+
+// readyWait bounds that wait: a WinTray that failed to start must not keep
+// the programs from starting at all.
+var readyWait = 2 * time.Minute
 
 func Run(args []string) int {
 	if code := runAppTaskHelper(args); code >= 0 {
@@ -386,7 +393,7 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 				settings: s, allowElevated: true,
 				onError: func(err error) {
 					m := i18n.For(s.Language)
-					mainWindow.ShowError(m.ManagedTaskFailedTitle, fmt.Sprintf(m.ManagedTaskFailedBody, err))
+					mainWindow.ShowError(m.ManagedTaskFailedTitle, fmt.Sprintf(m.ManagedTaskFailedBody, formatAppTaskError(s.Language, err)))
 				},
 			})
 			if trayController != nil {
@@ -524,6 +531,12 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 	if boxErr := box.SetPaths(config.CollectedTrayIconPaths(settings)); boxErr != nil {
 		logger.Warn(fmt.Sprintf("collect tray icons failed: %v", boxErr))
 	}
+	// Program logon tasks are held back until here.
+	if release, readyErr := ipc.MarkReady(readyMarker); readyErr != nil {
+		logger.Warn(fmt.Sprintf("publish ready state failed: %v", readyErr))
+	} else {
+		defer release()
+	}
 
 	createTray := func() error {
 		current := mainWindow.Settings()
@@ -570,7 +583,7 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 		// The message loop must exist before tasks can hand it hidden windows.
 		mainWindow.SetLaunchNowBusy(true)
 		mainWindow.Native().Starting().Attach(func() {
-			logger.Info(fmt.Sprintf("autorun mode: run managed apps (exitAfterCompleted=%t)", settings.ExitAfterManagedAppsCompleted))
+			logger.Info(fmt.Sprintf("autorun mode: run managed apps (exitAfterCompleted=%t, collectedTrayIcons=%d)", exitsAfterStartup(settings), len(config.CollectedTrayIconPaths(settings))))
 			launchWG.Add(1)
 			go func() {
 				defer launchWG.Done()
@@ -743,14 +756,20 @@ func runAppTaskHelper(args []string) int {
 			return 1
 		}
 		return 0
-	case len(args) == 3 && args[0] == startup.AppTaskHelperRun:
-		if err := startup.LaunchStartupRun(args[1], args[2]); err != nil {
-			logStartupHelperFailure(err)
-			return 1
+	case len(args) == 3 && (args[0] == startup.AppTaskHelperRun || args[0] == startup.AppTaskHelperShortcut || args[0] == startup.AppTaskHelperConfigured):
+		// The logon trigger fires for WinTray and its program tasks alike;
+		// no program may come up before WinTray does.
+		if !ipc.WaitReady(readyMarker, readyWait, 200*time.Millisecond) {
+			logStartupHelperFailure(fmt.Errorf("WinTray was not running after %s; starting %s anyway", readyWait, args[2]))
 		}
-		return 0
-	case len(args) == 3 && args[0] == startup.AppTaskHelperShortcut:
-		if err := startup.LaunchStartupShortcut(args[1], args[2]); err != nil {
+		launch := startup.LaunchStartupRun
+		switch args[0] {
+		case startup.AppTaskHelperShortcut:
+			launch = startup.LaunchStartupShortcut
+		case startup.AppTaskHelperConfigured:
+			launch = startup.LaunchConfigured
+		}
+		if err := launch(args[1], args[2]); err != nil {
 			logStartupHelperFailure(err)
 			return 1
 		}

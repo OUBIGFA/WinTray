@@ -322,33 +322,23 @@ func TestLogonTaskAppsOrderAndDelays(t *testing.T) {
 			{ID: "2", Name: "WinTray launched", ExePath: `C:\Apps\Other.exe`, RunOnStartup: true},
 			{ID: "3", Name: "Paused", ExePath: `C:\Apps\Paused.exe`, RunOnStartup: false, LaunchViaLogonTask: true},
 			{ID: "4", Name: "Second", ExePath: `C:\Apps\Two.exe`, RunOnStartup: true, LaunchViaLogonTask: true},
+			{ID: "5", Name: "Scheduled", ExePath: `C:\Apps\Three.exe`, RunOnStartup: true, LaunchViaLogonTask: true,
+				Schedule: Schedule{Enabled: true, StartDelayMinutes: 2}},
 		},
 	}
 
 	got := LogonTaskApps(settings)
-	if len(got) != 2 {
-		t.Fatalf("task apps = %d, want 2 (paused entries get no task)", len(got))
+	if len(got) != 3 {
+		t.Fatalf("task apps = %d, want 3 (paused entries get no task)", len(got))
 	}
-	if got[0].Entry.ID != "1" || got[1].Entry.ID != "4" {
-		t.Fatalf("task app order = %q, %q; want list order", got[0].Entry.ID, got[1].Entry.ID)
+	if got[0].Entry.ID != "1" || got[1].Entry.ID != "4" || got[2].Entry.ID != "5" {
+		t.Fatalf("task app order = %q, %q, %q; want list order", got[0].Entry.ID, got[1].Entry.ID, got[2].Entry.ID)
 	}
-	// The first task starts the base delay after sign-in, each later one one
-	// interval behind; WinTray-launched entries do not consume a slot.
-	if want := LogonTaskBaseDelaySeconds; got[0].DelaySeconds != want {
-		t.Errorf("first delay = %d, want %d", got[0].DelaySeconds, want)
-	}
-	if want := LogonTaskBaseDelaySeconds + 5; got[1].DelaySeconds != want {
-		t.Errorf("second delay = %d, want %d", got[1].DelaySeconds, want)
-	}
-}
-
-func TestLogonTaskDelaySecondsClampsInterval(t *testing.T) {
-	for _, tc := range []struct {
-		interval int
-		want     int
-	}{{-3, LogonTaskBaseDelaySeconds}, {0, LogonTaskBaseDelaySeconds}, {999, LogonTaskBaseDelaySeconds + 120}} {
-		if got := LogonTaskDelaySeconds(1, tc.interval); got != tc.want {
-			t.Errorf("LogonTaskDelaySeconds(1, %d) = %d, want %d", tc.interval, got, tc.want)
+	// Launch at boot starts at the moment of sign-in: neither a base delay
+	// nor the staggering interval applies; only an explicit scheduled start.
+	for i, want := range []int{0, 0, 120} {
+		if got[i].DelaySeconds != want {
+			t.Errorf("%s delay = %d, want %d", got[i].Entry.Name, got[i].DelaySeconds, want)
 		}
 	}
 }

@@ -279,6 +279,11 @@ func appTaskXML(userSID string, spec appTaskSpec) (string, string) {
 	if spec.highest {
 		runLevel = "HighestAvailable"
 	}
+	// Launch at boot starts at sign-in; a delay exists only when scheduled.
+	delay := ""
+	if spec.delay > 0 {
+		delay = fmt.Sprintf("\n      <Delay>PT%dS</Delay>", spec.delay)
+	}
 	workingDirectory := ""
 	if spec.workingDir != "" {
 		workingDirectory = "<WorkingDirectory>" + xmlText(spec.workingDir) + "</WorkingDirectory>"
@@ -286,8 +291,7 @@ func appTaskXML(userSID string, spec appTaskSpec) (string, string) {
 	body := fmt.Sprintf(`  <Triggers>
     <LogonTrigger>
       <Enabled>true</Enabled>
-      <UserId>%[1]s</UserId>
-      <Delay>PT%[2]dS</Delay>
+      <UserId>%[1]s</UserId>%[2]s
     </LogonTrigger>
   </Triggers>
   <Principals>
@@ -313,7 +317,7 @@ func appTaskXML(userSID string, spec appTaskSpec) (string, string) {
       %[6]s
     </Exec>
   </Actions>
-`, xmlText(userSID), spec.delay, runLevel, xmlText(spec.exePath), xmlText(spec.args), workingDirectory)
+`, xmlText(userSID), delay, runLevel, xmlText(spec.exePath), xmlText(spec.args), workingDirectory)
 	sum := sha256.Sum256([]byte(body))
 	fingerprint := "wintray-app-" + hex.EncodeToString(sum[:8])
 	return `<?xml version="1.0" encoding="UTF-16"?>

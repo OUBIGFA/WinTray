@@ -6,7 +6,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"wintray/internal/config"
 	"wintray/internal/logging"
@@ -31,6 +33,8 @@ func TestRunAppTaskHelperRecognizesOnlyItsOwnFlags(t *testing.T) {
 		{startup.AppTaskHelperShortcut},
 		{startup.AppTaskHelperShortcut, "link"},
 		{startup.AppTaskHelperShortcut, "link", "exe", "extra"},
+		{startup.AppTaskHelperConfigured, "args"},
+		{startup.AppTaskHelperConfigured, "args", "exe", "extra"},
 	} {
 		if code := runAppTaskHelper(args); code != -1 {
 			t.Errorf("runAppTaskHelper(%q) = %d, want -1 for a non-helper launch", args, code)
@@ -39,14 +43,25 @@ func TestRunAppTaskHelperRecognizesOnlyItsOwnFlags(t *testing.T) {
 }
 
 func TestStartupHelpersConsumeFailuresWithoutOpeningAnotherUI(t *testing.T) {
-	t.Setenv("LOCALAPPDATA", t.TempDir())
+	data := t.TempDir()
+	t.Setenv("LOCALAPPDATA", data)
+	// No WinTray publishes its ready state here: the helpers give up waiting
+	// for it, note that, and still try their launch.
+	restore := readyWait
+	readyWait = 50 * time.Millisecond
+	t.Cleanup(func() { readyWait = restore })
 	for _, args := range [][]string{
 		{startup.AppTaskHelperRun, "WinTrayTest-Missing-Original-Entry", `C:\Missing\app.exe`},
 		{startup.AppTaskHelperShortcut, filepath.Join(t.TempDir(), "missing.lnk"), `C:\Missing\app.exe`},
+		{startup.AppTaskHelperConfigured, "--flag", `relative\app.exe`},
 	} {
 		if got := runAppTaskHelper(args); got != 1 {
 			t.Fatalf("helper failure = %d, want a consumed failure (no normal launch)", got)
 		}
+	}
+	logs, err := os.ReadFile(filepath.Join(data, "WinTray", "wintray.log"))
+	if err != nil || strings.Count(string(logs), "WinTray was not running") != 3 {
+		t.Fatalf("the wait for WinTray must end in a logged timeout: %v\n%s", err, logs)
 	}
 }
 

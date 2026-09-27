@@ -63,6 +63,8 @@ type Messages struct {
 	ManagedTaskLaunchNowHint       string
 	ManagedTaskFailedTitle         string
 	ManagedTaskFailedBody          string
+	StartupCommandUnquoted         string
+	StartupCommandIndirect         string
 	ManagedAutoHide                string
 	ManagedAutoHideHint            string
 	ManagedAutoHideTip             string
@@ -165,7 +167,7 @@ var zhCN = Messages{
 	RunAtLogonHint:                 "关闭后不再由 WinTray 安排启动；程序自身的自启会保留或恢复",
 	StartHidden:                    "开机时不弹出 WinTray 窗口",
 	ExitOnDone:                     "开机任务完成后自动退出 WinTray",
-	ExitOnDoneHint:                 "如果还有命令行程序在用 WinTray 提供的托盘图标，会等它们都退出后再退出",
+	ExitOnDoneHint:                 "有程序启用托盘收纳时不会自动退出；还有命令行程序在用 WinTray 提供的托盘图标时，会等它们都退出后再退出",
 	SettingsTimingTitle:            "启动节奏",
 	RetrySeconds:                   "最长等待程序窗口",
 	RetrySecondsHint:               "程序启动较慢、窗口没被收进托盘时，可以调大；可填 0–120",
@@ -176,7 +178,7 @@ var zhCN = Messages{
 	SecondsUnit:                    "秒",
 	LanguageLabel:                  "语言 / Language",
 	ManagedListTitle:               "开机启动项",
-	ManagedListHint:                "程序名称列勾选开机启动，托盘收纳列勾选收纳图标",
+	ManagedListHint:                "程序名称列勾选开机启动，托盘收纳列勾选收纳图标；拖动程序可调整启动顺序",
 	ManagedListEmpty:               "还没有添加程序",
 	ManagedListEmptyHint:           "添加开机时想自动启动的程序，WinTray 会依次启动它们，并按你的设置收进托盘或在后台运行",
 	ManagedColumnName:              "程序名称",
@@ -198,6 +200,8 @@ var zhCN = Messages{
 	ManagedTaskLaunchNowHint:       "运行同一个已注册的登录任务以验证效果；需先保存成功，程序已运行时不会再次启动",
 	ManagedTaskFailedTitle:         "开机即启动未完成",
 	ManagedTaskFailedBody:          "%s\r\n\r\n未恢复的原自启状态会保留备份；请处理原因后再次保存设置，不要直接删除 WinTray 数据目录",
+	StartupCommandUnquoted:         "%s：原自启命令未加引号且路径含空格，WinTray 无法安全识别；请给该自启项的可执行文件路径加上引号",
+	StartupCommandIndirect:         "%s：原自启命令经由其他程序间接启动，WinTray 无法安全接管；请为该程序改用其他启动方式",
 	ManagedAutoHide:                "收进托盘",
 	ManagedAutoHideHint:            "启动后自动关闭主窗口，程序继续在托盘运行；适合 QQ、微信等带托盘图标的程序；命令行程序会由 WinTray 提供托盘图标",
 	ManagedAutoHideTip:             "WinTray 会向主窗口发送关闭消息（WM_CLOSE）；没有托盘图标的普通程序可能会因此退出",
@@ -305,7 +309,7 @@ var enUS = Messages{
 	RunAtLogonHint:                 "Stops WinTray's launch scheduling; apps' own startup remains or is restored",
 	StartHidden:                    "Don't show the WinTray window at sign-in",
 	ExitOnDone:                     "Exit WinTray when sign-in tasks finish",
-	ExitOnDoneHint:                 "If console programs still use tray icons from WinTray, it waits until they all exit",
+	ExitOnDoneHint:                 "Never exits while any program uses tray collection; if console programs still use tray icons from WinTray, it waits until they all exit",
 	SettingsTimingTitle:            "Timing",
 	RetrySeconds:                   "Wait for a window up to",
 	RetrySecondsHint:               "Increase it if slow programs aren't closed to the tray; 0–120",
@@ -316,7 +320,7 @@ var enUS = Messages{
 	SecondsUnit:                    "seconds",
 	LanguageLabel:                  "Language / 语言",
 	ManagedListTitle:               "Startup programs",
-	ManagedListHint:                "Check a program to start it at sign-in; check Tray icon to collect its icon",
+	ManagedListHint:                "Check a program to start it at sign-in; check Tray icon to collect its icon; drag programs to set their start order",
 	ManagedListEmpty:               "No programs yet",
 	ManagedListEmptyHint:           "Add the programs you want to start at sign-in; WinTray starts them one by one and can close them to the tray or run them in the background",
 	ManagedColumnName:              "Program name",
@@ -338,6 +342,8 @@ var enUS = Messages{
 	ManagedTaskLaunchNowHint:       "Runs the same registered logon task after settings are saved; does not relaunch an already running program",
 	ManagedTaskFailedTitle:         "Launch at boot not applied",
 	ManagedTaskFailedBody:          "%s\r\n\r\nUnrestored startup states remain backed up; resolve the issue and save settings again, and do not delete the WinTray data directory directly",
+	StartupCommandUnquoted:         "%s: the original startup command is unquoted and its path contains spaces, so WinTray cannot identify it safely; quote the executable path of that startup entry",
+	StartupCommandIndirect:         "%s: the original startup command starts the program through another program, so WinTray cannot take it over safely; use another launch mode for this program",
 	ManagedAutoHide:                "Close to tray",
 	ManagedAutoHideHint:            "Closes the main window after launch; the program keeps running in the tray; best for apps with a tray icon, such as QQ or WeChat; WinTray adds tray icons for console programs",
 	ManagedAutoHideTip:             "WinTray sends WM_CLOSE to the main window; apps without a tray icon may exit",

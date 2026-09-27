@@ -5,11 +5,10 @@ package ui
 import (
 	"fmt"
 	"path/filepath"
-	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
-	"unsafe"
 
 	"github.com/lxn/walk"
 	"github.com/lxn/win"
@@ -188,41 +187,43 @@ func (w *MainWindow) buildListPane(parent walk.Container) (*walk.Composite, erro
 		return nil, err
 	}
 	w.managedListModel = model
-	if err = installTrayCheckColumn(list, model); err != nil {
+	// Leave the list view's notification before a failure message can open.
+	if err = installTrayCheckColumn(list, model, func(row int) {
+		w.synchronize(func() { w.toggleTrayCollect(row) })
+	}); err != nil {
+		return nil, err
+	}
+	// Dragging a row sets the order programs start in.
+	view, _ := nativeRowView(list)
+	if err = installListReorder(list, view, w.moveManagedApp, w.save); err != nil {
 		return nil, err
 	}
 	list.CurrentIndexChanged().Attach(w.syncManagedEditor)
-	list.MouseUp().Attach(w.onManagedListMouseDown)
 	w.managedList = list
 	pane.SetMinMaxSize(walk.Size{Width: programsListPaneMinWidth}, walk.Size{})
 	return pane, nil
 }
 
-// The TableView routes native list-view clicks through MouseUp.
-// Hit-test that child so the tray toggle belongs only to its own column.
-func (w *MainWindow) onManagedListMouseDown(x, y int, button walk.MouseButton) {
-	if button != walk.LeftButton {
+// moveManagedApp moves the program in row from to row to, keeping it
+// selected. The caller saves once the whole drag is done.
+func (w *MainWindow) moveManagedApp(from, to int) {
+	apps := w.settings.ManagedApps
+	if from == to || from < 0 || to < 0 || from >= len(apps) || to >= len(apps) {
 		return
 	}
-	var listView win.HWND
-	for child := win.GetWindow(w.managedList.Handle(), win.GW_CHILD); child != 0; child = win.GetWindow(child, win.GW_HWNDNEXT) {
-		var bounds win.RECT
-		if win.GetClientRect(child, &bounds) && bounds.Right > 0 {
-			listView = child
-			break
-		}
+	app := apps[from]
+	apps = slices.Delete(apps, from, from+1)
+	w.settings.ManagedApps = slices.Insert(apps, to, app)
+	for i := min(from, to); i <= max(from, to); i++ {
+		w.updateManagedRow(i)
 	}
-	if listView == 0 {
-		return
-	}
-	hit := win.LVHITTESTINFO{Pt: win.POINT{X: int32(x), Y: int32(y)}}
-	win.SendMessage(listView, win.LVM_SUBITEMHITTEST, 0, uintptr(unsafe.Pointer(&hit)))
-	runtime.KeepAlive(&hit)
-	if hit.ISubItem != 1 || hit.IItem < 0 || hit.Flags&win.LVHT_ONITEM == 0 {
-		return
-	}
-	idx := int(hit.IItem)
-	if idx >= len(w.settings.ManagedApps) {
+	w.managedList.SetCurrentIndex(to)
+}
+
+// toggleTrayCollect switches tray collection for the program in row idx,
+// from a single click on its tray column cell.
+func (w *MainWindow) toggleTrayCollect(idx int) {
+	if idx < 0 || idx >= len(w.settings.ManagedApps) {
 		return
 	}
 	app := &w.settings.ManagedApps[idx]

@@ -255,6 +255,10 @@ func (t *AppTasks) syncPreservingStartup(app config.LogonTaskApp, inventory []ta
 	// Do not mistake an unreadable, disabled, or removed migrated source for
 	// this case (those retain the fail-closed paths below).
 	if native == "" && len(entries) == 0 && len(previous.Approvals) == 0 {
+		// Launched through WinTray's helper like a migrated entry, so the
+		// program waits until WinTray itself is up at sign-in.
+		spec.args = windows.ComposeCommandLine([]string{AppTaskHelperConfigured, app.Entry.Args, app.Entry.ExePath})
+		spec.exePath = t.selfExe
 		if err := t.syncOne(spec, allowElevated); err != nil {
 			return err
 		}

@@ -5,11 +5,27 @@ package startup
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
+	"strings"
 
 	"golang.org/x/sys/windows/registry"
 )
 
-const AppTaskHelperRun = "--launch-startup-run"
+const (
+	AppTaskHelperRun = "--launch-startup-run"
+	// AppTaskHelperConfigured starts a program that has no original startup
+	// entry with the arguments configured in WinTray.
+	AppTaskHelperConfigured = "--launch-configured"
+)
+
+// LaunchConfigured starts exePath with args from its own folder, as the task
+// did when it launched the program directly.
+func LaunchConfigured(args, exePath string) error {
+	if !filepath.IsAbs(exePath) || !strings.EqualFold(filepath.Ext(exePath), ".exe") {
+		return errors.New("configured startup requires an absolute .exe path")
+	}
+	return shellLaunchOriginal(exePath, args, filepath.Dir(exePath), 1)
+}
 
 // Read the original value at launch, so changes made by the program (including
 // its next update) are not replaced with stale, copied arguments. REG_EXPAND_SZ
@@ -34,12 +50,16 @@ func launchStartupRunFrom(keyPath, name, expectedExe string, launch func(string,
 			return err
 		}
 	}
-	path, args, err := splitStartupCommand(command)
+	path, args, err := splitStartupCommandFor(command, expectedExe)
+	if errors.Is(err, errNotStartupTarget) {
+		return errors.New("startup Run target changed; save its WinTray settings again")
+	}
+	var ambiguous ambiguousStartupCommand
+	if errors.As(err, &ambiguous) {
+		return ambiguous.at(`HKCU\Run\` + name)
+	}
 	if err != nil {
 		return err
-	}
-	if !sameExecutablePath(path, expectedExe) {
-		return errors.New("startup Run target changed; save its WinTray settings again")
 	}
 	if err := launch(path, args, "", 1); err != nil {
 		return fmt.Errorf("launch original Run entry %s: %w", name, err)

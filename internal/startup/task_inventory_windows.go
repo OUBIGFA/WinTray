@@ -257,7 +257,11 @@ func appTaskUpToDate(exported []byte, sid string, spec appTaskSpec, fingerprint 
 	if actualLevel == "" {
 		actualLevel = "LeastPrivilege" // Task Scheduler omits the schema default
 	}
-	actualDelay, err := time.ParseDuration(strings.ToLower(strings.TrimPrefix(trigger.Delay, "PT")))
+	// An undelayed trigger is exported without a Delay element.
+	actualDelay, err := time.Duration(0), error(nil)
+	if trigger.Delay != "" {
+		actualDelay, err = time.ParseDuration(strings.ToLower(strings.TrimPrefix(trigger.Delay, "PT")))
+	}
 	return err == nil && sameExecutablePath(action.Command, spec.exePath) && action.Arguments == spec.args &&
 		action.WorkingDirectory == spec.workingDir && actualLevel == level &&
 		actualDelay == time.Duration(spec.delay)*time.Second

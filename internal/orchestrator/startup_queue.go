@@ -81,7 +81,6 @@ func (t *startupTurn) finish(started bool) {
 // callers can hand hidden windows to a tray host immediately.
 func (s *Service) StartManagedApps(ctx context.Context, settings config.Settings, onResult func(config.ManagedAppEntry, Result)) []Result {
 	entries := make([]queuedStart, 0, len(settings.ManagedApps))
-	taskIndex := 0
 	for _, entry := range settings.ManagedApps {
 		if !config.ShouldLaunchViaWinTray(entry) {
 			continue
@@ -91,8 +90,7 @@ func (s *Service) StartManagedApps(ctx context.Context, settings config.Settings
 			// Task Scheduler starts it at the delay the task was registered
 			// with (config.LogonTaskApps); the wait only needs to cover that
 			// delay plus a margin.
-			delay := max(config.LogonTaskDelaySeconds(taskIndex, settings.StartupIntervalSeconds), config.ScheduledStartDelaySeconds(entry))
-			taskIndex++
+			delay := config.LogonTaskDelaySeconds(entry)
 			queued.externalWait = time.Duration(delay)*time.Second + logonTaskWaitMargin
 		} else {
 			queued.startDelay = time.Duration(config.ScheduledStartDelaySeconds(entry)) * time.Second

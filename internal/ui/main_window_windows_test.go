@@ -69,6 +69,7 @@ func TestMainWindowInteractions(t *testing.T) {
 	zh, en := i18n.For("zh-CN"), i18n.For("en-US")
 	var baseBody, baseDetail, baseList walk.Rectangle
 	var baseNameRow, baseDelay walk.Rectangle
+	var traySavesBefore int
 	w.mw.Starting().Attach(func() {
 		go func() {
 			time.Sleep(200 * time.Millisecond)
@@ -136,10 +137,17 @@ func TestMainWindowInteractions(t *testing.T) {
 				if !w.appEnabled.Checked() || !w.modeTray.Checked() || w.modeNormal.Checked() || w.modeHidden.Checked() {
 					t.Error("the editor must show the program's start settings")
 				}
-				before := saves
+				traySavesBefore = saves
+				// One real click, not a double click, switches collection.
 				clickTrayCell(t, w, 0)
+			})
+			step(func() {
+				before := traySavesBefore
 				if !w.managedListModel.rows[0].Collected || !w.settings.ManagedApps[0].CollectTrayIcon || w.settings.ManagedApps[1].CollectTrayIcon || saves != before+1 {
 					t.Errorf("tray toggle: row=%+v collected=%v script=%v saves=%d want=%d", w.managedListModel.rows[0], w.settings.ManagedApps[0].CollectTrayIcon, w.settings.ManagedApps[1].CollectTrayIcon, saves, before+1)
+				}
+				if !w.settings.ManagedApps[0].RunOnStartup {
+					t.Error("clicking the tray cell must not change the sign-in check box")
 				}
 				captureTestWindow(t, w, "programs-tray-checked")
 				w.managedList.SetCurrentIndex(1)
@@ -147,11 +155,17 @@ func TestMainWindowInteractions(t *testing.T) {
 					t.Error("script programs must not offer tray icon collection")
 				}
 				clickTrayCell(t, w, 1)
+			})
+			step(func() {
+				before := traySavesBefore
 				if w.settings.ManagedApps[1].CollectTrayIcon || saves != before+1 {
 					t.Errorf("script click: collected=%v saves=%d want=%d", w.settings.ManagedApps[1].CollectTrayIcon, saves, before+1)
 				}
 				w.managedList.SetCurrentIndex(0)
 				clickTrayCell(t, w, 0)
+			})
+			step(func() {
+				before := traySavesBefore
 				if w.managedListModel.rows[0].Collected || w.settings.ManagedApps[0].CollectTrayIcon || saves != before+2 {
 					t.Errorf("tray deselect: row=%+v collected=%v saves=%d want=%d", w.managedListModel.rows[0], w.settings.ManagedApps[0].CollectTrayIcon, saves, before+2)
 				}
@@ -688,7 +702,102 @@ func TestBlankAreaClickLeavesEditor(t *testing.T) {
 	w.Run()
 }
 
-// clickTrayCell uses the native cell rect to exercise the tray-column hit test.
+// Dragging a row moves the program along with the pointer and saves the new
+// start order once, on release. The list view's own drag detection needs real
+// input, so the test starts the drag with the notification it would send.
+func TestDragReordersPrograms(t *testing.T) {
+	if os.Getenv("WINTRAY_UI_TEST") != "1" {
+		t.Skip("set WINTRAY_UI_TEST=1 on an interactive Windows desktop")
+	}
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	discardStaleMessages()
+	defer discardStaleMessages()
+	deactivate := activateTestManifest(t)
+	defer deactivate()
+
+	settings := config.DefaultSettings()
+	for i, name := range []string{"First", "Second", "Third"} {
+		settings.ManagedApps = append(settings.ManagedApps, config.ManagedAppEntry{
+			ID: fmt.Sprint(i + 1), Name: name, ExePath: `C:\Apps\` + name + `.exe`, RunOnStartup: true,
+		})
+	}
+	var saved []config.Settings
+	w, err := NewMainWindow(settings, Callbacks{OnSave: func(s config.Settings) { saved = append(saved, s) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.mw.Dispose()
+
+	step := func(f func()) {
+		done := make(chan struct{})
+		w.synchronize(func() { defer close(done); f() })
+		<-done
+		time.Sleep(200 * time.Millisecond)
+	}
+	order := func(apps []config.ManagedAppEntry) string {
+		var names []string
+		for _, app := range apps {
+			names = append(names, app.Name)
+		}
+		return strings.Join(names, ",")
+	}
+	var view win.HWND
+	// rowPoint is the middle of row in the TableView's client coordinates,
+	// where the captured pointer messages arrive.
+	rowPoint := func(row int) uintptr {
+		rect := win.RECT{Left: win.LVIR_BOUNDS}
+		win.SendMessage(view, win.LVM_GETITEMRECT, uintptr(row), uintptr(unsafe.Pointer(&rect)))
+		point := win.POINT{X: (rect.Left + rect.Right) / 2, Y: (rect.Top + rect.Bottom) / 2}
+		win.ClientToScreen(view, &point)
+		win.ScreenToClient(w.managedList.Handle(), &point)
+		return uintptr(win.MAKELONG(uint16(point.X), uint16(point.Y)))
+	}
+	beginDrag := func(row int) {
+		note := win.NMLISTVIEW{Hdr: win.NMHDR{HwndFrom: view, Code: uint32(win.LVN_BEGINDRAG)}, IItem: int32(row)}
+		win.SendMessage(w.managedList.Handle(), win.WM_NOTIFY, 0, uintptr(unsafe.Pointer(&note)))
+	}
+	w.mw.Starting().Attach(func() {
+		go func() {
+			time.Sleep(200 * time.Millisecond)
+			step(func() {
+				view, _ = nativeRowView(w.managedList)
+				w.managedList.SetCurrentIndex(0)
+				beginDrag(0)
+				table := w.managedList.Handle()
+				win.PostMessage(table, win.WM_MOUSEMOVE, win.MK_LBUTTON, rowPoint(1))
+				win.PostMessage(table, win.WM_MOUSEMOVE, win.MK_LBUTTON, rowPoint(2))
+				win.PostMessage(table, win.WM_LBUTTONUP, 0, rowPoint(2))
+			})
+			step(func() {
+				if got := order(w.settings.ManagedApps); got != "Second,Third,First" {
+					t.Errorf("order after dragging First to the end = %s", got)
+				}
+				if len(saved) != 1 || order(saved[0].ManagedApps) != "Second,Third,First" {
+					t.Errorf("a drag must save the final order exactly once, got %d saves", len(saved))
+				}
+				if w.managedList.CurrentIndex() != 2 || w.appName.Text() != "First" || w.managedListModel.rows[2].Name != "First" {
+					t.Errorf("the dragged program must stay selected in its new row: index=%d name=%q", w.managedList.CurrentIndex(), w.appName.Text())
+				}
+				// Moving back to where it started saves nothing new.
+				beginDrag(2)
+				table := w.managedList.Handle()
+				win.PostMessage(table, win.WM_MOUSEMOVE, win.MK_LBUTTON, rowPoint(2))
+				win.PostMessage(table, win.WM_LBUTTONUP, 0, rowPoint(2))
+			})
+			step(func() {
+				if len(saved) != 1 || listReorders[w.managedList.Handle()].dragging {
+					t.Errorf("a drag that did not move must not save and must end: saves=%d", len(saved))
+				}
+			})
+			w.RequestExplicitClose()
+		}()
+	})
+	w.ShowMainWindow()
+	w.Run()
+}
+
+// clickTrayCell clicks the middle of the native tray cell of row.
 func clickTrayCell(t *testing.T, w *MainWindow, row int) {
 	t.Helper()
 	for child := win.GetWindow(w.managedList.Handle(), win.GW_CHILD); child != 0; child = win.GetWindow(child, win.GW_HWNDNEXT) {
@@ -706,7 +815,11 @@ func clickTrayCell(t *testing.T, w *MainWindow, row int) {
 			x = int32(w.managedList.IntFrom96DPI(w.managedList.Columns().At(0).Width() + 56))
 			y = int32(w.managedList.IntFrom96DPI(24 + row*30 + 15))
 		}
-		w.onManagedListMouseDown(int(x), int(y), walk.LeftButton)
+		// A real click: the list view runs its own drag detection on the
+		// button-down and reports the finished click as NM_CLICK.
+		pos := uintptr(win.MAKELONG(uint16(x), uint16(y)))
+		win.PostMessage(child, win.WM_LBUTTONDOWN, win.MK_LBUTTON, pos)
+		win.PostMessage(child, win.WM_LBUTTONUP, 0, pos)
 		return
 	}
 	t.Fatal("list row view is missing")

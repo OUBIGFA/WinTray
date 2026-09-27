@@ -48,7 +48,7 @@ func (t *AppTasks) launchNow(entry config.ManagedAppEntry) error {
 			if sameExecutablePath(action.Command, t.selfExe) {
 				args, parseErr := windows.DecomposeCommandLine(action.Arguments)
 				matches = parseErr == nil && len(args) == 3 &&
-					(args[0] == AppTaskHelperRun || args[0] == AppTaskHelperShortcut) && sameExecutablePath(args[2], entry.ExePath)
+					(args[0] == AppTaskHelperRun || args[0] == AppTaskHelperShortcut || args[0] == AppTaskHelperConfigured) && sameExecutablePath(args[2], entry.ExePath)
 			}
 			if !matches {
 				return errors.New("registered task targets another executable; save settings again before testing")
