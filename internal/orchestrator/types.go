@@ -67,6 +67,9 @@ type Service struct {
 	externalStartupWait   time.Duration
 	logonTaskLaunch       func(config.ManagedAppEntry) error
 	logonTaskLaunchWait   time.Duration
+	// Process termination is best effort; the run-limit worker must separately
+	// observe survivors before allowing the session to exit.
+	terminateProcesses func([]uint32) int
 }
 
 func NewService(enumerator WindowEnumerator, manager WindowManager, logger Logger) *Service {
@@ -75,6 +78,7 @@ func NewService(enumerator WindowEnumerator, manager WindowManager, logger Logge
 		externalStartupLookup: startup.NewExternalStartupLookup(),
 		logonTaskLaunch:       startup.LaunchAppTaskNow,
 		logonTaskLaunchWait:   30 * time.Second,
+		terminateProcesses:    terminateProcessTrees,
 		// WinTray's logon task runs before Explorer works through its Run
 		// queue one entry at a time, so a late entry may take minutes.
 		externalStartupWait: 300 * time.Second,

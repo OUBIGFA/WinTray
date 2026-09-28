@@ -20,11 +20,23 @@ func TestCompare(t *testing.T) {
 		{a: "2.0.0", b: "10.0.0", want: -1},
 		{a: "1.1.0", b: "1.1.0-beta", want: 1},
 		{a: "1.0.0", b: "dev-20240101120000", want: 1},
+		{a: "1.0.0+build.2", b: "1.0.0", want: 0},
+		{a: "1.0.0+build.2", b: "1.0.0+build.10", want: 0},
+		{a: "1.0.0-rc.10", b: "1.0.0-rc.2", want: 1},
+		{a: "1.0.0-rc.2+build.10", b: "1.0.0-rc.2+build.2", want: 0},
+		{a: "1.0.0-beta.2", b: "1.0.0-beta.11", want: -1},
+		{a: "1.0.0-beta.11", b: "1.0.0-rc.1", want: -1},
+		{a: "1.0.0-1", b: "1.0.0-alpha", want: -1},
+		{a: "1.0.0-alpha", b: "1.0.0-alpha.1", want: -1},
+		{a: "1.0.0-rc.999999999999999999999", b: "1.0.0-rc.1000000000000000000000", want: -1},
 	}
 
 	for _, tc := range cases {
 		if got := Compare(tc.a, tc.b); got != tc.want {
 			t.Errorf("Compare(%q, %q) = %d, want %d", tc.a, tc.b, got, tc.want)
+		}
+		if got := Compare(tc.b, tc.a); got != -tc.want {
+			t.Errorf("reverse Compare(%q, %q) = %d, want %d", tc.b, tc.a, got, -tc.want)
 		}
 	}
 }
@@ -53,6 +65,21 @@ func TestCheckAt(t *testing.T) {
 			wantUpdate:  false,
 			wantLatest:  "1.2.0",
 			wantPageURL: "https://github.com/OUBIGFA/WinTray/releases/tag/v1.2.0",
+		},
+		{
+			name:        "build metadata does not advertise an update",
+			current:     "1.2.0+local.1",
+			body:        `{"tag_name":"v1.2.0"}`,
+			wantLatest:  "1.2.0",
+			wantPageURL: "https://github.com/OUBIGFA/WinTray",
+		},
+		{
+			name:        "newer numbered prerelease",
+			current:     "1.2.0-rc.2",
+			body:        `{"tag_name":"v1.2.0-rc.10"}`,
+			wantUpdate:  true,
+			wantLatest:  "1.2.0-rc.10",
+			wantPageURL: "https://github.com/OUBIGFA/WinTray",
 		},
 		{
 			name:        "missing page falls back to the repository",

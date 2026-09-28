@@ -65,10 +65,12 @@ func (s *Service) EndOverduePrograms(entries []config.ManagedAppEntry, now time.
 			pids = append(pids, pid)
 			return true
 		})
-		ended := terminateProcessTrees(pids)
+		ended := s.terminateProcesses(pids)
 		s.logger.Info(fmt.Sprintf("scheduled run time over: %s ran %s (limit %s), ended %d processes", entry.Name, now.Sub(started).Round(time.Second), limit, ended))
-		if ended == 0 {
-			// Still running (for example elevated); try again next pass.
+		if s.hasExistingManagedProcess(expectedPath, expectedName) {
+			// TerminateProcess is asynchronous and can succeed for only some
+			// instances (for example an elevated sibling may be inaccessible).
+			// Observe survivors instead of treating any success as completion.
 			check.Running++
 			if check.Next.IsZero() || now.Before(check.Next) {
 				check.Next = now
@@ -104,8 +106,10 @@ func uniqueRunLimitEntries(entries []config.ManagedAppEntry) []config.ManagedApp
 }
 
 // ambiguousRunLimitPaths identifies duplicate executable entries whose launch
-// arguments or effective run limits differ. The process matcher has no
-// argument-level identity, so neither entry can be safely terminated.
+// arguments or effective run limits differ and at least one has a run limit.
+// Unlimited duplicates need no polling and must not keep WinTray resident.
+// The process matcher has no argument-level identity, so neither limited
+// entry in an ambiguous group can be safely terminated.
 func ambiguousRunLimitPaths(entries []config.ManagedAppEntry) map[string]bool {
 	type runLimitSignature struct {
 		args  string
@@ -120,7 +124,7 @@ func ambiguousRunLimitPaths(entries []config.ManagedAppEntry) map[string]bool {
 		}
 		path := strings.ToLower(normalizePath(entry.ExePath))
 		signature := runLimitSignature{args: entry.Args, limit: limit}
-		if previous, ok := signatures[path]; ok && previous != signature {
+		if previous, ok := signatures[path]; ok && previous != signature && (previous.limit > 0 || limit > 0) {
 			ambiguous[path] = true
 			continue
 		}

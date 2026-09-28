@@ -3,6 +3,7 @@
 package update
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -88,14 +89,14 @@ func Normalize(tag string) string {
 
 // Compare orders two versions: >0 when a is newer than b, 0 when equal.
 // Numeric components rank first; a pre-release suffix (1.2.0-beta) ranks below
-// the plain release it belongs to.
+// the plain release it belongs to. Build metadata (+build) never affects order.
 func Compare(a, b string) int {
 	numsA, preA := split(a)
 	numsB, preB := split(b)
 
 	for i := 0; i < len(numsA) || i < len(numsB); i++ {
-		if diff := at(numsA, i) - at(numsB, i); diff != 0 {
-			return sign(diff)
+		if order := cmp.Compare(at(numsA, i), at(numsB, i)); order != 0 {
+			return order
 		}
 	}
 	if preA == preB {
@@ -107,13 +108,53 @@ func Compare(a, b string) int {
 	if preB == "" {
 		return -1
 	}
-	return strings.Compare(preA, preB)
+	return comparePrerelease(preA, preB)
+}
+
+// Compare dot-separated pre-release identifiers per SemVer: numbers sort
+// numerically and below text. Compare digit strings without integer conversion
+// so even large numeric identifiers retain their ordering.
+func comparePrerelease(a, b string) int {
+	partsA, partsB := strings.Split(a, "."), strings.Split(b, ".")
+	for i := 0; i < min(len(partsA), len(partsB)); i++ {
+		a, b := partsA[i], partsB[i]
+		numericA, numericB := numericIdentifier(a), numericIdentifier(b)
+		if numericA != numericB {
+			if numericA {
+				return -1
+			}
+			return 1
+		}
+		if numericA {
+			a, b = strings.TrimLeft(a, "0"), strings.TrimLeft(b, "0")
+			if order := cmp.Compare(len(a), len(b)); order != 0 {
+				return order
+			}
+		}
+		if order := strings.Compare(a, b); order != 0 {
+			return order
+		}
+	}
+	return cmp.Compare(len(partsA), len(partsB))
+}
+
+func numericIdentifier(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := range s {
+		if !isDigit(s[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 func split(v string) ([]int, string) {
-	normalized := Normalize(v)
+	// Metadata is not a pre-release suffix, including when both are present.
+	normalized, _, _ := strings.Cut(Normalize(v), "+")
 	pre := ""
-	if idx := strings.IndexAny(normalized, "-+ "); idx >= 0 {
+	if idx := strings.IndexAny(normalized, "- "); idx >= 0 {
 		pre = normalized[idx+1:]
 		normalized = normalized[:idx]
 	}
@@ -138,13 +179,6 @@ func at(nums []int, i int) int {
 		return nums[i]
 	}
 	return 0
-}
-
-func sign(v int) int {
-	if v > 0 {
-		return 1
-	}
-	return -1
 }
 
 func isDigit(b byte) bool {

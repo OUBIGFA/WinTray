@@ -358,16 +358,16 @@ func TestStart_CloseDelayHoldsWindowActionAfterLaunch(t *testing.T) {
 	const quick = 2 * time.Second
 
 	for i, tc := range []struct {
-		name         string
-		delaySeconds int
-		cancelAfter  time.Duration
-		launchNow    bool
-		wantCode     ResultCode
+		name              string
+		delaySeconds      int
+		cancelDuringDelay bool
+		launchNow         bool
+		wantCode          ResultCode
 	}{
 		{name: "no delay acts on the window right away", wantCode: ResultManaged},
 		{name: "delay holds the window scan and the close", delaySeconds: 2, wantCode: ResultManaged},
-		{name: "shutdown during the delay leaves the window alone", delaySeconds: 30, cancelAfter: 300 * time.Millisecond, wantCode: ResultNoWindowManaged},
-		{name: "launch now still counts a launch cancelled during the delay", delaySeconds: 30, cancelAfter: 300 * time.Millisecond, launchNow: true, wantCode: ResultStartedOnly},
+		{name: "shutdown during the delay leaves the window alone", delaySeconds: 30, cancelDuringDelay: true, wantCode: ResultNoWindowManaged},
+		{name: "launch now still counts a launch cancelled during the delay", delaySeconds: 30, cancelDuringDelay: true, launchNow: true, wantCode: ResultStartedOnly},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			releaseFile := filepath.Join(dir, fmt.Sprintf("release-%d.done", i))
@@ -382,26 +382,37 @@ func TestStart_CloseDelayHoldsWindowActionAfterLaunch(t *testing.T) {
 			t.Cleanup(func() { releaseHelper(t, exePath, releaseFile, enum.pid) })
 			mgr := &timedManager{}
 			svc := NewService(enum, mgr, &testLogger{})
-			ctx := context.Background()
-			if tc.cancelAfter > 0 {
-				var cancel context.CancelFunc
-				ctx, cancel = context.WithTimeout(ctx, tc.cancelAfter)
-				defer cancel()
+			svc.externalStartupLookup = func(string) (string, error) { return "", nil }
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			var cancelledAt time.Time
+			if tc.cancelDuringDelay {
+				// Synchronize cancellation with the post-launch age probe. A
+				// timer started before launch can expire during process discovery
+				// on a busy CI machine, testing a different cancellation path.
+				restoreAges := overrideProcessAges(t, func(pid uint32) (time.Time, bool) {
+					created, known := processStartTime(pid)
+					cancelledAt = time.Now()
+					cancel()
+					return created, known
+				}, time.Time{})
+				defer restoreAges()
 			}
 
-			started := time.Now()
 			var got Result
 			if tc.launchNow {
 				got = svc.StartNow(ctx, entry, 5)
 			} else {
 				got = svc.StartAndManage(ctx, entry, 5)
 			}
-			elapsed := time.Since(started)
 			if got.Code != tc.wantCode {
 				t.Fatalf("result = %+v, want code %s", got, tc.wantCode)
 			}
-			if tc.cancelAfter > 0 {
-				if elapsed >= quick || !enum.firstScan.IsZero() || len(mgr.closeCalls)+len(mgr.hideCalls) != 0 {
+			if tc.cancelDuringDelay {
+				if cancelledAt.IsZero() {
+					t.Fatal("launch never reached the close-delay age probe")
+				}
+				if elapsed := time.Since(cancelledAt); elapsed >= quick || !enum.firstScan.IsZero() || len(mgr.closeCalls)+len(mgr.hideCalls) != 0 {
 					t.Fatalf("cancelled launch took %s, scanned=%t close=%v hide=%v; want no wait and no window action", elapsed, !enum.firstScan.IsZero(), mgr.closeCalls, mgr.hideCalls)
 				}
 				return
@@ -420,8 +431,8 @@ func TestStart_CloseDelayHoldsWindowActionAfterLaunch(t *testing.T) {
 			if closeAfter := mgr.closeAt.Sub(created); closeAfter < wait {
 				t.Fatalf("window closed %s after the process started, want at least %s", closeAfter, wait)
 			}
-			if tc.delaySeconds == 0 && elapsed >= quick {
-				t.Fatalf("launch without delay took %s, want under %s", elapsed, quick)
+			if elapsed := mgr.closeAt.Sub(enum.firstScan); tc.delaySeconds == 0 && elapsed >= quick {
+				t.Fatalf("closing the discovered window without delay took %s, want under %s", elapsed, quick)
 			}
 		})
 	}
