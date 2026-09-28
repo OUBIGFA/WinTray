@@ -172,6 +172,7 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 	host := tray.NewHost(settings.Language, logger, orchestrator.FindConsoleWindow)
 	selfPath, _ := os.Executable()
 	box := traybox.NewBox(selfPath, logger)
+	host.SetTrayBox(box)
 	state := residencyState{autorun: isAutorunLaunch(args), startupPending: isAutorunLaunch(args)}
 	state.settingsOpen = shouldShowMainWindowForSettings(args, settings)
 	quitting := false

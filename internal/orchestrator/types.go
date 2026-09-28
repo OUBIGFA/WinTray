@@ -72,7 +72,7 @@ type Service struct {
 func NewService(enumerator WindowEnumerator, manager WindowManager, logger Logger) *Service {
 	return &Service{
 		enumerator: enumerator, manager: manager, logger: logger,
-		externalStartupLookup: startup.FindEnabledRunEntry,
+		externalStartupLookup: startup.NewExternalStartupLookup(),
 		logonTaskLaunch:       startup.LaunchAppTaskNow,
 		logonTaskLaunchWait:   30 * time.Second,
 		// WinTray's logon task runs before Explorer works through its Run

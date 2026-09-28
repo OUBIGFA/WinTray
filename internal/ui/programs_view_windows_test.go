@@ -36,3 +36,13 @@ func TestStartModeTaskReplacesEveryOtherLaunchFlag(t *testing.T) {
 		t.Fatalf("startModeOf after switching away = %v, want close to tray", got)
 	}
 }
+
+func TestStartModesPreservePausedStartup(t *testing.T) {
+	for _, mode := range []startMode{startToTray, startHidden, startNormal, startTask} {
+		app := config.ManagedAppEntry{}
+		mode.applyTo(&app)
+		if app.RunOnStartup {
+			t.Fatalf("mode %v unexpectedly enabled startup", mode)
+		}
+	}
+}

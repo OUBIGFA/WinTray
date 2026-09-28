@@ -83,16 +83,23 @@ func TestStartNow_FollowsEntryWindowBehavior(t *testing.T) {
 		name       string
 		closeAfter bool
 		hidden     bool
+		paused     bool
+		task       bool
 		wantAction string
 	}{
 		{name: "no option checked leaves the window alone", wantAction: ""},
 		{name: "close window after launch acts on the window", closeAfter: true, wantAction: "close"},
 		{name: "launch hidden in background leaves the window alone", hidden: true, wantAction: ""},
+		{name: "paused close-to-tray leaves the window alone", closeAfter: true, paused: true},
+		{name: "paused hidden mode uses normal launch", hidden: true, paused: true},
+		{name: "paused logon-task mode uses normal launch", task: true, paused: true},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			entry := base
+			entry.RunOnStartup = !tc.paused
+			entry.LaunchViaLogonTask = tc.task
 			entry.LaunchHiddenInBackground = tc.hidden
 			entry.TrayBehavior.AutoMinimizeAndHideOnLaunch = tc.closeAfter
 			enum := &testEnumerator{windows: []ManagedWindowInfo{

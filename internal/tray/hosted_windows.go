@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"sync"
 	"time"
+	"unsafe"
 
 	"github.com/lxn/walk"
 	"github.com/lxn/win"
 	"golang.org/x/sys/windows"
 	"wintray/internal/branding"
 	"wintray/internal/i18n"
+	"wintray/internal/traybox"
 )
 
 // HostedWindow describes a program whose window WinTray keeps hidden on its
@@ -39,23 +41,25 @@ type Host struct {
 	logger       Logger
 	lookupWindow func(pid uint32) uintptr
 	onEmpty      func()
+	box          *traybox.Box
 
 	mu    sync.Mutex
 	items map[uint32]*hostedItem
 }
 
 type hostedItem struct {
-	host      *Host
-	info      HostedWindow
-	form      *walk.MainWindow
-	icon      *walk.NotifyIcon
-	ownedIcon walk.Image
-	show      *walk.Action
-	hide      *walk.Action
-	release   *walk.Action
-	quit      *walk.Action
-	stop      chan struct{}
-	closed    bool
+	host           *Host
+	info           HostedWindow
+	form           *walk.MainWindow
+	icon           *walk.NotifyIcon
+	ownedIcon      walk.Image
+	show           *walk.Action
+	hide           *walk.Action
+	release        *walk.Action
+	quit           *walk.Action
+	stop           chan struct{}
+	closed         bool
+	unregisterIcon func()
 }
 
 // NewHost creates an empty host. lookupWindow resolves the window of a hosted
@@ -68,6 +72,10 @@ func NewHost(language string, logger Logger, lookupWindow func(pid uint32) uintp
 		items:        map[uint32]*hostedItem{},
 	}
 }
+
+// SetTrayBox connects hosted icon identities to the shared collection box.
+// Set it on the UI thread before adding any programs.
+func (h *Host) SetTrayBox(box *traybox.Box) { h.box = box }
 
 // SetOnEmpty registers a callback invoked (on the UI thread) when the last
 // hosted program goes away.
@@ -195,12 +203,18 @@ func (h *Host) newItem(w HostedWindow) (*hostedItem, error) {
 	if err != nil {
 		return nil, err
 	}
+	item := &hostedItem{host: h, info: w, form: form, stop: make(chan struct{})}
+	if h.box != nil {
+		item.unregisterIcon = h.box.RegisterHostedIcon(uintptr(form.Handle()), w.ExePath, func() {
+			deferOnUIThread(item, item.refreshCollection)
+		})
+	}
 	icon, err := walk.NewNotifyIcon(form)
 	if err != nil {
-		form.Dispose()
+		item.disposeResources()
 		return nil, err
 	}
-	item := &hostedItem{host: h, info: w, form: form, icon: icon, stop: make(chan struct{})}
+	item.icon = icon
 
 	img, owned := programIcon(w.ExePath)
 	if owned {
@@ -253,6 +267,42 @@ func programIcon(exePath string) (walk.Image, bool) {
 		return img, false
 	}
 	return nil, false
+}
+
+// refreshCollection publishes the existing icon instead of sending Walk a
+// synthetic TaskbarCreated. Walk aborts that re-add when Explorer already
+// has the icon, leaving the box with only an incomplete hidden registration.
+func (item *hostedItem) refreshCollection() {
+	if item.closed || item.icon == nil {
+		return
+	}
+	// Walk's NotifyIcon uses one icon per form (uID 0), WM_APP callbacks
+	// and NOTIFYICON_VERSION (3). Keep that native identity and behavior.
+	nid := win.NOTIFYICONDATA{
+		HWnd: item.form.Handle(), UCallbackMessage: win.WM_APP,
+		UFlags:      win.NIF_MESSAGE | win.NIF_STATE | win.NIF_TIP,
+		DwStateMask: win.NIS_HIDDEN,
+	}
+	nid.CbSize = uint32(unsafe.Sizeof(nid) - unsafe.Sizeof(win.HICON(0)))
+	copy(nid.SzTip[:], windows.StringToUTF16(item.info.Name))
+	if !win.Shell_NotifyIcon(win.NIM_MODIFY, &nid) {
+		item.host.logger.Warn(fmt.Sprintf("tray host: refresh collection failed for %s", item.info.Name))
+		return
+	}
+	nid.UVersion = win.NOTIFYICON_VERSION
+	if !win.Shell_NotifyIcon(win.NIM_SETVERSION, &nid) {
+		item.host.logger.Warn(fmt.Sprintf("tray host: refresh callback version failed for %s", item.info.Name))
+	}
+	// Let Walk republish its own DPI-specific image. Its setter otherwise
+	// suppresses an unchanged image, which a newly started box has not seen.
+	image := item.icon.Icon()
+	if err := item.icon.SetIcon(nil); err != nil {
+		item.host.logger.Warn(fmt.Sprintf("tray host: refresh image failed for %s: %v", item.info.Name, err))
+		return
+	}
+	if err := item.icon.SetIcon(image); err != nil {
+		item.host.logger.Warn(fmt.Sprintf("tray host: restore image failed for %s: %v", item.info.Name, err))
+	}
 }
 
 func (item *hostedItem) applyLanguage(language string) {
@@ -430,6 +480,11 @@ func (item *hostedItem) watchProcess(h windows.Handle, wakeWindow win.HWND) {
 
 func (item *hostedItem) disposeResources() {
 	disposeNotifyIcon(item.icon)
+	item.icon = nil
+	if item.unregisterIcon != nil {
+		item.unregisterIcon()
+		item.unregisterIcon = nil
+	}
 	if item.ownedIcon != nil {
 		item.ownedIcon.Dispose()
 		item.ownedIcon = nil

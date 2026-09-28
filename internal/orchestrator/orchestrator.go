@@ -71,6 +71,11 @@ func (s *Service) StartAndManage(ctx context.Context, entry config.ManagedAppEnt
 // handling is best effort here: the launch itself already succeeded, so it must
 // not be reported as a failure.
 func (s *Service) StartNow(ctx context.Context, entry config.ManagedAppEntry, retrySeconds int) Result {
+	// Disabled startup settings remain saved, but must not affect a manual
+	// launch while their master switch (and their editor) is off.
+	if !entry.RunOnStartup {
+		return s.start(ctx, entry, retrySeconds, startOptions{windowOptional: true})
+	}
 	if entry.LaunchViaLogonTask {
 		return s.start(ctx, entry, retrySeconds, startOptions{windowOptional: true, launchViaTask: true})
 	}

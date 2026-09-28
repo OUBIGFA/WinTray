@@ -107,8 +107,11 @@ func TestMainWindowInteractions(t *testing.T) {
 				if w.managedList.Columns().Len() != 3 || w.managedList.Columns().At(1).Title() != zh.TrayBoxHomeTitle || w.managedListModel.rows[0].Collected || trayCheckColumns[w.managedList.Handle()] == nil {
 					t.Error("the tray icon column must be present and unchecked by default")
 				}
-				if w.delayBlock.Parent() != w.modeLabel.Parent() || w.scheduleRow.Parent().Bounds().Y < w.modeLabel.Parent().Bounds().Y+w.modeLabel.Parent().Bounds().Height || w.scheduleEnabled.Text() != zh.ManagedSchedule {
-					t.Error("the close delay must sit below the start modes, followed by a checkbox labelled custom timing")
+				if w.delayBlock.Parent() != w.modeLabel.Parent() || w.argsBlock.Bounds().Y < w.modeBlock.Bounds().Y+w.modeBlock.Bounds().Height || w.scheduleRow.Parent().Bounds().Y < w.argsBlock.Bounds().Y+w.argsBlock.Bounds().Height || w.scheduleEnabled.Text() != zh.ManagedSchedule {
+					t.Error("start modes and close delay must precede arguments, then independent custom timing")
+				}
+				if w.appEnabled.Text() != "开机启动此程序" || w.appEnabled.Parent().Children().At(0) != w.appEnabled {
+					t.Error("the sign-in checkbox must replace the redundant section label")
 				}
 				w.managedList.SetCurrentIndex(0)
 			})
@@ -131,6 +134,7 @@ func TestMainWindowInteractions(t *testing.T) {
 				captureTestWindow(t, w, "programs-zh")
 				win.SendMessage(trayCheckColumns[w.managedList.Handle()].view, win.LVM_SETHOTITEM, 2, 0)
 				captureTestWindow(t, w, "programs-tray-hover")
+				checkTrayCheckboxPostPaint(t, w)
 				if !w.editor.Visible() || w.appName.Text() != "Cloud Drive" || w.appPath.Text() != settings.ManagedApps[0].ExePath {
 					t.Error("selection did not populate the editor")
 				}
@@ -189,7 +193,7 @@ func TestMainWindowInteractions(t *testing.T) {
 				}
 				// Each setting starts at the left edge of the editor, with its
 				// name above its control.
-				for _, widget := range []walk.Widget{w.appEnabledLabel, w.appEnabled, w.appEnabledHint, w.modeLabel, w.delayLabel, w.argsLabel} {
+				for _, widget := range []walk.Widget{w.appEnabled, w.appEnabledHint, w.modeLabel, w.delayLabel, w.argsLabel} {
 					if x := widget.Bounds().X; x != 0 {
 						t.Errorf("%T with text starting at x=%d, want it at the left edge of its group", widget, x)
 					}
@@ -241,6 +245,45 @@ func TestMainWindowInteractions(t *testing.T) {
 					t.Error("the list check box must switch the program on and update the editor")
 				}
 				_ = w.managedListModel.SetChecked(0, false)
+				// RocketDock regression: a paused entry must not offer active
+				// startup choices that look like they apply independently.
+				before = saves
+				if w.modeBlock.Enabled() || w.modeTray.Enabled() || w.modeHidden.Enabled() || w.modeTask.Enabled() || w.modeNormal.Enabled() || w.delayEdit.Enabled() || w.argsEdit.Enabled() {
+					t.Error("paused program must disable all startup mode editing")
+				}
+				w.setStartMode(startTask)
+				if w.settings.ManagedApps[0].LaunchViaLogonTask || saves != before {
+					t.Error("paused startup mode must reject edits")
+				}
+				// The schedule stays editable while sign-in launch is disabled.
+				click(w.scheduleEnabled)
+				if !w.scheduleEnabled.Enabled() || !w.startDelayEdit.Enabled() || !w.autoExitEdit.Enabled() {
+					t.Error("paused startup must leave custom timing editable")
+				}
+				w.autoExitEdit.SetText("5")
+				w.autoExitEdit.SendMessage(win.WM_KEYDOWN, win.VK_RETURN, 0)
+				if config.ScheduledRunLimit(w.settings.ManagedApps[0]) != 5 || w.settings.ManagedApps[0].RunOnStartup {
+					t.Error("custom timing must retain its run limit without enabling sign-in launch")
+				}
+				captureTestWindow(t, w, "programs-startup-disabled")
+				click(w.scheduleEnabled)
+				click(w.appEnabled)
+				if !w.modeBlock.Enabled() || !w.modeTask.Enabled() || !w.argsEdit.Enabled() {
+					t.Error("enabling startup must activate mode editing")
+				}
+				click(w.modeTask)
+				if len(config.LogonTaskApps(w.Settings())) != 1 {
+					t.Error("enabled launch at boot must produce a logon task")
+				}
+				click(w.appEnabled)
+				w.syncManagedEditor()
+				if w.settings.ManagedApps[0].RunOnStartup || len(config.LogonTaskApps(w.Settings())) != 0 || w.modeTask.Enabled() {
+					t.Error("an explicit pause must remain effective after refreshing the editor")
+				}
+				// Restore the hidden-mode fixture used by later language checks.
+				click(w.appEnabled)
+				click(w.modeHidden)
+				click(w.appEnabled)
 				click(w.launchNowBtn)
 				if launches != 1 || w.launchNowBtn.Enabled() {
 					t.Error("a program switched off should still launch manually, with busy feedback")

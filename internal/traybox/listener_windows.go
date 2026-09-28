@@ -90,6 +90,9 @@ type trackedIcon struct {
 
 type listenerConfig struct {
 	className string
+	// Only explicitly registered WinTray owner windows use a hosted path;
+	// WinTray's own icon must continue to be excluded from collection.
+	hostedOwners *sync.Map
 	// target returns the window requests are passed on to.
 	target func(self win.HWND) win.HWND
 	// raise keeps the listener above Explorer's taskbar.
@@ -529,6 +532,11 @@ func (l *listener) iconPath(d trayData) string {
 		}
 		l.mu.Unlock()
 	}
+	if l.cfg.hostedOwners != nil {
+		if owner, ok := l.cfg.hostedOwners.Load(d.HWnd); ok {
+			return owner.(hostedIconOwner).path
+		}
+	}
 	return windowProcessPath(d.HWnd)
 }
 
@@ -663,6 +671,18 @@ func (l *listener) sync() {
 	l.mu.Unlock()
 	for _, p := range pending {
 		n := postTaskbarCreated(p, l.taskbarCreated)
+		// These icons live in WinTray, so the hosted executable's process
+		// enumeration cannot find them when collection is enabled later.
+		if l.cfg.hostedOwners != nil {
+			l.cfg.hostedOwners.Range(func(_, value any) bool {
+				owner := value.(hostedIconOwner)
+				if owner.path == p && owner.refresh != nil {
+					owner.refresh()
+					n++
+				}
+				return true
+			})
+		}
 		l.logger.Info(fmt.Sprintf("tray box: asked %d windows of %s to register their icons", n, p))
 	}
 }

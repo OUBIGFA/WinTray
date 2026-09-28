@@ -72,10 +72,10 @@ type MainWindow struct {
 	appPath          *walk.Label
 	browseLink       *walk.LinkLabel
 	launchNowBtn     *walk.PushButton
-	appEnabledLabel  *walk.Label
 	appEnabled       *walk.CheckBox
 	appEnabledHint   *walk.TextLabel
 	modeLabel        *walk.Label
+	modeBlock        *walk.Composite
 	modeTray         *walk.RadioButton
 	modeHidden       *walk.RadioButton
 	modeTask         *walk.RadioButton
@@ -97,6 +97,7 @@ type MainWindow struct {
 	autoExitUnit     *walk.Label
 	scheduleHint     *walk.TextLabel
 	argsLabel        *walk.Label
+	argsBlock        *walk.Composite
 	argsEdit         *walk.LineEdit
 	argsHint         *walk.TextLabel
 	removeBtn        *walk.PushButton

@@ -69,13 +69,14 @@ func nativeRowView(list *walk.TableView) (win.HWND, win.HIMAGELIST) {
 	return 0, 0
 }
 
-func trayCheckColumnWndProc(hwnd, msg, wp uintptr, lp unsafe.Pointer, id, ref uintptr) uintptr {
-	result, _, _ := defSubclassProc.Call(hwnd, msg, wp, uintptr(lp))
+func trayCheckColumnWndProc(hwnd, msg, wp, lp, id, ref uintptr) uintptr {
+	result, _, _ := defSubclassProc.Call(hwnd, msg, wp, lp)
 	column := trayCheckColumns[win.HWND(hwnd)]
-	if column == nil || uint32(msg) != win.WM_NOTIFY || lp == nil {
+	if column == nil || uint32(msg) != win.WM_NOTIFY || lp == 0 {
 		return result
 	}
-	header := (*win.NMHDR)(lp)
+	notification := nativeMessagePointer(lp)
+	header := (*win.NMHDR)(notification)
 	if header.HwndFrom != column.view {
 		return result
 	}
@@ -83,10 +84,10 @@ func trayCheckColumnWndProc(hwnd, msg, wp uintptr, lp unsafe.Pointer, id, ref ui
 		// NM_CLICK arrives once the list view has finished its own mouse
 		// handling. A button-up message does not: the list view swallows it
 		// in its drag detection, so the first click of a pair was lost.
-		column.click((*win.NMITEMACTIVATE)(lp).PtAction)
+		column.click((*win.NMITEMACTIVATE)(notification).PtAction)
 		return result
 	}
-	draw := (*win.NMLVCUSTOMDRAW)(lp)
+	draw := (*win.NMLVCUSTOMDRAW)(notification)
 	if header.Code != win.NM_CUSTOMDRAW || draw.ISubItem != 1 {
 		return result
 	}
@@ -98,7 +99,14 @@ func trayCheckColumnWndProc(hwnd, msg, wp uintptr, lp unsafe.Pointer, id, ref ui
 		if row < 0 || row >= len(column.model.rows) || !column.model.rows[row].CanCollect {
 			return result
 		}
-		rc := draw.Nmcd.Rc
+		// Post-paint notifications during selection/hot-item changes can
+		// have an empty rc. Resolve the cell through the native list view;
+		// centering in that empty rectangle draws at the header's origin.
+		rc := win.RECT{Top: 1, Left: win.LVIR_BOUNDS}
+		if win.SendMessage(column.view, win.LVM_GETSUBITEMRECT, uintptr(row), uintptr(unsafe.Pointer(&rc))) == 0 || rc.Right <= rc.Left || rc.Bottom <= rc.Top {
+			return result
+		}
+		runtime.KeepAlive(&rc)
 		x := rc.Left + (rc.Right-rc.Left-column.width)/2
 		y := rc.Top + (rc.Bottom-rc.Top-column.height)/2
 		index := int32(0)
@@ -108,6 +116,13 @@ func trayCheckColumnWndProc(hwnd, msg, wp uintptr, lp unsafe.Pointer, id, ref ui
 		win.ImageList_DrawEx(column.stateImages, index, draw.Nmcd.Hdc, x, y, column.width, column.height, win.CLR_DEFAULT, win.CLR_DEFAULT, win.ILD_TRANSPARENT)
 	}
 	return result
+}
+
+// LPARAM is also used for coordinates and integer flags. Keep it as uintptr
+// in callbacks so the Go stack scanner never treats those values as pointers;
+// convert only notifications that Windows defines as native memory addresses.
+func nativeMessagePointer(address uintptr) unsafe.Pointer {
+	return *(*unsafe.Pointer)(unsafe.Pointer(&address))
 }
 
 // click toggles the row under point when point is in the tray column.

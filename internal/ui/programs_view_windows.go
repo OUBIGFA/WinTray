@@ -267,10 +267,10 @@ func (w *MainWindow) buildDetailPane(parent walk.Container) error {
 	if err = w.buildStartMode(w.editor); err != nil {
 		return err
 	}
-	if err = w.buildSchedule(w.editor); err != nil {
+	if err = w.buildArguments(w.editor); err != nil {
 		return err
 	}
-	if err = w.buildArguments(w.editor); err != nil {
+	if err = w.buildSchedule(w.editor); err != nil {
 		return err
 	}
 	if _, err = walk.NewVSpacer(w.editor); err != nil {
@@ -294,9 +294,6 @@ func (w *MainWindow) buildSignIn(parent walk.Container) error {
 	if err != nil {
 		return err
 	}
-	if w.appEnabledLabel, err = newFieldLabel(block); err != nil {
-		return err
-	}
 	if w.appEnabled, err = walk.NewCheckBox(block); err != nil {
 		return err
 	}
@@ -310,6 +307,7 @@ func (w *MainWindow) buildSignIn(parent walk.Container) error {
 		}
 		app.RunOnStartup = w.appEnabled.Checked()
 		w.updateManagedRow(idx)
+		w.syncManagedEditor()
 		w.save()
 	})
 	w.appEnabledHint, err = newWrappedHint(block)
@@ -368,6 +366,7 @@ func (w *MainWindow) buildStartMode(parent walk.Container) error {
 	if err != nil {
 		return err
 	}
+	w.modeBlock = block
 	if w.modeLabel, err = newFieldLabel(block); err != nil {
 		return err
 	}
@@ -565,6 +564,7 @@ func (w *MainWindow) buildArguments(parent walk.Container) error {
 	if err != nil {
 		return err
 	}
+	w.argsBlock = block
 	if w.argsLabel, err = newFieldLabel(block); err != nil {
 		return err
 	}
@@ -580,7 +580,7 @@ func (w *MainWindow) buildArguments(parent walk.Container) error {
 			return
 		}
 		app, _, ok := w.selectedManagedApp()
-		if !ok {
+		if !ok || !app.RunOnStartup {
 			return
 		}
 		app.Args = w.argsEdit.Text()
@@ -705,7 +705,6 @@ func (w *MainWindow) applyProgramsLanguage(msg i18n.Messages) {
 	w.browseLink.SetToolTipText(msg.BrowseProgramHint)
 	w.setLaunchNowBusy(w.launchNowBusy)
 	w.launchNowBtn.SetToolTipText(msg.ManagedLaunchNowHint)
-	w.appEnabledLabel.SetText(msg.ManagedEnabledLabel)
 	w.appEnabled.SetText(msg.ManagedEnabled)
 	w.appEnabledHint.SetText(msg.ManagedEnabledHint)
 	w.modeLabel.SetText(msg.ManagedModeLabel)
@@ -910,21 +909,19 @@ func (w *MainWindow) onManagedChecked(idx int, checked bool) {
 	w.settings.ManagedApps[idx].RunOnStartup = checked
 	w.updateManagedRow(idx)
 	if _, selected, ok := w.selectedManagedApp(); ok && selected == idx {
-		w.updatingEditor = true
-		w.appEnabled.SetChecked(checked)
-		w.updatingEditor = false
+		w.syncManagedEditor()
 	}
 	w.save()
 }
 
 func (w *MainWindow) setStartMode(mode startMode) {
 	app, idx, ok := w.selectedManagedApp()
-	if !ok || startModeOf(*app) == mode {
+	if !ok || !app.RunOnStartup || startModeOf(*app) == mode {
 		return
 	}
 	mode.applyTo(app)
 	w.updateManagedRow(idx)
-	w.showStartMode(mode)
+	w.syncManagedEditor()
 	w.save()
 }
 
@@ -948,6 +945,9 @@ func (w *MainWindow) showStartMode(mode startMode) {
 		w.launchNowBtn.SetToolTipText(msg.ManagedTaskLaunchNowHint)
 	} else {
 		w.argsHint.SetText(msg.ManagedArgsHint)
+		w.launchNowBtn.SetToolTipText(msg.ManagedLaunchNowHint)
+	}
+	if app, _, ok := w.selectedManagedApp(); ok && !app.RunOnStartup {
 		w.launchNowBtn.SetToolTipText(msg.ManagedLaunchNowHint)
 	}
 	w.delayBlock.SetEnabled(mode == startToTray)
@@ -1007,6 +1007,10 @@ func (w *MainWindow) syncManagedEditor() {
 	defer func() { w.updatingEditor = false }()
 
 	w.editor.SetEnabled(ok)
+	// Startup modes and arguments share the sign-in switch. Scheduling is
+	// independent: its run limit also applies to manually started programs.
+	w.modeBlock.SetEnabled(ok && app.RunOnStartup)
+	w.argsBlock.SetEnabled(ok && app.RunOnStartup)
 	if ok {
 		isExe := strings.EqualFold(filepath.Ext(app.ExePath), ".exe")
 		w.modeTask.SetEnabled(isExe)

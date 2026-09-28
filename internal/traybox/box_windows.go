@@ -2,7 +2,10 @@
 
 package traybox
 
-import "strings"
+import (
+	"strings"
+	"sync"
+)
 
 // Box collects the tray icons of the programs selected in WinTray's list.
 // Its methods run on the UI thread.
@@ -12,6 +15,15 @@ type Box struct {
 	paths    []string
 	listener *listener
 	config   listenerConfig
+	// Hosted windows belong to WinTray, but their icons represent another
+	// executable. Keep identities across listener stop/start cycles.
+	hostedOwners sync.Map // uint32 HWND -> hostedIconOwner
+}
+
+type hostedIconOwner struct {
+	path string
+	// refresh queues a current native icon update on its owning UI thread.
+	refresh func()
 }
 
 func NewBox(selfPath string, logger Logger) *Box {
@@ -23,6 +35,15 @@ func NewBox(selfPath string, logger Logger) *Box {
 }
 
 func (b *Box) HasSelection() bool { return len(b.paths) != 0 }
+
+// RegisterHostedIcon associates a NotifyIcon owner with the program it hosts.
+// Call before creating the icon; release after disposing it, before destroying
+// the owner window, so reused window handles never inherit the association.
+func (b *Box) RegisterHostedIcon(hwnd uintptr, exePath string, refresh func()) func() {
+	owner := uint32(hwnd)
+	b.hostedOwners.Store(owner, hostedIconOwner{canonicalIconPath(exePath), refresh})
+	return func() { b.hostedOwners.Delete(owner) }
+}
 
 // SetPaths collects the icons of exactly these programs. Icons of programs
 // no longer listed are shown in the notification area again. On failure the
@@ -44,7 +65,9 @@ func (b *Box) SetPaths(paths []string) error {
 			b.logger.Info("tray box: stopped")
 		}
 	case b.listener == nil:
-		l, err := startListener(b.config, b.selfPath, selected, b.logger)
+		cfg := b.config
+		cfg.hostedOwners = &b.hostedOwners
+		l, err := startListener(cfg, b.selfPath, selected, b.logger)
 		if err != nil {
 			return err
 		}

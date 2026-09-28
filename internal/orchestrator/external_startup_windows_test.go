@@ -198,6 +198,28 @@ func TestStartupWithoutEnabledRunEntryAndManualStartStillLaunch(t *testing.T) {
 
 type callbackEnumerator func() []ManagedWindowInfo
 
+func TestManualStartWithStartupDisabledIgnoresSavedModes(t *testing.T) {
+	for _, mode := range []string{"hidden", "tray", "task"} {
+		t.Run(mode, func(t *testing.T) {
+			entry := startupTestEntry(t)
+			entry.RunOnStartup = false
+			entry.LaunchHiddenInBackground = mode == "hidden"
+			entry.TrayBehavior.AutoMinimizeAndHideOnLaunch = mode == "tray"
+			entry.LaunchViaLogonTask = mode == "task"
+			manager := &testManager{}
+			svc := NewService(&testEnumerator{}, manager, &testLogger{})
+			svc.logonTaskLaunch = func(config.ManagedAppEntry) error {
+				t.Fatal("paused manual launch must not invoke the saved logon task")
+				return nil
+			}
+			result := svc.StartNow(context.Background(), entry, 0)
+			if result.Code != ResultStartedOnly || result.Hidden != nil || len(manager.closeCalls)+len(manager.hideCalls) != 0 || len(startupTestPIDs(entry.ExePath)) != 1 {
+				t.Fatalf("disabled mode %s must launch normally once: result=%+v close=%v hide=%v", mode, result, manager.closeCalls, manager.hideCalls)
+			}
+		})
+	}
+}
+
 func (e callbackEnumerator) EnumerateTopLevelWindows() []ManagedWindowInfo { return e() }
 
 func TestStartupRechecksAfterBaselineBeforeLaunching(t *testing.T) {

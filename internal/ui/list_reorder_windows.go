@@ -48,22 +48,22 @@ func installListReorder(list *walk.TableView, view win.HWND, move func(from, to 
 	return nil
 }
 
-func listReorderWndProc(hwnd, msg, wp uintptr, lp unsafe.Pointer, id, ref uintptr) uintptr {
+func listReorderWndProc(hwnd, msg, wp, lp, id, ref uintptr) uintptr {
 	reorder := listReorders[win.HWND(hwnd)]
 	if reorder == nil {
-		result, _, _ := defSubclassProc.Call(hwnd, msg, wp, uintptr(lp))
+		result, _, _ := defSubclassProc.Call(hwnd, msg, wp, lp)
 		return result
 	}
 	switch uint32(msg) {
 	case win.WM_NOTIFY:
-		header := (*win.NMHDR)(lp)
-		if lp != nil && header.HwndFrom == reorder.view && header.Code == uint32(win.LVN_BEGINDRAG) {
-			reorder.begin(int((*win.NMLISTVIEW)(lp).IItem))
+		header := (*win.NMHDR)(nativeMessagePointer(lp))
+		if lp != 0 && header.HwndFrom == reorder.view && header.Code == uint32(win.LVN_BEGINDRAG) {
+			reorder.begin(int((*win.NMLISTVIEW)(nativeMessagePointer(lp)).IItem))
 			return 0
 		}
 	case win.WM_MOUSEMOVE:
 		if reorder.dragging {
-			reorder.follow(uintptr(unsafe.Pointer(lp)))
+			reorder.follow(lp)
 			return 0
 		}
 	case win.WM_LBUTTONUP:
@@ -76,7 +76,7 @@ func listReorderWndProc(hwnd, msg, wp uintptr, lp unsafe.Pointer, id, ref uintpt
 			reorder.end()
 		}
 	}
-	result, _, _ := defSubclassProc.Call(hwnd, msg, wp, uintptr(lp))
+	result, _, _ := defSubclassProc.Call(hwnd, msg, wp, lp)
 	return result
 }
 

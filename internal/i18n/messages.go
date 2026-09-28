@@ -51,7 +51,6 @@ type Messages struct {
 	ManagedArgsHint                string
 	ManagedArgsPlaceholder         string
 	ManagedEnabled                 string
-	ManagedEnabledLabel            string
 	ManagedEnabledHint             string
 	ManagedModeLabel               string
 	ManagedLaunchOnly              string
@@ -188,11 +187,11 @@ var zhCN = Messages{
 	ManagedAppArgs:                 "启动参数（可选）",
 	ManagedArgsHint:                "适用于 .exe 程序及 .bat、.cmd、.ps1、.py 等脚本",
 	ManagedArgsPlaceholder:         "例如 --minimized",
-	ManagedEnabled:                 "开机后自动启动此程序",
+	ManagedEnabled:                 "开机启动此程序",
 	ManagedEnabledHint:             "取消后仅停止 WinTray 的启动安排，程序自身的自启会保留或恢复",
 	ManagedModeLabel:               "启动方式",
 	ManagedLaunchOnly:              "正常启动",
-	ManagedLaunchOnlyHint:          "只负责启动，窗口保持原样",
+	ManagedLaunchOnlyHint:          "优先沿用程序原有自启，没有自启时由 WinTray 启动；不收起或关闭窗口",
 	ManagedTaskLaunch:              "开机即启动",
 	ManagedTaskLaunchHint:          "优先沿用原自启的参数、静默和权限，已有登录任务直接复用；没有原自启时按本页配置创建任务",
 	ManagedTaskLaunchTip:           "不经过普通自启队列；仅支持 .exe；新建管理员任务首次需确认，已有任务的权限和延迟保持原样",
@@ -221,7 +220,7 @@ var zhCN = Messages{
 	ManagedLaunchHidden:            "后台启动",
 	ManagedLaunchHiddenHint:        "不弹出任何窗口，直接在后台运行；适合 .bat、.ps1、.py 等脚本和命令行工具",
 	ManagedLaunchNow:               "立即启动",
-	ManagedLaunchNowHint:           "按当前设置马上启动一次，可以用来试试效果",
+	ManagedLaunchNowHint:           "立即启动一次；未勾选开机启动时按正常方式启动",
 	ManagedLaunchNowBusy:           "启动中…",
 	LaunchNowDoneBody:              "已启动: %s",
 	AddProgram:                     "添加程序",
@@ -293,7 +292,6 @@ var zhCN = Messages{
 	SettingsTroubleshootTitle:      "故障排查",
 	LogsTitle:                      "运行日志",
 	CleanupRestoreTitle:            "重置所有数据",
-	ManagedEnabledLabel:            "开机启动",
 	LanguageEnLabel:                "English",
 }
 
@@ -334,7 +332,7 @@ var enUS = Messages{
 	ManagedEnabledHint:             "Stops only WinTray's launch scheduling; the app's own startup remains or is restored",
 	ManagedModeLabel:               "How it starts",
 	ManagedLaunchOnly:              "Start normally",
-	ManagedLaunchOnlyHint:          "Just starts the program and leaves its window as is",
+	ManagedLaunchOnlyHint:          "Uses the app's own startup when available, or starts it through WinTray; leaves the window as is",
 	ManagedTaskLaunch:              "Launch at boot",
 	ManagedTaskLaunchHint:          "Preserves original startup arguments, silent behavior and privileges; reuses native tasks, or creates a task from these settings when no startup entry exists",
 	ManagedTaskLaunchTip:           "Bypasses the normal startup queue; .exe only; creating an elevated task needs confirmation, while existing task privileges and delays stay unchanged",
@@ -363,7 +361,7 @@ var enUS = Messages{
 	ManagedLaunchHidden:            "Run in background",
 	ManagedLaunchHiddenHint:        "Runs in the background without showing any window; best for scripts (.bat, .ps1, .py) and command-line tools",
 	ManagedLaunchNow:               "Launch Now",
-	ManagedLaunchNowHint:           "Starts it now with these settings, so you can try them out",
+	ManagedLaunchNowHint:           "Starts it now; uses normal mode when start at sign-in is off",
 	ManagedLaunchNowBusy:           "Starting…",
 	LaunchNowDoneBody:              "Started: %s",
 	AddProgram:                     "Add Program",
@@ -435,7 +433,6 @@ var enUS = Messages{
 	SettingsTroubleshootTitle:      "Troubleshooting",
 	LogsTitle:                      "Logs",
 	CleanupRestoreTitle:            "Reset all data",
-	ManagedEnabledLabel:            "At sign-in",
 	LanguageEnLabel:                "English",
 }
 
