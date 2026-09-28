@@ -4,6 +4,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -31,7 +32,7 @@ func TestMainSessionHostingLifecycle(t *testing.T) {
 	if os.Getenv("WINTRAY_UI_TEST") != "1" {
 		t.Skip("set WINTRAY_UI_TEST=1 on an interactive Windows desktop")
 	}
-	for _, mode := range []string{"last program exits", "manual exit restores", "exit during startup", "settings remain open", "silent keeps hosting", "no hosted programs"} {
+	for _, mode := range []string{"last program exits", "manual exit restores", "exit during startup", "settings remain open", "silent keeps hosting", "no hosted programs", "startup before settings", "startup with collector before settings"} {
 		t.Run(mode, func(t *testing.T) {
 			dir := t.TempDir()
 			t.Cleanup(func() {
@@ -62,7 +63,15 @@ func TestMainSessionHostingLifecycle(t *testing.T) {
 				settings.ExitAfterManagedAppsCompleted = false
 			}
 			var releases []string
-			if mode != "no hosted programs" {
+			probeStartup := strings.HasPrefix(mode, "startup ")
+			if mode == "startup with collector before settings" {
+				// Select a nonexistent app so the real collector starts without
+				// intercepting any of the user's tray icons.
+				settings.ManagedApps = append(settings.ManagedApps, config.ManagedAppEntry{
+					Name: "collector fixture", ExePath: filepath.Join(dir, "absent.exe"), CollectTrayIcon: true,
+				})
+			}
+			if mode != "no hosted programs" && !probeStartup {
 				for i := 0; i < 2; i++ {
 					exe := filepath.Join(dir, fmt.Sprintf("console-%d.exe", i))
 					if err := os.WriteFile(exe, image, 0o600); err != nil {
@@ -86,6 +95,9 @@ func TestMainSessionHostingLifecycle(t *testing.T) {
 			}
 			eventName := fmt.Sprintf("WinTray_SessionTest_%d_%d", os.Getpid(), time.Now().UnixNano())
 			cmd := exec.Command(sessionExe, "-test.run=^TestMainSessionProcess$", "--", dir, manifest, eventName)
+			if probeStartup {
+				cmd.Env = append(os.Environ(), "WINTRAY_TEST_EARLY_STARTUP=1")
+			}
 			var output bytes.Buffer
 			cmd.Stdout, cmd.Stderr = &output, &output
 			cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
@@ -113,8 +125,26 @@ func TestMainSessionHostingLifecycle(t *testing.T) {
 					t.Fatal("session did not exit")
 				}
 			}
-			if mode == "no hosted programs" {
+			if mode == "no hosted programs" || probeStartup {
+				if mode == "startup with collector before settings" {
+					// Collection intentionally keeps WinTray resident. Exit through
+					// its real UI so the listener also restores its native state.
+					waitSessionCondition(t, "startup readiness report", func() bool {
+						_, err := os.Stat(filepath.Join(dir, "startup-ready"))
+						return err == nil
+					})
+					waitSessionCondition(t, "session activation", func() bool { return ipc.TrySignalActivation(eventName) })
+					var hwnd win.HWND
+					waitSessionCondition(t, "settings window", func() bool { hwnd = visibleSessionWindow(uint32(cmd.Process.Pid)); return hwnd != 0 })
+					clickSessionButton(t, hwnd, "退出 WinTray")
+				}
 				awaitExit()
+				if probeStartup {
+					data, err := os.ReadFile(filepath.Join(dir, "startup-ready"))
+					if err != nil || string(data) != "before settings" {
+						t.Fatalf("startup was not released before settings: report=%q err=%v", data, err)
+					}
+				}
 				return
 			}
 
@@ -346,8 +376,39 @@ func TestMainSessionProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer logger.Close()
+	readyName := eventName + "_Ready"
+	checkStartup := func(config.Settings) {
+		if os.Getenv("WINTRAY_TEST_EARLY_STARTUP") != "1" {
+			return
+		}
+		// Probe the real cross-process readiness contract while registration
+		// and UI construction have not yet completed. A late marker deadlocks
+		// here until the deadline, reproducing sign-in's unnecessary wait.
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := ipc.WaitStartupReady(ctx, readyName, time.Millisecond); err != nil {
+			t.Fatalf("startup helper still waits for settings: %v", err)
+		}
+		var settingsWindow win.HWND
+		windows.NewLazySystemDLL("user32.dll").NewProc("EnumWindows").Call(syscall.NewCallback(func(hwnd win.HWND, _ uintptr) uintptr {
+			var pid uint32
+			win.GetWindowThreadProcessId(hwnd, &pid)
+			var class [128]uint16
+			win.GetClassName(hwnd, &class[0], len(class))
+			if pid == uint32(os.Getpid()) && strings.Contains(windows.UTF16ToString(class[:]), "Walk_MainWindow_Class") {
+				settingsWindow = hwnd
+			}
+			return 1
+		}), 0)
+		if settingsWindow != 0 {
+			t.Fatal("startup readiness was published only after creating the settings window")
+		}
+		if err := os.WriteFile(filepath.Join(dir, "startup-ready"), []byte("before settings"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	code := runMainSession([]string{"--autorun", "--background"}, settings, sessionServices{
-		store: store, logger: logger, activationName: eventName, setRunAtLogon: func(config.Settings) {},
+		store: store, logger: logger, activationName: eventName, readyName: readyName, setRunAtLogon: checkStartup,
 		syncAppTasks: func(appTaskSyncRequest) {}, // never touch real program tasks from the session fixture
 	})
 	if code != 0 {

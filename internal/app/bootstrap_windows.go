@@ -36,8 +36,7 @@ const (
 	readyMarker = "WinTray_Ready"
 )
 
-// readyWait bounds that wait: a WinTray that failed to start must not keep
-// the programs from starting at all.
+// readyWait bounds a helper's lifetime; timeout is a reported startup failure.
 var readyWait = 2 * time.Minute
 
 func Run(args []string) int {
@@ -92,6 +91,7 @@ func Run(args []string) int {
 		return 1
 	}
 	defer logger.Close()
+	logger.Info("startup: settings loaded")
 	if settingsErr != nil {
 		logger.Warn(fmt.Sprintf("load settings failed; defaults kept in memory: %v", settingsErr))
 	}
@@ -113,7 +113,7 @@ func Run(args []string) int {
 		appTaskWorker.Wait()
 	}()
 	return runMainSession(args, settings, sessionServices{
-		store: store, logger: logger, activationName: activationEvent,
+		store: store, logger: logger, activationName: activationEvent, readyName: readyMarker,
 		setRunAtLogon: logon.Request,
 		syncAppTasks: func(r appTaskSyncRequest) {
 			appTaskWorker.Request(r.snapshot())
@@ -152,6 +152,7 @@ type sessionServices struct {
 	store             *config.Store
 	logger            *logging.Logger
 	activationName    string
+	readyName         string
 	setRunAtLogon     func(config.Settings)
 	syncAppTasks      func(appTaskSyncRequest)
 	restoreAppStartup func() error
@@ -161,6 +162,7 @@ type sessionServices struct {
 // runMainSession owns UI, startup workers and hosted icons for one instance.
 // Registry registration and data paths are supplied by the composition root.
 func runMainSession(args []string, settings config.Settings, services sessionServices) int {
+	started := time.Now()
 	store, logger := services.store, services.logger
 	enumerator := orchestrator.NewWin32WindowEnumerator()
 	manager := orchestrator.NewWin32WindowManager()
@@ -185,6 +187,22 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 			logger.Warn(fmt.Sprintf("restore collected tray icons on shutdown failed: %v", err))
 		}
 	}()
+
+	// A logon task needs the collector, not the settings window. Building
+	// native controls and loading program icons can block on the busy Shell
+	// at sign-in, so release helpers before any of that work. The collector
+	// has its own message thread and is already able to receive their icons.
+	if boxErr := box.SetPaths(config.CollectedTrayIconPaths(settings)); boxErr != nil {
+		logger.Warn(fmt.Sprintf("collect tray icons failed; startup helpers remain blocked: %v", boxErr))
+	} else if release, readyErr := ipc.MarkReady(services.readyName); readyErr != nil {
+		logger.Warn(fmt.Sprintf("publish ready state failed: %v", readyErr))
+	} else {
+		defer release()
+		logger.Info(fmt.Sprintf("startup: program tasks released after %s", time.Since(started).Round(time.Millisecond)))
+	}
+	services.setRunAtLogon(settings)
+	// Reconciliation runs in the background and never gates existing tasks.
+	services.syncAppTasks(appTaskSyncRequest{settings: settings, allowElevated: false})
 
 	// Keep pumping UI messages while outstanding work is cancelled and hidden
 	// windows are recovered. Closing the message loop first loses hand-offs.
@@ -522,22 +540,7 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 		})
 	}
 
-	services.setRunAtLogon(settings)
-	// Heal program tasks without prompting: a task missing an elevated
-	// confirmation waits for the next save, which is allowed to ask for one.
-	services.syncAppTasks(appTaskSyncRequest{settings: settings, allowElevated: false})
-
-	// Collect icons before programs are launched, so their icons never
-	// appear on the taskbar.
-	if boxErr := box.SetPaths(config.CollectedTrayIconPaths(settings)); boxErr != nil {
-		logger.Warn(fmt.Sprintf("collect tray icons failed: %v", boxErr))
-	}
-	// Program logon tasks are held back until here.
-	if release, readyErr := ipc.MarkReady(readyMarker); readyErr != nil {
-		logger.Warn(fmt.Sprintf("publish ready state failed: %v", readyErr))
-	} else {
-		defer release()
-	}
+	logger.Info(fmt.Sprintf("startup: settings window ready after %s", time.Since(started).Round(time.Millisecond)))
 
 	createTray := func() error {
 		current := mainWindow.Settings()
@@ -758,6 +761,7 @@ func runAppTaskHelper(args []string) int {
 		}
 		return 0
 	case len(args) == 3 && (args[0] == startup.AppTaskHelperRun || args[0] == startup.AppTaskHelperShortcut || args[0] == startup.AppTaskHelperConfigured):
+		started := time.Now()
 		// The logon trigger fires for WinTray and its program tasks alike;
 		// neither a missing WinTray nor an unready desktop may be bypassed.
 		ctx, cancel := context.WithTimeout(context.Background(), readyWait)
@@ -767,6 +771,7 @@ func runAppTaskHelper(args []string) int {
 			return 1
 		}
 		launch := startup.LaunchStartupRun
+		readyAfter := time.Since(started)
 		switch args[0] {
 		case startup.AppTaskHelperShortcut:
 			launch = startup.LaunchStartupShortcut
@@ -776,6 +781,10 @@ func runAppTaskHelper(args []string) int {
 		if err := launch(args[1], args[2]); err != nil {
 			logStartupHelperFailure(fmt.Errorf("launch mode=%s source=%q target=%q: %w", args[0], args[1], args[2], err))
 			return 1
+		}
+		if logger := newHostLogger(); logger != nil {
+			logger.Info(fmt.Sprintf("original startup launched: target=%q readyWait=%s launch=%s", args[2], readyAfter.Round(time.Millisecond), (time.Since(started) - readyAfter).Round(time.Millisecond)))
+			logger.Close()
 		}
 		return 0
 	case len(args) == 2 && args[0] == startup.AppTaskHelperDelete:
