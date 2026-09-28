@@ -281,8 +281,8 @@ func readRunStartupEntries(key registry.Key, source runSource, exePath string) (
 		}
 		entry := startupEntry{
 			label: source.label + `\` + name, path: path, args: args, show: 1,
-			// A Run value has no working-directory field. Do not silently
-			// replace it with the executable's directory as the old task did.
+			// A Run value has no working-directory field. Preserve the
+			// inherited launch context rather than inventing a directory.
 			machine:      source.root == registry.LOCAL_MACHINE,
 			approvalPath: source.approvalPath, approvalName: name,
 		}

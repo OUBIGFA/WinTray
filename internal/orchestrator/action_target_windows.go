@@ -2,22 +2,11 @@
 
 package orchestrator
 
-import "golang.org/x/sys/windows"
-
-func resolveOwnerChain(window ManagedWindowInfo) uintptr {
-	target := window.Handle
-	owner := window.OwnerHandle
-	for depth := 0; depth < 8; depth++ {
-		if owner == 0 || owner == target || !isWindow(owner) {
-			break
-		}
-		var ownerPID uint32
-		if _, err := windows.GetWindowThreadProcessId(windows.HWND(owner), &ownerPID); err != nil || ownerPID != window.ProcessID {
-			break
-		}
-		target = owner
-		nextOwner, _, _ := procGetWindow.Call(owner, gwOwner)
-		owner = nextOwner
-	}
-	return target
+// resolveActionTargetHandle preserves the actual window selected for closing.
+// GW_OWNER is not a parent/control relationship: legacy applications often
+// own their forms with an invisible application window that also services
+// their tray icon. Sending SC_CLOSE to that owner can remove the icon or end
+// the program instead of closing the form into its native tray.
+func resolveActionTargetHandle(window ManagedWindowInfo) uintptr {
+	return window.Handle
 }

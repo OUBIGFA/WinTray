@@ -58,6 +58,7 @@ const (
 )
 
 type Service struct {
+	visibility *startupVisibility
 	enumerator WindowEnumerator
 	manager    WindowManager
 	logger     Logger

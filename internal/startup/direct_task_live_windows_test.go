@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"golang.org/x/sys/windows"
+	"wintray/internal/config"
 )
 
 func TestConfiguredStartupLiveRoundTrip(t *testing.T) {
@@ -38,6 +39,12 @@ func TestConfiguredStartupLiveRoundTrip(t *testing.T) {
 	name := fmt.Sprintf("WinTrayLive-Configured-%d-%d-", os.Getpid(), time.Now().UnixNano())
 	tasks := &AppTasks{userSID: user.User.Sid.String(), selfExe: self, namePrefix: name, statePath: filepath.Join(dir, "migration.json"), run: runSchtasks,
 		findEntries: func(string) ([]startupEntry, error) { return nil, nil }}
+	if helper := os.Getenv("WINTRAY_STARTUP_HELPER_EXE"); helper != "" {
+		if !filepath.IsAbs(helper) {
+			t.Fatal("WINTRAY_STARTUP_HELPER_EXE must be an absolute path")
+		}
+		tasks.selfExe = helper
+	}
 	t.Cleanup(func() {
 		if _, err := runSchtasks("/Delete", "/TN", name+"1", "/F"); err != nil {
 			t.Error(err)
@@ -47,6 +54,19 @@ func TestConfiguredStartupLiveRoundTrip(t *testing.T) {
 	want := []string{"--background", "a b", `C:\ends-with-slash\`, `--literal=%SystemRoot%`, `a"b`}
 	settings := taskSettings(exe)
 	settings.ManagedApps[0].Args = windows.ComposeCommandLine(append([]string{"--wintray-startup-test-report", output}, want...))
+	// Task Scheduler expands environment variables in action arguments.
+	// Compare against the original direct task, not shell-free argv rules;
+	// introducing the ready-wait helper must preserve that native behavior.
+	if err := tasks.syncOne(tasks.spec(config.LogonTaskApps(settings)[0]), false); err != nil {
+		t.Fatal(err)
+	}
+	if err := tasks.launchNow(settings.ManagedApps[0]); err != nil {
+		t.Fatal(err)
+	}
+	direct := waitForLiveLaunch(t, output)
+	output = filepath.Join(dir, "helper-result.json")
+	settings.ManagedApps[0].Args = windows.ComposeCommandLine(append([]string{"--wintray-startup-test-report", output}, want...))
+	want = direct.Args
 	if err := tasks.Sync(settings, false); err != nil {
 		t.Fatal(err)
 	}

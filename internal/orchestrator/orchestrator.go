@@ -81,7 +81,7 @@ func (s *Service) StartNow(ctx context.Context, entry config.ManagedAppEntry, re
 	})
 }
 
-func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retrySeconds int, opts startOptions) Result {
+func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retrySeconds int, opts startOptions) (result Result) {
 	// Every validation/error path must let the next queued entry proceed.
 	defer opts.turn.finish(false)
 	if ctx.Err() != nil {
@@ -102,6 +102,14 @@ func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retry
 	// the process. "Close window after launch" therefore means "keep the
 	// window hidden and reachable from a tray icon" for these programs.
 	consoleProgram := opts.manageWindow && consoleExecutableCheck(entry.ExePath)
+	if opts.manageWindow && !consoleProgram {
+		var err error
+		s, err = s.withStartupVisibility(entry.ExePath)
+		if err != nil {
+			return Result{AppName: entry.Name, Code: ResultProcessStartFailed, Message: err.Error()}
+		}
+		defer s.finishStartupVisibility(&result)
+	}
 
 	running := s.hasExistingManagedProcess(expectedPath, expectedName) || s.hasExistingManagedWindow(expectedPath, expectedName)
 	externalSource, externalWait := "", time.Duration(0)
@@ -409,7 +417,7 @@ func (s *Service) hasExistingManagedWindow(expectedPath, expectedName string) bo
 	return false
 }
 
-func (s *Service) HideExisting(ctx context.Context, entry config.ManagedAppEntry, retrySeconds int) Result {
+func (s *Service) HideExisting(ctx context.Context, entry config.ManagedAppEntry, retrySeconds int) (result Result) {
 	expectedName := stringutil.TrimExt(filepath.Base(entry.ExePath))
 	if expectedName == "" {
 		return Result{AppName: entry.Name, Managed: false, Code: ResultInvalidProcessName, Message: "invalid process name"}
@@ -425,6 +433,12 @@ func (s *Service) HideExisting(ctx context.Context, entry config.ManagedAppEntry
 			return Result{AppName: entry.Name, Managed: false, Code: ResultNoExistingWindowManaged, Message: "no existing window managed"}
 		}
 	}
+	var err error
+	s, err = s.withStartupVisibility(entry.ExePath)
+	if err != nil {
+		return Result{AppName: entry.Name, Code: ResultNoExistingWindowManaged, Message: err.Error()}
+	}
+	defer s.finishStartupVisibility(&result)
 	if !s.waitQuietPeriod(ctx, entry, nil, expectedPath, expectedName) {
 		return Result{AppName: entry.Name, Managed: false, Code: ResultNoExistingWindowManaged, Message: "no existing window managed"}
 	}
@@ -444,6 +458,7 @@ func (s *Service) manageFirstMatchingWindow(ctx context.Context, predicate func(
 	const delay = 500 * time.Millisecond
 	var last managedWindow
 	managedAny := false
+	handled := make(map[uintptr]bool)
 	processStarts := map[uint32]time.Time{}
 	insideDelayLogged := map[uint32]struct{}{}
 	singleRound := retrySeconds <= 0
@@ -468,6 +483,9 @@ func (s *Service) manageFirstMatchingWindow(ctx context.Context, predicate func(
 		bestByRoot := map[uintptr]MatchCandidate{}
 		now := time.Now()
 		for _, w := range windows {
+			if handled[w.Handle] {
+				continue
+			}
 			if !predicate(w) || !hasTrustedWindowIdentity(w, expectedPath, launchedPID) {
 				continue
 			}
@@ -505,25 +523,30 @@ func (s *Service) manageFirstMatchingWindow(ctx context.Context, predicate func(
 		}
 
 		managedThisRound := false
+		failedThisRound := false
 		for _, c := range candidates {
 			if managed, ok := s.tryManageAndVerify(actionCtx, c.Window, c.Score, actionType); ok {
 				last = managed
-				if actionType != "hide" {
+				if actionType != "hide" && s.visibility == nil {
 					return last, true
 				}
 				managedAny = true
+				if actionType == "close" {
+					handled[c.Window.Handle] = true
+				}
 				managedThisRound = true
 				continue
 			}
+			failedThisRound = true
 		}
 
-		if actionType == "hide" {
+		if actionType == "hide" || s.visibility != nil {
 			if managedThisRound {
 				if singleRound {
-					return last, true
+					return last, actionType == "hide" || !failedThisRound
 				}
 				if !waitWithContext(actionCtx, 150*time.Millisecond) {
-					return last, managedAny
+					return last, actionType == "hide" && managedAny
 				}
 				continue
 			}
@@ -599,10 +622,6 @@ func (s *Service) applyAndVerify(ctx context.Context, window ManagedWindowInfo, 
 
 	s.logger.Warn(fmt.Sprintf("action not applied action=%s score=%d hwnd=0x%X", action, score, targetHwnd))
 	return false
-}
-
-func resolveActionTargetHandle(window ManagedWindowInfo) uintptr {
-	return resolveOwnerChain(window)
 }
 
 func (s *Service) captureBaseline(predicate func(ManagedWindowInfo) bool) map[uintptr]struct{} {

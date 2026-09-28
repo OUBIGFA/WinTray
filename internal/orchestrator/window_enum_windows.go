@@ -64,6 +64,13 @@ func enumWindowsProc(hwnd uintptr, _ uintptr) uintptr {
 		return 1
 	}
 
+	*activeEnum.result = append(*activeEnum.result, windowInfo(hwnd, activeEnum.foreground, activeEnum.processes))
+	return 1
+}
+
+// windowInfo also describes hidden UI while a startup shield is active.
+// The ordinary desktop enumerator above deliberately remains visible-only.
+func windowInfo(hwnd, foreground uintptr, processes map[uint32][2]string) ManagedWindowInfo {
 	titleLen, _, _ := procGetWindowTextLengthW.Call(hwnd)
 	titleBuf := make([]uint16, titleLen+1)
 	_, _, _ = procGetWindowTextW.Call(hwnd, uintptr(unsafe.Pointer(&titleBuf[0])), uintptr(len(titleBuf)))
@@ -78,29 +85,30 @@ func enumWindowsProc(hwnd uintptr, _ uintptr) uintptr {
 
 	var pid uint32
 	_, _, _ = procGetWindowThreadProcess.Call(hwnd, uintptr(unsafe.Pointer(&pid)))
-	info, ok := activeEnum.processes[pid]
+	info, ok := processes[pid]
 	if !ok {
 		info = [2]string{}
 		if pid != 0 {
 			info[0], info[1] = processInfo(pid)
 		}
-		activeEnum.processes[pid] = info
+		if processes != nil {
+			processes[pid] = info
+		}
 	}
 
-	*activeEnum.result = append(*activeEnum.result, ManagedWindowInfo{
+	return ManagedWindowInfo{
 		Handle:       hwnd,
 		ProcessID:    pid,
 		ProcessName:  info[0],
 		ProcessPath:  info[1],
 		Title:        windows.UTF16ToString(titleBuf),
 		ClassName:    windows.UTF16ToString(classBuf),
-		IsVisible:    true,
+		IsVisible:    isWindowVisible(hwnd),
 		IsMinimized:  isMin != 0,
-		IsForeground: hwnd == activeEnum.foreground,
+		IsForeground: hwnd == foreground,
 		OwnerHandle:  owner,
 		IsToolWindow: isTool,
-	})
-	return 1
+	}
 }
 
 func processInfo(pid uint32) (string, string) {

@@ -758,9 +758,12 @@ func runAppTaskHelper(args []string) int {
 		return 0
 	case len(args) == 3 && (args[0] == startup.AppTaskHelperRun || args[0] == startup.AppTaskHelperShortcut || args[0] == startup.AppTaskHelperConfigured):
 		// The logon trigger fires for WinTray and its program tasks alike;
-		// no program may come up before WinTray does.
-		if !ipc.WaitReady(readyMarker, readyWait, 200*time.Millisecond) {
-			logStartupHelperFailure(fmt.Errorf("WinTray was not running after %s; starting %s anyway", readyWait, args[2]))
+		// neither a missing WinTray nor an unready desktop may be bypassed.
+		ctx, cancel := context.WithTimeout(context.Background(), readyWait)
+		defer cancel()
+		if err := ipc.WaitStartupReady(ctx, readyMarker, 200*time.Millisecond); err != nil {
+			logStartupHelperFailure(fmt.Errorf("mode=%s source=%q target=%q: %w", args[0], args[1], args[2], err))
+			return 1
 		}
 		launch := startup.LaunchStartupRun
 		switch args[0] {
@@ -770,7 +773,7 @@ func runAppTaskHelper(args []string) int {
 			launch = startup.LaunchConfigured
 		}
 		if err := launch(args[1], args[2]); err != nil {
-			logStartupHelperFailure(err)
+			logStartupHelperFailure(fmt.Errorf("launch mode=%s source=%q target=%q: %w", args[0], args[1], args[2], err))
 			return 1
 		}
 		return 0

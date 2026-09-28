@@ -53,10 +53,12 @@ var (
 			result := f.result.Load()
 			cds := (*copyDataStruct)(foreignPointer(lParam))
 			if cds.DwData == copyDataNotifyIcon {
+				f.mu.Lock()
+				f.raw = append(f.raw, append([]byte(nil), unsafe.Slice((*byte)(foreignPointer(cds.LpData)), cds.CbData)...))
+				f.mu.Unlock()
 				if d, ok := parseTrayData(unsafe.Slice((*byte)(foreignPointer(cds.LpData)), cds.CbData)); ok {
 					f.mu.Lock()
 					f.received = append(f.received, d)
-					f.raw = append(f.raw, append([]byte(nil), unsafe.Slice((*byte)(foreignPointer(cds.LpData)), cds.CbData)...))
 					hook, reply := f.onRequest, f.reply
 					f.mu.Unlock()
 					if reply != nil {

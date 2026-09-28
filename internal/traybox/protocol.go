@@ -103,9 +103,15 @@ func withHidden(b []byte) []byte {
 		return b
 	}
 	out := append([]byte(nil), b...)
+	state, mask := uint32(0), uint32(0)
+	if d.Flags&nifState != 0 {
+		state, mask = d.State, d.StateMask
+	}
+	// Legacy callers may leave dwState/dwStateMask uninitialized when
+	// NIF_STATE is absent. Adding that flag must not activate garbage bits.
 	put(out, offFlags, d.Flags|nifState)
-	put(out, offState, d.State|nisHidden)
-	put(out, offStateMask, d.StateMask|nisHidden)
+	put(out, offState, state|nisHidden)
+	put(out, offStateMask, mask|nisHidden)
 	return out
 }
 
@@ -117,8 +123,11 @@ func stateRequest(template []byte, hidden bool) []byte {
 	if !ok {
 		return nil
 	}
-	out := make([]byte, len(template))
-	copy(out, template[:offFlags])
+	// Preserve the opaque tail emitted by the installed shell32 (newer
+	// Windows versions carry data beyond NOTIFYICONDATA). Only known,
+	// unrequested fields are cleared; flags prevent replaying notifications.
+	out := append([]byte(nil), template...)
+	clear(out[offFlags:trayDataSize])
 	put(out, offMessage, nimModify)
 	put(out, offFlags, nifState|d.Flags&nifGUID)
 	if hidden {

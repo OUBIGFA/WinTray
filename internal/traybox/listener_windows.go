@@ -76,6 +76,10 @@ type trackedIcon struct {
 	// hidden is the state the program itself asked for; such an icon is not
 	// listed and stays hidden when it is handed back to Explorer.
 	hidden bool
+	// A rejected collection is rolled back to the original native ADD.
+	// Do not advertise it as collected or repeatedly hide its later updates.
+	collectionFailed bool
+	nativeRestored   bool
 	// template is the program's latest request, reused for state changes.
 	template       []byte
 	seq            uint64
@@ -280,7 +284,7 @@ func (l *listener) snapshot() []Icon {
 	l.mu.Lock()
 	entries := make([]entry, 0, len(l.icons))
 	for _, t := range l.icons {
-		if !t.hidden && l.paths[strings.ToLower(t.ExePath)] {
+		if !t.hidden && !t.collectionFailed && l.paths[strings.ToLower(t.ExePath)] {
 			entries = append(entries, entry{t.Icon, t.seq})
 		}
 	}
@@ -357,8 +361,9 @@ func (l *listener) onCopyData(wParam, lParam uintptr) uintptr {
 	path := l.iconPath(d)
 	selected := l.selected(path)
 	l.mu.Lock()
-	tracked := l.icons[idOf(d)] != nil
-	collect := selected && !l.closing
+	previous := l.icons[idOf(d)]
+	tracked := previous != nil
+	collect := selected && !l.closing && (previous == nil || !previous.collectionFailed)
 	l.mu.Unlock()
 	// Keep observing selected programs during shutdown, but do not hide
 	// their new icons. If shutdown fails, those icons must remain tracked.
@@ -416,18 +421,50 @@ func (l *listener) onCopyData(wParam, lParam uintptr) uintptr {
 	if collect && d.Message != nimDelete && needHide {
 		hiddenResult, hiddenDelivered := l.hideCurrent(idOf(d), uintptr(d.HWnd))
 		if isNew && delivered && result == 0 && hiddenDelivered && hiddenResult == 0 {
-			// Explorer explicitly rejected both registration and hiding:
-			// there is no collected icon to restore. A timeout is uncertain
-			// and must keep its record instead. Never discard a newer update.
-			l.mu.Lock()
-			if t := l.icons[idOf(d)]; t != nil && t.revision == revision {
-				delete(l.icons, idOf(d))
-			}
-			l.mu.Unlock()
-			l.logger.Warn(fmt.Sprintf("tray box: Explorer rejected registration and hiding for %s", path))
+			return l.rollbackRejectedCollection(wParam, path, d, data, revision, result)
 		}
 	}
 	return result
+}
+
+// rollbackRejectedCollection undoes a rejected rewrite, not a successful
+// collection. Only a definitively rejected ADD is safe to retry unmodified.
+// Timeouts and newer/reentrant requests never authorize another registration.
+func (l *listener) rollbackRejectedCollection(wParam uintptr, path string, d trayData, raw []byte, revision uint64, result uintptr) uintptr {
+	id := idOf(d)
+	l.mu.Lock()
+	t := l.icons[id]
+	if t == nil || t.revision != revision {
+		l.mu.Unlock()
+		return result
+	}
+	t.collectionFailed = true
+	l.mu.Unlock()
+	l.logger.Warn(fmt.Sprintf("tray box: collection rejected for %s (message=%d flags=0x%X bytes=%d cbSize=%d); restoring original native registration", path, d.Message, d.Flags, len(raw), le(raw, 8)))
+	if d.Message != nimAdd {
+		l.mu.Lock()
+		if l.icons[id] == t && t.revision == revision {
+			delete(l.icons, id)
+		}
+		l.mu.Unlock()
+		return result
+	}
+	originalResult, delivered := l.sendRequestResult(wParam, raw)
+	l.mu.Lock()
+	if l.icons[id] == t && t.revision == revision {
+		if delivered && originalResult != 0 {
+			t.nativeRestored = true
+		} else if delivered {
+			delete(l.icons, id) // all three requests explicitly rejected
+		}
+	}
+	l.mu.Unlock()
+	if delivered && originalResult != 0 {
+		l.logger.Warn(fmt.Sprintf("tray box: native icon restored for %s; collection failed and remains disabled for this icon until reselected", path))
+	} else {
+		l.logger.Warn(fmt.Sprintf("tray box: original native registration was not confirmed for %s (delivered=%t result=%d)", path, delivered, originalResult))
+	}
+	return originalResult
 }
 
 // onIconRect answers Shell_NotifyIconGetRect for collected icons. Explorer
@@ -444,7 +481,7 @@ func (l *listener) onIconRect(wParam, lParam uintptr, data []byte) uintptr {
 	}
 	l.mu.Lock()
 	t := l.icons[q.ID]
-	collected := t != nil && !l.closing && l.paths[strings.ToLower(t.ExePath)]
+	collected := t != nil && !t.collectionFailed && !l.closing && l.paths[strings.ToLower(t.ExePath)]
 	l.mu.Unlock()
 	if !collected {
 		return l.forward(win.WM_COPYDATA, wParam, lParam)
@@ -472,7 +509,7 @@ func (l *listener) onIconRect(wParam, lParam uintptr, data []byte) uintptr {
 func (l *listener) hideCurrent(id iconID, wParam uintptr) (uintptr, bool) {
 	l.mu.Lock()
 	var request []byte
-	if t := l.icons[id]; t != nil && !l.closing && l.paths[strings.ToLower(t.ExePath)] {
+	if t := l.icons[id]; t != nil && !t.collectionFailed && !l.closing && l.paths[strings.ToLower(t.ExePath)] {
 		request = stateRequest(t.template, true)
 	}
 	l.mu.Unlock()
@@ -596,7 +633,7 @@ func (l *listener) heal() {
 			delete(l.icons, id)
 			continue
 		}
-		if !t.hidden && !l.closing && l.paths[strings.ToLower(t.ExePath)] {
+		if !t.hidden && !t.collectionFailed && !l.closing && l.paths[strings.ToLower(t.ExePath)] {
 			checks = append(checks, check{id, stateRequest(t.template, true)})
 		}
 	}
@@ -648,7 +685,7 @@ func (l *listener) restoreIcons(all bool) error {
 			l.mu.Unlock()
 			continue
 		}
-		if t.hidden || !isWindow(win.HWND(uintptr(t.owner))) {
+		if t.hidden || t.nativeRestored || !isWindow(win.HWND(uintptr(t.owner))) {
 			if !all {
 				delete(l.icons, id)
 			}

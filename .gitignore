@@ -1,7 +1,6 @@
 dist/
 publish/
 tmp/
-_temp/
 build/package.local.ps1
 *.exe
 *.dll
@@ -33,3 +32,6 @@ coverage.out
 # Local logs and settings
 *.log
 settings.json
+
+# Ignore scratch directories at any depth, after all keep rules.
+_temp/

@@ -4,11 +4,11 @@ package app
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"wintray/internal/config"
 	"wintray/internal/logging"
@@ -42,36 +42,54 @@ func TestRunAppTaskHelperRecognizesOnlyItsOwnFlags(t *testing.T) {
 	}
 }
 
-func TestStartupHelpersConsumeFailuresWithoutOpeningAnotherUI(t *testing.T) {
+func TestStartupHelpersAbortOnReadinessTimeoutWithoutLaunching(t *testing.T) {
 	data := t.TempDir()
 	t.Setenv("LOCALAPPDATA", data)
-	// No WinTray publishes its ready state here: the helpers give up waiting
-	// for it, note that, and still try their launch.
+	// An already expired deadline must abort all launch variants, even when
+	// a real WinTray happens to be running in the test session. Invalid launch
+	// inputs expose any accidental fallthrough without starting a program.
 	restore := readyWait
-	readyWait = 50 * time.Millisecond
+	readyWait = 0
 	t.Cleanup(func() { readyWait = restore })
-	for _, args := range [][]string{
+	requests := [][]string{
 		{startup.AppTaskHelperRun, "WinTrayTest-Missing-Original-Entry", `C:\Missing\app.exe`},
 		{startup.AppTaskHelperShortcut, filepath.Join(t.TempDir(), "missing.lnk"), `C:\Missing\app.exe`},
 		{startup.AppTaskHelperConfigured, "--flag", `relative\app.exe`},
-	} {
+	}
+	for _, args := range requests {
 		if got := runAppTaskHelper(args); got != 1 {
 			t.Fatalf("helper failure = %d, want a consumed failure (no normal launch)", got)
 		}
 	}
 	logs, err := os.ReadFile(filepath.Join(data, "WinTray", "wintray.log"))
-	if err != nil || strings.Count(string(logs), "WinTray was not running") != 3 {
-		t.Fatalf("the wait for WinTray must end in a logged timeout: %v\n%s", err, logs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(logs)
+	if strings.Count(text, "context deadline exceeded") != len(requests) ||
+		strings.Count(text, "original startup helper failed:") != len(requests) ||
+		strings.Contains(text, "launch mode=") {
+		t.Fatalf("timeout must log once per request and never reach a launcher:\n%s", logs)
+	}
+	for _, args := range requests {
+		want := fmt.Sprintf("mode=%s source=%q target=%q: waiting for startup readiness", args[0], args[1], args[2])
+		if !strings.Contains(text, want) {
+			t.Fatalf("missing wait stage and original launch identity %q:\n%s", want, logs)
+		}
 	}
 }
 
 func TestProgramTaskSyncErrorsReachTheRequestingUI(t *testing.T) {
 	logger, err := logging.New(t.TempDir())
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer logger.Close()
 	var reported error
 	ensureAppTasks(nil, appTaskSyncRequest{onError: func(err error) { reported = err }}, logger)
-	if reported == nil { t.Fatal("unavailable task service was silently accepted") }
+	if reported == nil {
+		t.Fatal("unavailable task service was silently accepted")
+	}
 }
 
 func TestTaskSyncRequestSnapshotsTheEditableProgramList(t *testing.T) {
@@ -88,9 +106,13 @@ func TestTaskSyncRequestSnapshotsTheEditableProgramList(t *testing.T) {
 
 func TestCleanupKeepsRecoveryDataUntilOriginalStartupRestored(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "WinTray")
-	if err := os.Mkdir(dir, 0o700); err != nil { t.Fatal(err) }
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	path := filepath.Join(dir, "startup-migrations.json")
-	if err := os.WriteFile(path, []byte("recovery data"), 0o600); err != nil { t.Fatal(err) }
+	if err := os.WriteFile(path, []byte("recovery data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	restoreErr := errors.New("task deletion denied")
 	if err := cleanupAppDataAfterRestore(dir, func() error { return restoreErr }); !errors.Is(err, restoreErr) {
 		t.Fatalf("restore failure was hidden: %v", err)
@@ -99,8 +121,14 @@ func TestCleanupKeepsRecoveryDataUntilOriginalStartupRestored(t *testing.T) {
 		t.Fatalf("failed restoration erased the backup: %q %v", data, err)
 	}
 	if err := cleanupAppDataAfterRestore(dir, func() error {
-		if _, err := os.Stat(path); err != nil { t.Fatal("cleanup ran before restoration") }
+		if _, err := os.Stat(path); err != nil {
+			t.Fatal("cleanup ran before restoration")
+		}
 		return nil
-	}); err != nil { t.Fatal(err) }
-	if _, err := os.Stat(dir); !os.IsNotExist(err) { t.Fatalf("restored data directory was not cleaned: %v", err) }
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("restored data directory was not cleaned: %v", err)
+	}
 }

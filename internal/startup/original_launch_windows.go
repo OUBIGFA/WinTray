@@ -61,6 +61,9 @@ func launchStartupRunFrom(keyPath, name, expectedExe string, launch func(string,
 	if err != nil {
 		return err
 	}
+	// Run values do not specify a working directory. Preserve the inherited
+	// launch context, as Explorer and the logon task do; forcing the program
+	// folder can change the meaning of relative arguments.
 	if err := launch(path, args, "", 1); err != nil {
 		return fmt.Errorf("launch original Run entry %s: %w", name, err)
 	}

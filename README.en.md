@@ -37,11 +37,11 @@ Core use cases:
 - **Managed Program List**: Maintain any number of programs, each with independent behavior configuration
 - **Auto Start**: Registers a per-user logon task that starts WinTray right after sign-in; no administrator rights needed
 - **Close to Tray**: When configured in the program list, the sign-in task closes the target window while the program keeps running in the tray
-- **System Start**: Changes only the sign-in trigger, preserving original startup arguments, silent behavior and privileges; reuses existing logon tasks instead of launching twice
-- **Wait for a Window**: 0–120 seconds, for slow-starting programs whose window shows up late
+- **Launch at Boot**: Changes only the sign-in trigger, preserving original startup arguments, silent behavior and privileges; reuses existing logon tasks instead of launching twice
+- **Wait for a window up to**: 0–120 seconds, for slow-starting programs whose window shows up late
 - **Wait Before Closing**: Each program can run for a set number of seconds before its window is closed, to skip login dialogs and other pre-launch popups (such as the new QQ)
-- **Staggered Startup**: Launch programs in list order (drag them in the list to reorder), 3 seconds apart by default; adjust the interval from 0–120 seconds in Global Settings to reduce competing startup workloads
-- **Cleanup & Restore Defaults**: One-click cleanup of local config/logs from the main window
+- **Staggered Startup**: Launch programs in list order (drag them in the list to reorder), 3 seconds apart by default; adjust "Delay between programs" in Settings from 0–120 seconds to reduce competing startup workloads
+- **Reset all data**: One-click cleanup of local config/logs in Settings
 - **Bilingual UI**: Built-in Simplified Chinese / English, switchable instantly
 - **Single Instance Protection**: Prevents duplicate launches to avoid configuration conflicts
 
@@ -54,7 +54,7 @@ WinTray is **portable only** — no installation needed.
 Go to the [Releases](../../releases) page, download the latest `WinTray-Portable.zip`, extract it, and run `WinTray.exe` directly.
 
 - Configuration, logs and original-startup recovery backups are stored in `%LOCALAPPDATA%\WinTray\`
-- Before removing WinTray, use **Reset** in Settings to restore migrated startup states and remove WinTray tasks, then delete the program folder; do not delete a data directory that still contains recovery backups
+- Before removing WinTray, use **Reset…** in Settings to restore migrated startup states and remove WinTray tasks, then delete the program folder; do not delete a data directory that still contains recovery backups
 
 ---
 
@@ -75,41 +75,45 @@ WinTray supports adding the following program types to the managed list, automat
 
 ### Per-Program Configuration Options
 
-- **How it starts**: **Launch at boot** (changes only the original sign-in trigger, preserving arguments, silent behavior and privileges; reuses existing tasks, and asks once when creating an elevated task) / **Start normally** (just starts the program, window untouched) / **Close to tray** (closes the main window after launch, the program keeps running in the tray) / **Run in background** (no window at all, best for scripts and command-line tools)
-- **Wait before closing**: Available with "Close to tray", 0–600 seconds — the window is closed only after the program has been running that long, skipping sign-in windows (10–15 seconds for the new QQ). Covers instances started by the program's own auto-start too
-- **Arguments**: Arguments for normal/background/close-to-tray launches; launch at boot uses the original entry's arguments instead of overriding them with this field
+- **How it starts** (choose one): **Close to tray** — closes the main window after launch, the program keeps running in the tray / **Run in background** — no window at all, best for scripts and command-line tools / **Launch at boot** — changes only the original startup trigger / **Start normally** — just starts the program, window untouched
+- **Wait before closing**: Works with "Close to tray", 0–600 seconds; for programs with a sign-in window (10–15 seconds for the new QQ) it skips the login process
+- **Arguments**: Optional, passed to the program in normal/background/close-to-tray launches
 - **Start this program at sign-in**: Unchecking stops WinTray's launch scheduling; the program's own startup remains or is restored
 
-> Console programs without a tray icon of their own (such as `syncthing.exe` or `frpc.exe`) get a WinTray-hosted tray icon instead: left-click shows/hides the window, and the context menu can show, hide, stop hosting or quit the program.
+> Console programs without a tray icon of their own (such as `syncthing.exe` or `frpc.exe`) get a WinTray-hosted tray icon with "Close to tray": left-click shows/hides the window, and the context menu can show, hide, stop hosting or quit the program.
 
-### System Start: Preserve Original Startup Settings
+### Close-to-Tray Startup
+
+WinTray tries to hide startup windows, then closes them once the program has run for the configured delay. The native tray remains available. If closing fails or is cancelled, the windows become visible again.
+
+**Some programs may still briefly show a window.** Complete manual sign-in first or choose “Start normally”. Tray-icon collection must be enabled separately.
+
+### Launch at Boot: Preserve Original Startup Settings
 
 Only the startup trigger is replaced; the program's own startup configuration is left untouched.
 
-- **Reuse existing tasks**: The original logon task keeps its actions, arguments, working directory, privileges, delay and conditions — no second task is created (e.g. Karing's `Karing Autorun`). Duplicate tasks left by older WinTray versions are removed.
-- **User-level startup entries**: `HKCU\Run` and `.lnk` files in the Startup folder are supported. Original registry values and shortcuts stay intact; only a recoverable enable state is toggled to prevent double launches, so the program's own startup option can stay on.
-- **Timing**: New tasks bypass Explorer's startup queue and start as soon as WinTray is up at sign-in (never before it), without the staggering interval; only "Custom timing" holds one back by its start delay. Existing tasks keep their own delay.
-- **Privileges**: Ordinary tasks need no elevation; creating an elevated task asks once for confirmation.
-- **Errors instead of guesses**: Unquoted startup commands with spaces in their path (e.g. `C:\Program Files\Filen\Filen.exe --hidden`) are resolved the way Windows resolves them; they count as ambiguous when a shorter prefix file really exists or when another program such as `cmd` or `rundll32` starts the target. Missing, disabled, ambiguous or machine-wide shared entries report an error rather than guessed silent flags, a bare-executable fallback or blanket elevation. Use "Start normally" for such programs.
-- **Undo**: Switching modes, pausing, removing an entry or turning off WinTray startup deletes the replacement task and restores only the enable states WinTray changed; the program's own task is never touched. "Launch Now" runs the same registered task (after a successful save) and does nothing if the program is already running.
-- **Rollback**: `startup-migrations.json` is saved before migration; on failure WinTray rolls back, keeps the backup and reports the cause, without overwriting later user changes.
+- **Reuse the original entry**: Existing logon tasks, registry entries and Startup-folder shortcuts are all reused; only a recoverable enable state is toggled to prevent double launches. Duplicate tasks left by older WinTray versions are removed.
+- **Arguments and privileges unchanged**: Preserve original arguments, silent startup, privileges and working directory. New administrator tasks require one confirmation.
+- **Startup timing**: New tasks start as soon as WinTray and the desktop are ready, without the staggering interval. Existing tasks retain their delays, and custom timing still applies. A readiness timeout reports an error.
+- **Clean undo**: Switching modes, pausing, removing an entry or turning off WinTray startup deletes the replacement task and restores the enable states; the program's own startup is never touched.
+- **Errors instead of guesses**: Missing, disabled or unresolvable entries report an error rather than guessed flags or a bare-executable fallback. Use "Start normally" for such programs.
 
-### Collect Tray Icons
+### Tray Icons
 
 Check **Tray icon** in the program list to move the program's existing tray icons into WinTray's right-click menu. Requires Windows 11 and an `.exe` program.
 
-- The original icons disappear from the taskbar and the `^` hidden-icons flyout
-- Entries use the program's current icon and tooltip; status changes appear the next time you open the menu
-- Left-click acts as clicking the original icon; right-click opens the program's own tray menu (behavior set by that program)
-- Unchecking the option or exiting WinTray normally restores the icons; WinTray stays running while collecting so they remain reachable
+- Icons disappear from the taskbar and the `^` flyout; menu entries use the program's current icon and name
+- Left-click acts as clicking the original icon; right-click opens the program's own tray menu
+- Unchecking the option or exiting WinTray normally restores the icons; unselected programs keep their native tray icons
+- Failed collection attempts restore the original icon where possible and log the cause
 
 ### Custom Timing
 
-Check **Custom timing** to set two values: a **0–1440 minute** delay after sign-in (default **0**) and an auto-exit **0–1440 minutes** after launch that also ends child processes (default **30**; **0** disables it). Both are ignored while unchecked.
+When checked, two values: **start 0–1440 min after sign-in** (default **0**) and **quit after 0–1440 min** of running, ending child processes too (default **30**; **0** never quits). Both stay inactive while unchecked.
 
 ### Staggered Startup
 
-The global **Delay between programs** sets the minimum gap between launches — **3 seconds** by default, adjustable from **0–120 seconds**. Programs start in list order, which you set by dragging them in the list; "Launch Now" is unaffected.
+The **Delay between programs** in Settings sets the minimum gap between launches — **3 seconds** by default, adjustable from **0–120 seconds**. Programs start in list order (drag to reorder); "Launch Now" is unaffected.
 
 ### Common Use Cases
 
@@ -191,11 +195,10 @@ A: The new QQ shows a login window first and quits if it is closed too early. Se
 A: No. When the program's own `Run` entry is enabled, WinTray just waits for Windows to start it and **never launches it again**, so there's no duplicate.
 
 **Q: A program in my list isn't being minimized to the tray.**
-A: Make sure the program is set to "Close to tray" and WinTray's auto-start is enabled. If the program starts slowly, increase "Wait for a window up to".
+A: Make sure the program is set to "Close to tray" and "Run WinTray at sign-in" is on. If the program starts slowly, increase "Wait for a window up to".
 
 ---
 
 ## License
 
 This project is released under the [MIT License](LICENSE).
-

@@ -53,10 +53,10 @@ func LogonTaskApps(settings Settings) []LogonTaskApp {
 
 type TrayBehavior struct {
 	AutoMinimizeAndHideOnLaunch bool `json:"autoMinimizeAndHideOnLaunch"`
-	// CloseDelaySeconds keeps the program's windows untouched until its process
-	// has been running this long. A login or splash window shown first is left
-	// alone (the NT-based QQ quits when its login window is closed), and the
-	// close reaches the main window that is up once the delay has passed. The
+	// CloseDelaySeconds defers native close requests until the process has
+	// been running this long. Startup UI may be visually shielded meanwhile,
+	// without changing its native visibility or closing its login window (the
+	// NT-based QQ quits when its login window is closed). The
 	// delay counts from the creation of the process whoever started it, so a
 	// program started by its own autorun entry is covered too, and a program
 	// running longer than the delay is handled right away. It only applies

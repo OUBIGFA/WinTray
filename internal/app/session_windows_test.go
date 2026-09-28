@@ -3,6 +3,7 @@
 package app
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -85,6 +86,8 @@ func TestMainSessionHostingLifecycle(t *testing.T) {
 			}
 			eventName := fmt.Sprintf("WinTray_SessionTest_%d_%d", os.Getpid(), time.Now().UnixNano())
 			cmd := exec.Command(sessionExe, "-test.run=^TestMainSessionProcess$", "--", dir, manifest, eventName)
+			var output bytes.Buffer
+			cmd.Stdout, cmd.Stderr = &output, &output
 			cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
@@ -92,7 +95,13 @@ func TestMainSessionHostingLifecycle(t *testing.T) {
 			done := make(chan struct{})
 			var waitErr error
 			go func() { waitErr = cmd.Wait(); close(done) }()
-			t.Cleanup(func() { _ = cmd.Process.Kill(); <-done })
+			t.Cleanup(func() {
+				_ = cmd.Process.Kill()
+				<-done
+				if t.Failed() {
+					t.Logf("session process output:\n%s", output.String())
+				}
+			})
 			awaitExit := func() {
 				t.Helper()
 				select {
@@ -339,6 +348,7 @@ func TestMainSessionProcess(t *testing.T) {
 	defer logger.Close()
 	code := runMainSession([]string{"--autorun", "--background"}, settings, sessionServices{
 		store: store, logger: logger, activationName: eventName, setRunAtLogon: func(config.Settings) {},
+		syncAppTasks: func(appTaskSyncRequest) {}, // never touch real program tasks from the session fixture
 	})
 	if code != 0 {
 		t.Fatalf("session exit code %d", code)
