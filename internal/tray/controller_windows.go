@@ -21,6 +21,10 @@ const (
 	trayActionExit         = 3
 	trayBoxedBase          = 100
 	trayIDLimit            = 9000
+	// TPM_RIGHTBUTTON executes a normal command on right-click and suppresses
+	// WM_MENURBUTTONUP. Leave it unset so the owner can open the icon's menu
+	// (the same owner notification used by Explorer++'s MenuController).
+	trayMenuFlags = win.TPM_NOANIMATION | win.TPM_RETURNCMD
 )
 
 type Controller struct {
@@ -126,7 +130,7 @@ func (c *Controller) showContextMenu() {
 		return
 	}
 
-	flags := uint32(win.TPM_NOANIMATION | win.TPM_RETURNCMD | win.TPM_RIGHTBUTTON)
+	flags := uint32(trayMenuFlags)
 	var actionID win.BOOL
 	rightClicked := trackBoxRightClicks(hwnd, func() {
 		if c.box != nil && refreshBoxMenu(hMenu, icons, bitmaps, c.box.Icons()) {

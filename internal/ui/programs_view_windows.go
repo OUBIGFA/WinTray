@@ -4,6 +4,7 @@ package ui
 
 import (
 	"fmt"
+	"log"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -167,9 +168,6 @@ func (w *MainWindow) buildListPane(parent walk.Container) (*walk.Composite, erro
 		return nil, err
 	}
 	list.SetGridlines(false)
-	if err = list.SetLastColumnStretched(true); err != nil {
-		return nil, err
-	}
 	if err = list.SetSelectionHiddenWithoutFocus(false); err != nil {
 		return nil, err
 	}
@@ -193,8 +191,26 @@ func (w *MainWindow) buildListPane(parent walk.Container) (*walk.Composite, erro
 	}); err != nil {
 		return nil, err
 	}
-	// Dragging a row sets the order programs start in.
 	view, _ := nativeRowView(list)
+	// Give spare width to program names. The native client area excludes the
+	// vertical scrollbar, which can also change when programs are added or removed.
+	stretchNameColumn := func() {
+		var bounds win.RECT
+		if !win.GetClientRect(view, &bounds) {
+			log.Print("get program list client bounds failed")
+			return
+		}
+		columns := list.Columns()
+		width := list.IntTo96DPI(int(bounds.Right - bounds.Left))
+		width -= columns.At(1).Width() + columns.At(2).Width()
+		if err := columns.At(0).SetWidth(max(0, width)); err != nil {
+			log.Printf("resize program name column: %v", err)
+		}
+	}
+	list.SizeChanged().Attach(stretchNameColumn)
+	list.ItemCountChanged().Attach(stretchNameColumn)
+	stretchNameColumn()
+	// Dragging a row sets the order programs start in.
 	if err = installListReorder(list, view, w.moveManagedApp, w.save); err != nil {
 		return nil, err
 	}

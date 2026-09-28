@@ -69,12 +69,14 @@ func TestMainWindowInteractions(t *testing.T) {
 	zh, en := i18n.For("zh-CN"), i18n.For("en-US")
 	var baseBody, baseDetail, baseList walk.Rectangle
 	var baseNameRow, baseDelay walk.Rectangle
+	var baseNameColumnWidth int
 	var traySavesBefore int
 	w.mw.Starting().Attach(func() {
 		go func() {
 			time.Sleep(200 * time.Millisecond)
 			step(func() {
 				baseBody, baseDetail, baseList = w.programsBody.Bounds(), w.detailPane.Bounds(), w.managedList.Bounds()
+				baseNameColumnWidth = w.managedList.Columns().At(0).Width()
 				listPane := w.managedList.Parent().Bounds()
 				divider := w.programsBody.Children().At(2).Bounds()
 				leftGap := divider.X - listPane.X - listPane.Width
@@ -319,8 +321,9 @@ func TestMainWindowInteractions(t *testing.T) {
 				if listPane.Width <= baseList.Width || detail.Width != baseDetail.Width || detail.X+detail.Width != w.programsBody.ClientBounds().Width {
 					t.Errorf("wide window displaced the editor: list=%+v detail=%+v body=%+v", listPane, detail, w.programsBody.ClientBounds())
 				}
-				if w.managedList.Columns().At(0).Width() != 170 || w.managedList.Columns().At(1).Width() != 112 {
-					t.Error("resizing must not enlarge the fixed name and tray columns")
+				columns := w.managedList.Columns()
+				if columns.At(0).Width()-baseNameColumnWidth != w.managedList.Bounds().Width-baseList.Width || columns.At(1).Width() != 112 || columns.At(2).Width() != 145 {
+					t.Errorf("resizing must grow only the name column: name=%d tray=%d action=%d", columns.At(0).Width(), columns.At(1).Width(), columns.At(2).Width())
 				}
 				checkWindowLayout(t, w)
 				captureTestWindow(t, w, "programs-zh-wide")
@@ -329,6 +332,10 @@ func TestMainWindowInteractions(t *testing.T) {
 			step(func() {
 				if w.detailPane.Bounds().Width != baseDetail.Width || w.detailPane.Bounds().X != baseDetail.X {
 					t.Error("shrinking must restore the original editor position")
+				}
+				columns := w.managedList.Columns()
+				if columns.At(0).Width() != baseNameColumnWidth || columns.At(1).Width() != 112 || columns.At(2).Width() != 145 {
+					t.Errorf("shrinking must restore the name width and keep other columns fixed: name=%d tray=%d action=%d", columns.At(0).Width(), columns.At(1).Width(), columns.At(2).Width())
 				}
 				click(w.settingsBtn)
 			})

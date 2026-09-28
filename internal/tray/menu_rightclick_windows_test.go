@@ -3,6 +3,7 @@
 package tray
 
 import (
+	"os"
 	"runtime"
 	"syscall"
 	"testing"
@@ -10,6 +11,72 @@ import (
 
 	"github.com/lxn/win"
 )
+
+// Exercise Windows' real modal menu loop, not a fabricated WM_MENURBUTTONUP.
+// Input is sent only after locating our popup; restore the cursor afterwards.
+func TestBoxRightClickThroughNativeMenuLoop(t *testing.T) {
+	if os.Getenv("WINTRAY_UI_TEST") != "1" {
+		t.Skip("set WINTRAY_UI_TEST=1 on an interactive Windows desktop")
+	}
+	t.Run("right opens native context menu", func(t *testing.T) {
+		testBoxMouseThroughNativeMenuLoop(t, win.MOUSEEVENTF_RIGHTDOWN, win.MOUSEEVENTF_RIGHTUP, trayBoxedBase, 0)
+	})
+	t.Run("left selects normal command", func(t *testing.T) {
+		testBoxMouseThroughNativeMenuLoop(t, win.MOUSEEVENTF_LEFTDOWN, win.MOUSEEVENTF_LEFTUP, 0, trayBoxedBase)
+	})
+}
+
+func testBoxMouseThroughNativeMenuLoop(t *testing.T, down, up uintptr, wantRight uint32, wantCommand win.BOOL) {
+	t.Helper()
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	hwnd := win.CreateWindowEx(0, syscall.StringToUTF16Ptr("STATIC"), nil, win.WS_POPUP, 0, 0, 0, 0, 0, 0, win.GetModuleHandle(nil), nil)
+	if hwnd == 0 {
+		t.Fatal("create menu owner")
+	}
+	defer win.DestroyWindow(hwnd)
+	menu := win.CreatePopupMenu()
+	if menu == 0 {
+		t.Fatal("create menu")
+	}
+	defer win.DestroyMenu(menu)
+	if !appendTrayMenuItem(menu, menuItem{id: trayBoxedBase, text: "Collected test icon"}) {
+		t.Fatal("append menu item")
+	}
+	var cursor win.POINT
+	win.GetCursorPos(&cursor)
+	defer win.SetCursorPos(cursor.X, cursor.Y)
+	win.SetForegroundWindow(hwnd)
+	ticks := 0
+	var command win.BOOL
+	got := trackBoxRightClicks(hwnd, func() {
+		ticks++
+		if ticks > 20 {
+			procEndMenu.Call()
+			return
+		}
+		if ticks != 1 {
+			return
+		}
+		popup := win.FindWindow(syscall.StringToUTF16Ptr("#32768"), nil)
+		if popup == 0 || win.GetWindowThreadProcessId(popup, nil) != win.GetCurrentThreadId() {
+			return
+		}
+		var rect win.RECT
+		if ok, _, _ := menuUser32.NewProc("GetMenuItemRect").Call(uintptr(hwnd), uintptr(menu), 0, uintptr(unsafe.Pointer(&rect))); ok == 0 {
+			return
+		}
+		pt := win.POINT{X: (rect.Left + rect.Right) / 2, Y: (rect.Top + rect.Bottom) / 2}
+		win.SetCursorPos(pt.X, pt.Y)
+		menuUser32.NewProc("mouse_event").Call(down, 0, 0, 0, 0)
+		menuUser32.NewProc("mouse_event").Call(up, 0, 0, 0, 0)
+	}, func() {
+		command = win.TrackPopupMenuEx(menu, trayMenuFlags, 100, 100, hwnd, nil)
+	})
+	if got != wantRight || command != wantCommand {
+		t.Fatalf("native right click = %d, normal command = %d, ticks = %d; want %d/%d", got, command, ticks, wantRight, wantCommand)
+	}
+}
 
 var testMenuOwnerProc = syscall.NewCallback(func(hwnd win.HWND, msg uint32, wParam, lParam uintptr) uintptr {
 	return win.DefWindowProc(hwnd, msg, wParam, lParam)
