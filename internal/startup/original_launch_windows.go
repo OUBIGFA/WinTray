@@ -16,7 +16,36 @@ const (
 	// AppTaskHelperConfigured starts a program that has no original startup
 	// entry with the arguments configured in WinTray.
 	AppTaskHelperConfigured = "--launch-configured"
+	AppTaskHelperHidden     = "--hidden-startup"
 )
+
+// LaunchHiddenStartup retains the original command/shortcut while requesting
+// its initial window hidden for a frequency-controlled background launch.
+func LaunchHiddenStartup(mode, source, exePath string) error {
+	switch mode {
+	case AppTaskHelperRun:
+		return launchStartupRunFrom(runKeyPath, source, exePath, func(path, args, dir string, _ int32) error { return shellLaunchOriginal(path, args, dir, 0) })
+	case AppTaskHelperConfigured:
+		if !filepath.IsAbs(exePath) || !strings.EqualFold(filepath.Ext(exePath), ".exe") {
+			return errors.New("configured startup requires an absolute .exe path")
+		}
+		return shellLaunchOriginal(exePath, source, filepath.Dir(exePath), 0)
+	case AppTaskHelperShortcut:
+		link, err := readStartupShortcut(source)
+		if err != nil {
+			return err
+		}
+		path, err := expandedPath(link.path)
+		if err != nil {
+			return err
+		}
+		if !sameExecutablePath(path, exePath) {
+			return errors.New("startup shortcut target changed")
+		}
+		return shellLaunchOriginal(source, "", "", 0)
+	}
+	return errors.New("unknown startup helper mode")
+}
 
 // LaunchConfigured starts exePath with args from its own folder, as the task
 // did when it launched the program directly.

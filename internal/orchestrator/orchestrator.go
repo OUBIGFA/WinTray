@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -32,6 +33,7 @@ type startOptions struct {
 	externalOwned          bool
 	externalWait           time.Duration
 	launchViaTask          bool
+	limitFrequency         bool
 	turn                   *startupTurn
 }
 
@@ -58,6 +60,12 @@ func managedStartOptions(entry config.ManagedAppEntry) startOptions {
 	if opts.externalOwned {
 		opts.hideProcessWindow = false
 		opts.manageWindow = false
+	}
+	if config.StartupFrequencyEnabled(entry) {
+		opts.limitFrequency = true
+		opts.externalOwned = false
+		opts.launchViaTask = strings.EqualFold(filepath.Ext(entry.ExePath), ".exe")
+		opts.respectExternalStartup = !opts.launchViaTask
 	}
 	return opts
 }
@@ -89,6 +97,12 @@ func (s *Service) StartNow(ctx context.Context, entry config.ManagedAppEntry, re
 func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retrySeconds int, opts startOptions) (result Result) {
 	// Every validation/error path must let the next queued entry proceed.
 	defer opts.turn.finish(false)
+	if opts.limitFrequency && entry.LaunchViaLogonTask {
+		// Launch-at-boot retains its independent timing when a quota transfers
+		// the trigger back to WinTray; it never waits behind staggered entries.
+		opts.turn.finish(false)
+		opts.turn = nil
+	}
 	if ctx.Err() != nil {
 		return cancelledResult(entry)
 	}
@@ -134,6 +148,9 @@ func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retry
 			return Result{AppName: entry.Name, Code: ResultStartupCheckFailed, Message: "startup check failed"}
 		}
 		if source != "" {
+			if opts.limitFrequency {
+				return Result{AppName: entry.Name, Code: ResultFrequencyCheckFailed, Message: "external script startup cannot be frequency-controlled: " + source}
+			}
 			externalSource, externalWait = source, s.externalStartupWait
 		}
 	}
@@ -177,10 +194,15 @@ func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retry
 		return cancelledResult(entry)
 	}
 	if opts.launchViaTask {
-		if err := s.logonTaskLaunch(entry); err != nil {
+		admitted, err := s.launchWithFrequency(entry, opts, func() error { return s.logonTaskLaunch(entry) })
+		if err != nil {
 			s.logger.Error(fmt.Sprintf("original startup task failed: %s err=%v", entry.Name, err))
-			return Result{AppName: entry.Name, Code: ResultProcessStartFailed, Message: err.Error()}
+			return frequencyLaunchError(entry, opts, err)
 		}
+		if !admitted {
+			return frequencyLimitResult(entry)
+		}
+		opts.turn.finish(true)
 		// schtasks /Run only confirms submission. Observe the actual process
 		// before reporting success; never compensate with a bare exe launch.
 		if !s.waitForExternalStartup(ctx, expectedPath, expectedName, s.logonTaskLaunchWait) {
@@ -189,13 +211,24 @@ func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retry
 			}
 			return Result{AppName: entry.Name, Code: ResultExternalStartupTimeout, Message: "original startup task did not start the process"}
 		}
+		if opts.manageWindow || consoleProgram {
+			return s.manageRunning(ctx, entry, retrySeconds, opts, consoleProgram, expectedPath, expectedName)
+		}
 		return startedResult(entry, opts)
 	}
-	cmd, err := startProcess(entry.ExePath, entry.Args, opts.launchMode())
-	opts.turn.finish(err == nil)
+	var cmd *exec.Cmd
+	admitted, err := s.launchWithFrequency(entry, opts, func() error {
+		var err error
+		cmd, err = startProcess(entry.ExePath, entry.Args, opts.launchMode())
+		return err
+	})
+	opts.turn.finish(err == nil && admitted)
 	if err != nil {
 		s.logger.Error(fmt.Sprintf("start failed: %s err=%v", entry.Name, err))
-		return Result{AppName: entry.Name, Managed: false, Code: ResultProcessStartFailed, Message: "process start failed"}
+		return frequencyLaunchError(entry, opts, err)
+	}
+	if !admitted {
+		return frequencyLimitResult(entry)
 	}
 	pid := uint32(cmd.Process.Pid)
 	defer cmd.Process.Release()
@@ -220,6 +253,26 @@ func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retry
 		return windowNotManagedResult(entry, opts)
 	}
 	return managedResult(entry, managed, ResultManaged, "managed")
+}
+
+// Manual launches and already-running programs never touch the automatic quota.
+func (s *Service) launchWithFrequency(entry config.ManagedAppEntry, opts startOptions, launch func() error) (bool, error) {
+	if opts.limitFrequency {
+		return s.startupHistory.Launch(entry, time.Now(), launch)
+	}
+	return true, launch()
+}
+
+func frequencyLimitResult(entry config.ManagedAppEntry) Result {
+	return Result{AppName: entry.Name, Managed: true, Code: ResultFrequencyLimit, Message: "automatic startup limit reached"}
+}
+
+func frequencyLaunchError(entry config.ManagedAppEntry, opts startOptions, err error) Result {
+	code := ResultProcessStartFailed
+	if opts.limitFrequency {
+		code = ResultFrequencyCheckFailed
+	}
+	return Result{AppName: entry.Name, Code: code, Message: err.Error()}
 }
 
 // waitForExternalStartup observes a registered launch; it must never fall back

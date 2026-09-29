@@ -151,6 +151,22 @@ func (task taskDefinition) launches(exePath string) bool {
 }
 
 func (task taskDefinition) logonFor(sid string) bool {
+	if !task.interactiveFor(sid) {
+		return false
+	}
+	for _, trigger := range task.Triggers {
+		if !enabledByDefault(trigger.Enabled) || (trigger.UserID != "" && !sameWindowsUser(trigger.UserID, sid)) {
+			continue
+		}
+		if logonBoundaryActive(trigger.StartBoundary, trigger.EndBoundary, time.Now()) {
+			return true
+		}
+	}
+	return false
+}
+
+// Demand-only tasks retain the same interactive principal and privileges.
+func (task taskDefinition) interactiveFor(sid string) bool {
 	if !enabledByDefault(task.Settings.Enabled) {
 		return false
 	}
@@ -163,19 +179,7 @@ func (task taskDefinition) logonFor(sid string) bool {
 			interactive = true
 		}
 	}
-	if !interactive {
-		return false
-	}
-	for _, trigger := range task.Triggers {
-		if !enabledByDefault(trigger.Enabled) || (trigger.UserID != "" && !sameWindowsUser(trigger.UserID, sid)) {
-			continue
-		}
-		if !logonBoundaryActive(trigger.StartBoundary, trigger.EndBoundary, time.Now()) {
-			continue
-		}
-		return true
-	}
-	return false
+	return interactive
 }
 
 func logonBoundaryActive(start, end string, now time.Time) bool {
@@ -242,13 +246,16 @@ func findNativeLogonTask(tasks []taskDefinition, exePath, sid, ownPrefix string)
 // actions/privileges without changing Description. Validate the actual fields.
 func appTaskUpToDate(exported []byte, sid string, spec appTaskSpec, fingerprint string) bool {
 	var task taskDefinition
-	if decodeTaskXML(exported, &task) != nil || !strings.Contains(task.Registration.Description, fingerprint) || !task.logonFor(sid) {
+	if decodeTaskXML(exported, &task) != nil || !strings.Contains(task.Registration.Description, fingerprint) || !task.interactiveFor(sid) {
 		return false
 	}
-	if len(task.Actions.Exec) != 1 || len(task.Principals) != 1 || len(task.Triggers) != 1 {
+	if len(task.Actions.Exec) != 1 || len(task.Principals) != 1 {
 		return false
 	}
-	action, principal, trigger := task.Actions.Exec[0], task.Principals[0], task.Triggers[0]
+	if spec.demandOnly && len(task.Triggers) != 0 || !spec.demandOnly && (len(task.Triggers) != 1 || !task.logonFor(sid)) {
+		return false
+	}
+	action, principal := task.Actions.Exec[0], task.Principals[0]
 	level := "LeastPrivilege"
 	if spec.highest {
 		level = "HighestAvailable"
@@ -259,10 +266,10 @@ func appTaskUpToDate(exported []byte, sid string, spec appTaskSpec, fingerprint 
 	}
 	// An undelayed trigger is exported without a Delay element.
 	actualDelay, err := time.Duration(0), error(nil)
-	if trigger.Delay != "" {
-		actualDelay, err = time.ParseDuration(strings.ToLower(strings.TrimPrefix(trigger.Delay, "PT")))
+	if !spec.demandOnly && task.Triggers[0].Delay != "" {
+		actualDelay, err = time.ParseDuration(strings.ToLower(strings.TrimPrefix(task.Triggers[0].Delay, "PT")))
 	}
 	return err == nil && sameExecutablePath(action.Command, spec.exePath) && action.Arguments == spec.args &&
 		action.WorkingDirectory == spec.workingDir && actualLevel == level &&
-		actualDelay == time.Duration(spec.delay)*time.Second
+		(spec.demandOnly || actualDelay == time.Duration(spec.delay)*time.Second)
 }

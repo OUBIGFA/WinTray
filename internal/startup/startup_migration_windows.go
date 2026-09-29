@@ -34,8 +34,10 @@ func (b approvalBackup) owns(value approvalValue) bool {
 }
 
 type appMigration struct {
-	ExePath   string           `json:"exePath"`
-	Approvals []approvalBackup `json:"approvals"`
+	ExePath    string            `json:"exePath"`
+	Approvals  []approvalBackup  `json:"approvals"`
+	Frequency  bool              `json:"frequency,omitempty"`
+	NativeTask *nativeTaskBackup `json:"nativeTask,omitempty"`
 }
 
 type migrationState struct {
@@ -59,6 +61,12 @@ func loadMigrationState(path string) (*migrationState, error) {
 	for name, app := range decoded.Apps {
 		if name == "" || !filepath.IsAbs(app.ExePath) {
 			return nil, fmt.Errorf("invalid startup backup entry %q (left untouched)", name)
+		}
+		if app.NativeTask != nil {
+			var task taskDefinition
+			if !app.Frequency || app.NativeTask.Name == "" || decodeTaskXML([]byte(app.NativeTask.Before), &task) != nil || !task.launches(app.ExePath) || app.NativeTask.Applied == "" {
+				return nil, fmt.Errorf("invalid native task backup for %s", name)
+			}
 		}
 		for _, backup := range app.Approvals {
 			enabled, err := approvalEnabled(backup.Before)
@@ -162,6 +170,10 @@ func (t *AppTasks) releaseMigration(name string, state *migrationState, allowEle
 	if !ok {
 		return nil
 	}
+	if err := t.restoreNativeTask(migration.NativeTask, allowElevated); err != nil {
+		return err
+	}
+	migration.NativeTask = nil
 	remaining, restoreErr := t.restoreApprovals(migration.Approvals)
 	if len(remaining) == 0 {
 		delete(state.Apps, name)
@@ -206,6 +218,17 @@ func usableStartupEntries(entries []startupEntry, previous appMigration) ([]star
 func (t *AppTasks) syncPreservingStartup(app config.LogonTaskApp, inventory []taskDefinition, state *migrationState, allowElevated bool) error {
 	spec := t.spec(app)
 	previous := state.Apps[spec.name]
+	if previous.Frequency && !spec.demandOnly {
+		if err := t.releaseMigration(spec.name, state, allowElevated); err != nil {
+			return err
+		}
+		var err error
+		inventory, err = readTaskInventory(t.run)
+		if err != nil {
+			return err
+		}
+		previous = appMigration{}
+	}
 	if previous.ExePath != "" && !sameExecutablePath(previous.ExePath, app.Entry.ExePath) {
 		if err := t.releaseMigration(spec.name, state, allowElevated); err != nil {
 			return err
@@ -219,6 +242,21 @@ func (t *AppTasks) syncPreservingStartup(app config.LogonTaskApp, inventory []ta
 	}
 	if !filepath.IsAbs(app.Entry.ExePath) || !strings.EqualFold(filepath.Ext(app.Entry.ExePath), ".exe") {
 		return fail(errors.New("logon startup requires an absolute .exe path"))
+	}
+	if previous.NativeTask != nil {
+		// Discover the original owner from its backup after verifying that
+		// our suppression is still intact. Never overwrite an outside edit.
+		if err := t.verifyNativeTask(previous.NativeTask); err != nil {
+			return err
+		}
+		for i := range inventory {
+			if strings.TrimPrefix(inventory[i].Registration.URI, `\`) == previous.NativeTask.Name {
+				if err := decodeTaskXML([]byte(previous.NativeTask.Before), &inventory[i]); err != nil {
+					return err
+				}
+				inventory[i].Registration.URI = `\` + previous.NativeTask.Name
+			}
+		}
 	}
 	native, err := findNativeLogonTask(inventory, app.Entry.ExePath, t.userSID, t.namePrefix)
 	if err != nil {
@@ -243,6 +281,12 @@ func (t *AppTasks) syncPreservingStartup(app config.LogonTaskApp, inventory []ta
 		}
 		entries = active
 		if len(entries) == 0 {
+			if spec.demandOnly {
+				if err := t.remove(spec.name, allowElevated); err != nil {
+					return err
+				}
+				return t.syncLimitedNative(spec, native, previous, state, allowElevated)
+			}
 			if err := t.releaseMigration(spec.name, state, allowElevated); err != nil {
 				return err
 			}
@@ -258,9 +302,16 @@ func (t *AppTasks) syncPreservingStartup(app config.LogonTaskApp, inventory []ta
 		// Launched through WinTray's helper like a migrated entry, so the
 		// program waits until WinTray itself is up at sign-in.
 		spec.args = windows.ComposeCommandLine([]string{AppTaskHelperConfigured, app.Entry.Args, app.Entry.ExePath})
+		if spec.demandOnly && app.Entry.LaunchHiddenInBackground {
+			spec.args = AppTaskHelperHidden + " " + spec.args
+		}
 		spec.exePath = t.selfExe
 		if err := t.syncOne(spec, allowElevated); err != nil {
 			return err
+		}
+		if spec.demandOnly {
+			state.Apps[spec.name] = appMigration{ExePath: app.Entry.ExePath, Frequency: true}
+			return t.saveMigrationState(state)
 		}
 		t.report("registered configured logon startup: " + app.Entry.Name)
 		return nil
@@ -300,6 +351,9 @@ func (t *AppTasks) syncPreservingStartup(app config.LogonTaskApp, inventory []ta
 		} else {
 			spec.args = windows.ComposeCommandLine([]string{AppTaskHelperRun, entry.approvalName, entry.path})
 		}
+		if spec.demandOnly && app.Entry.LaunchHiddenInBackground {
+			spec.args = AppTaskHelperHidden + " " + spec.args
+		}
 	}
 	if native != "" {
 		if err := t.remove(spec.name, allowElevated); err != nil {
@@ -328,7 +382,7 @@ func (t *AppTasks) syncPreservingStartup(app config.LogonTaskApp, inventory []ta
 		return fail(err)
 	}
 	if len(backups) > 0 || len(previous.Approvals) > 0 {
-		state.Apps[spec.name] = appMigration{ExePath: app.Entry.ExePath, Approvals: backups}
+		state.Apps[spec.name] = appMigration{ExePath: app.Entry.ExePath, Approvals: backups, Frequency: spec.demandOnly, NativeTask: previous.NativeTask}
 		// Durable backup BEFORE changing Windows. A crash can be reconciled
 		// on the next run without deleting/reconstructing the program's data.
 		if err := t.saveMigrationState(state); err != nil {
@@ -350,6 +404,9 @@ func (t *AppTasks) syncPreservingStartup(app config.LogonTaskApp, inventory []ta
 		}
 		t.report("migrated original startup trigger: " + app.Entry.Name + " <- " + usable[0].label)
 	} else {
+		if spec.demandOnly {
+			return t.syncLimitedNative(spec, native, state.Apps[spec.name], state, allowElevated)
+		}
 		t.report("reuse original logon task: " + app.Entry.Name + " -> " + native)
 	}
 	return nil

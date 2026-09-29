@@ -118,6 +118,7 @@ func Run(args []string) int {
 		syncAppTasks: func(r appTaskSyncRequest) {
 			appTaskWorker.Request(r.snapshot())
 		},
+		waitAppTasks: appTaskWorker.Wait,
 		restoreAppStartup: func() error {
 			appTaskWorker.Wait()
 			if appTasks == nil {
@@ -155,6 +156,7 @@ type sessionServices struct {
 	readyName         string
 	setRunAtLogon     func(config.Settings)
 	syncAppTasks      func(appTaskSyncRequest)
+	waitAppTasks      func()
 	restoreAppStartup func() error
 	removeLogon       func() error
 }
@@ -591,6 +593,13 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 			launchWG.Add(1)
 			go func() {
 				defer launchWG.Done()
+				// Limited startups must not race their original-trigger takeover.
+				for _, entry := range settings.ManagedApps {
+					if config.StartupFrequencyEnabled(entry) && services.waitAppTasks != nil {
+						services.waitAppTasks()
+						break
+					}
+				}
 				runManagedApps(launchCtx, orch, settings, logger, handOffToHost)
 				mainWindow.Synchronize(func() {
 					state.startupPending = false
@@ -754,6 +763,10 @@ func ensureAppTasks(tasks *startup.AppTasks, request appTaskSyncRequest, logger 
 // remove one program task after the user has confirmed an elevation prompt.
 // It reports -1 when args belong to none of them.
 func runAppTaskHelper(args []string) int {
+	hidden := len(args) == 4 && args[0] == startup.AppTaskHelperHidden
+	if hidden {
+		args = args[1:]
+	}
 	switch {
 	case len(args) == 3 && args[0] == startup.AppTaskHelperRegister:
 		if err := startup.RegisterAppTaskHeadless(args[1], args[2]); err != nil {
@@ -777,6 +790,9 @@ func runAppTaskHelper(args []string) int {
 			launch = startup.LaunchStartupShortcut
 		case startup.AppTaskHelperConfigured:
 			launch = startup.LaunchConfigured
+		}
+		if hidden {
+			launch = func(source, path string) error { return startup.LaunchHiddenStartup(args[0], source, path) }
 		}
 		if err := launch(args[1], args[2]); err != nil {
 			logStartupHelperFailure(fmt.Errorf("launch mode=%s source=%q target=%q: %w", args[0], args[1], args[2], err))

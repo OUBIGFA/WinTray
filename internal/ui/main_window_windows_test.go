@@ -182,6 +182,15 @@ func TestMainWindowInteractions(t *testing.T) {
 				if !w.settings.ManagedApps[0].Schedule.Enabled || !w.scheduleBlock.Enabled() {
 					t.Error("custom timing toggle must enable the time fields")
 				}
+				click(w.frequencyEnabled)
+				w.frequencyDaysEdit.SetText("2")
+				w.frequencyDaysEdit.SendMessage(win.WM_KEYDOWN, win.VK_RETURN, 0)
+				w.frequencyRunsEdit.SetText("3")
+				w.frequencyRunsEdit.SendMessage(win.WM_KEYDOWN, win.VK_RETURN, 0)
+				if !config.StartupFrequencyEnabled(w.settings.ManagedApps[0]) || w.settings.ManagedApps[0].Schedule.FrequencyDays != 2 || w.settings.ManagedApps[0].Schedule.FrequencyRuns != 3 {
+					t.Error("frequency controls must save days and automatic launch count")
+				}
+				captureTestWindow(t, w, "programs-frequency")
 				w.startDelayEdit.SetText("30")
 				w.startDelayEdit.SendMessage(win.WM_KEYDOWN, win.VK_RETURN, 0)
 				w.autoExitEdit.SetText("0")
@@ -266,6 +275,9 @@ func TestMainWindowInteractions(t *testing.T) {
 				w.autoExitEdit.SendMessage(win.WM_KEYDOWN, win.VK_RETURN, 0)
 				if config.ScheduledRunLimit(w.settings.ManagedApps[0]) != 5 || w.settings.ManagedApps[0].RunOnStartup {
 					t.Error("custom timing must retain its run limit without enabling sign-in launch")
+				}
+				if config.StartupFrequencyEnabled(w.settings.ManagedApps[0]) || w.frequencyEnabled.Enabled() || w.frequencyDaysEdit.Enabled() {
+					t.Error("paused startup must retain frequency settings without applying them")
 				}
 				captureTestWindow(t, w, "programs-startup-disabled")
 				click(w.scheduleEnabled)

@@ -158,6 +158,8 @@ func migrate(settings Settings) Settings {
 		schedule := &settings.ManagedApps[i].Schedule
 		schedule.StartDelayMinutes = ClampScheduleMinutes(schedule.StartDelayMinutes)
 		schedule.AutoExitMinutes = ClampScheduleMinutes(schedule.AutoExitMinutes)
+		schedule.FrequencyDays = ClampFrequencyDays(schedule.FrequencyDays)
+		schedule.FrequencyRuns = ClampFrequencyRuns(schedule.FrequencyRuns)
 	}
 	return settings
 }

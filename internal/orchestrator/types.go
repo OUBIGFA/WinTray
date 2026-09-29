@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"path/filepath"
 	"time"
 
 	"wintray/internal/config"
@@ -43,6 +44,8 @@ const (
 	ResultInvalidExePath          ResultCode = "invalid_exe_path"
 	ResultProcessStartFailed      ResultCode = "process_start_failed"
 	ResultStartupCheckFailed      ResultCode = "startup_check_failed"
+	ResultFrequencyLimit          ResultCode = "startup_frequency_limit"
+	ResultFrequencyCheckFailed    ResultCode = "startup_frequency_check_failed"
 	ResultExternalStartupTimeout  ResultCode = "external_startup_timeout"
 	ResultCancelled               ResultCode = "cancelled"
 	ResultAlreadyRunningManaged   ResultCode = "already_running_managed"
@@ -58,10 +61,11 @@ const (
 )
 
 type Service struct {
-	visibility *startupVisibility
-	enumerator WindowEnumerator
-	manager    WindowManager
-	logger     Logger
+	visibility     *startupVisibility
+	enumerator     WindowEnumerator
+	manager        WindowManager
+	logger         Logger
+	startupHistory *config.StartupHistory
 	// Instance-local probes keep tests isolated from the user's startup setup.
 	externalStartupLookup func(string) (string, error)
 	externalStartupWait   time.Duration
@@ -73,8 +77,13 @@ type Service struct {
 }
 
 func NewService(enumerator WindowEnumerator, manager WindowManager, logger Logger) *Service {
+	var history *config.StartupHistory
+	if dir, err := config.AppDirWithError(); err == nil {
+		history = config.NewStartupHistory(filepath.Join(dir, "startup-history.json"))
+	}
 	return &Service{
 		enumerator: enumerator, manager: manager, logger: logger,
+		startupHistory:        history,
 		externalStartupLookup: startup.NewExternalStartupLookup(),
 		logonTaskLaunch:       startup.LaunchAppTaskNow,
 		logonTaskLaunchWait:   30 * time.Second,

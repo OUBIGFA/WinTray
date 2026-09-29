@@ -504,6 +504,7 @@ func (w *MainWindow) buildSchedule(parent walk.Container) error {
 	}
 	w.scheduleEnabled.CheckedChanged().Attach(func() {
 		w.scheduleBlock.SetEnabled(w.scheduleEnabled.Checked())
+		w.syncFrequencyEnabled()
 		if w.updatingEditor {
 			return
 		}
@@ -543,9 +544,80 @@ func (w *MainWindow) buildSchedule(parent walk.Container) error {
 	if w.scheduleHint, err = newWrappedHint(w.scheduleBlock); err != nil {
 		return err
 	}
+	if w.frequencyEnabled, err = walk.NewCheckBox(w.scheduleBlock); err != nil {
+		return err
+	}
+	if w.frequencyBlock, err = newRow(w.scheduleBlock, 8); err != nil {
+		return err
+	}
+	if w.frequencyDaysEdit, w.frequencyDaysUnit, err = newNumberEdit(w.frequencyBlock); err != nil {
+		return err
+	}
+	if w.frequencyRunsEdit, w.frequencyRunsUnit, err = newNumberEdit(w.frequencyBlock); err != nil {
+		return err
+	}
+	if _, err = walk.NewHSpacer(w.frequencyBlock); err != nil {
+		return err
+	}
+	if w.frequencyHint, err = newWrappedHint(w.scheduleBlock); err != nil {
+		return err
+	}
+	w.frequencyEnabled.CheckedChanged().Attach(func() {
+		w.syncFrequencyEnabled()
+		if w.updatingEditor {
+			return
+		}
+		app, idx, ok := w.selectedManagedApp()
+		if !ok || !app.RunOnStartup {
+			return
+		}
+		app.Schedule.FrequencyEnabled = w.frequencyEnabled.Checked()
+		w.updateManagedRow(idx)
+		w.save()
+	})
+	w.attachFrequencyNumber(w.frequencyDaysEdit, func(s *config.Schedule) *int { return &s.FrequencyDays }, config.ClampFrequencyDays)
+	w.attachFrequencyNumber(w.frequencyRunsEdit, func(s *config.Schedule) *int { return &s.FrequencyRuns }, config.ClampFrequencyRuns)
 	w.attachScheduleMinutes(w.startDelayEdit, func(s *config.Schedule) *int { return &s.StartDelayMinutes })
 	w.attachScheduleMinutes(w.autoExitEdit, func(s *config.Schedule) *int { return &s.AutoExitMinutes })
 	return nil
+}
+
+// Automatic-launch options are dormant while startup is off; auto-exit remains
+// editable in the enclosing schedule. Saved frequency values are never cleared.
+func (w *MainWindow) syncFrequencyEnabled() {
+	if w.frequencyEnabled == nil || w.frequencyBlock == nil {
+		return
+	}
+	app, _, ok := w.selectedManagedApp()
+	enabled := ok && app.RunOnStartup && w.scheduleEnabled.Checked()
+	w.frequencyEnabled.SetEnabled(enabled)
+	w.frequencyBlock.SetEnabled(enabled && w.frequencyEnabled.Checked())
+}
+
+func (w *MainWindow) attachFrequencyNumber(edit *walk.LineEdit, field func(*config.Schedule) *int, clamp func(int) int) {
+	edit.EditingFinished().Attach(func() {
+		if w.updatingEditor {
+			return
+		}
+		app, idx, ok := w.selectedManagedApp()
+		if !ok || !app.RunOnStartup {
+			return
+		}
+		stored := field(&app.Schedule)
+		value, err := strconv.Atoi(strings.TrimSpace(edit.Text()))
+		if err != nil {
+			walk.MsgBox(w.mw, w.mw.Title(), i18n.For(w.settings.Language).ManagedFrequencyInvalid, walk.MsgBoxIconWarning)
+			value = *stored
+		}
+		value = clamp(value)
+		edit.SetText(strconv.Itoa(value))
+		if value == *stored {
+			return
+		}
+		*stored = value
+		w.updateManagedRow(idx)
+		w.save()
+	})
 }
 
 // attachScheduleMinutes saves one scheduled time when its editor is left.
@@ -741,6 +813,10 @@ func (w *MainWindow) applyProgramsLanguage(msg i18n.Messages) {
 	w.scheduleExit.SetText(msg.ManagedScheduleExit)
 	w.autoExitUnit.SetText(msg.ManagedScheduleExitUnit)
 	w.scheduleHint.SetText(msg.ManagedScheduleHint)
+	w.frequencyEnabled.SetText(msg.ManagedFrequency)
+	w.frequencyDaysUnit.SetText(msg.ManagedFrequencyDays)
+	w.frequencyRunsUnit.SetText(msg.ManagedFrequencyRuns)
+	w.frequencyHint.SetText(msg.ManagedFrequencyHint)
 	w.argsLabel.SetText(msg.ManagedAppArgs)
 	w.argsHint.SetText(msg.ManagedArgsHint)
 	w.argsEdit.SetCueBanner(msg.ManagedArgsPlaceholder)
@@ -840,7 +916,7 @@ func (w *MainWindow) onAddProgram() {
 			RunOnStartup:             true,
 			LaunchHiddenInBackground: launchHiddenByDefault,
 			TrayBehavior:             config.TrayBehavior{AutoMinimizeAndHideOnLaunch: !launchHiddenByDefault},
-			Schedule:                 config.Schedule{AutoExitMinutes: config.DefaultAutoExitMinutes},
+			Schedule:                 config.Schedule{AutoExitMinutes: config.DefaultAutoExitMinutes, FrequencyDays: 1, FrequencyRuns: 1},
 		})
 	}
 	w.refreshManagedList()
@@ -1051,6 +1127,10 @@ func (w *MainWindow) syncManagedEditor() {
 		w.scheduleBlock.SetEnabled(false)
 		w.startDelayEdit.SetText("0")
 		w.autoExitEdit.SetText(strconv.Itoa(config.DefaultAutoExitMinutes))
+		w.frequencyEnabled.SetChecked(false)
+		w.frequencyDaysEdit.SetText("1")
+		w.frequencyRunsEdit.SetText("1")
+		w.syncFrequencyEnabled()
 		return
 	}
 
@@ -1068,6 +1148,10 @@ func (w *MainWindow) syncManagedEditor() {
 	w.scheduleBlock.SetEnabled(app.Schedule.Enabled)
 	w.startDelayEdit.SetText(strconv.Itoa(app.Schedule.StartDelayMinutes))
 	w.autoExitEdit.SetText(strconv.Itoa(app.Schedule.AutoExitMinutes))
+	w.frequencyEnabled.SetChecked(app.Schedule.FrequencyEnabled)
+	w.frequencyDaysEdit.SetText(strconv.Itoa(config.ClampFrequencyDays(app.Schedule.FrequencyDays)))
+	w.frequencyRunsEdit.SetText(strconv.Itoa(config.ClampFrequencyRuns(app.Schedule.FrequencyRuns)))
+	w.syncFrequencyEnabled()
 	w.argsEdit.SetText(app.Args)
 }
 

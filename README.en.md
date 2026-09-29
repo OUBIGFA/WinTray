@@ -109,7 +109,15 @@ Check **Tray icon** in the program list to move the program's existing tray icon
 
 ### Custom Timing
 
-When checked, two values: **start 0–1440 min after sign-in** (default **0**) and **quit after 0–1440 min** of running, ending child processes too (default **30**; **0** never quits). Both stay inactive while unchecked.
+When checked, configure:
+
+- **Start delay**: **0–1440 minutes** after sign-in, default **0**.
+- **Auto-quit**: quit after **0–1440 minutes**, including child processes; default **30**, **0** means never quit. Still applies when “Start this program at sign-in” is off.
+- **Limit automatic launches**: at most **1–1000 launches** within the last **1–365 days**. Off by default; starts at **1 launch per day** when enabled. **1 day = 24 hours**; restarting or crossing midnight does not reset the count.
+
+The limit applies only to automatic sign-in launches. Manual launches and “Launch Now” are unrestricted. Enabling it takes over original sign-in startup; disabling it restores the previous startup arrangement. Takeover failures show an error; administrator tasks require one confirmation.
+
+Unchecking “Custom timing” disables all three settings.
 
 ### Staggered Startup
 

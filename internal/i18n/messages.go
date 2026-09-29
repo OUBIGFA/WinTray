@@ -78,6 +78,11 @@ type Messages struct {
 	ManagedScheduleExit            string
 	ManagedScheduleExitUnit        string
 	ManagedScheduleHint            string
+	ManagedFrequency               string
+	ManagedFrequencyDays           string
+	ManagedFrequencyRuns           string
+	ManagedFrequencyHint           string
+	ManagedFrequencyInvalid        string
 	ManagedScheduleInvalid         string
 	ManagedScheduleTag             string
 	ManagedLaunchHidden            string
@@ -214,7 +219,12 @@ var zhCN = Messages{
 	ManagedScheduleStartUnit:       "分钟启动",
 	ManagedScheduleExit:            "运行",
 	ManagedScheduleExitUnit:        "分钟后退出",
-	ManagedScheduleHint:            "适合签到类程序：错开开机高峰再启动，运行满时长后彻底结束（含子进程）；退出时间为 0 表示不自动退出",
+	ManagedScheduleHint:            "时间范围 0–1440 分钟，退出时间为 0 表示不退出；取消开机启动后，自动退出仍生效",
+	ManagedFrequency:               "限制自动运行次数",
+	ManagedFrequencyDays:           "天内最多自动运行",
+	ManagedFrequencyRuns:           "次",
+	ManagedFrequencyHint:           "按最近天数计次（1 天 = 24 小时），接管原有开机自启；手动打开不受限",
+	ManagedFrequencyInvalid:        "请输入整数：天数 1–365，次数 1–1000",
 	ManagedScheduleInvalid:         "时间必须是 0 到 1440 之间的整数（分钟）",
 	ManagedScheduleTag:             "%s · 定时",
 	ManagedLaunchHidden:            "后台启动",
@@ -264,7 +274,7 @@ var zhCN = Messages{
 	ManagedListHiddenTemplate:      "%s | %s | 后台静默启动=%t",
 	ManagedListParamTemplate:       "关闭窗口=%t",
 	ManagedListParamHiddenTemplate: "静默启动=%t",
-	ManagedListParamPausedTemplate: "已暂停",
+	ManagedListParamPausedTemplate: "原生行为",
 	RunSummaryNone:                 "没有可执行的受管任务",
 	RunSummaryLine:                 "%s: %s",
 	FatalStartupTitle:              "WinTray 启动失败",
@@ -355,7 +365,12 @@ var enUS = Messages{
 	ManagedScheduleStartUnit:       "min after sign-in",
 	ManagedScheduleExit:            "Quit after",
 	ManagedScheduleExitUnit:        "min",
-	ManagedScheduleHint:            "For check-in tools: starts after the sign-in rush and is ended for good, child processes included, once it has run that long; 0 never quits it",
+	ManagedScheduleHint:            "Times: 0–1440 min; 0 means never quit; auto-quit still applies when start at sign-in is off",
+	ManagedFrequency:               "Limit automatic launches",
+	ManagedFrequencyDays:           "days: at most",
+	ManagedFrequencyRuns:           "launches",
+	ManagedFrequencyHint:           "Rolling days (1 day = 24 hours); takes over original sign-in startup; manual launches are unrestricted",
+	ManagedFrequencyInvalid:        "Enter whole numbers: 1–365 days, 1–1000 launches",
 	ManagedScheduleInvalid:         "Times must be whole minutes from 0 to 1440",
 	ManagedScheduleTag:             "%s · timed",
 	ManagedLaunchHidden:            "Run in background",
@@ -405,7 +420,7 @@ var enUS = Messages{
 	ManagedListHiddenTemplate:      "%s | %s | LaunchHidden=%t",
 	ManagedListParamTemplate:       "CloseAfterLaunch=%t",
 	ManagedListParamHiddenTemplate: "LaunchHidden=%t",
-	ManagedListParamPausedTemplate: "Paused",
+	ManagedListParamPausedTemplate: "Native behavior",
 	RunSummaryNone:                 "No managed tasks to run",
 	RunSummaryLine:                 "%s: %s",
 	FatalStartupTitle:              "WinTray startup failed",
@@ -496,22 +511,24 @@ func IsLikelyPermissionCode(code string) bool {
 
 func TranslateResultCode(language, code string) string {
 	messages := map[string]string{
-		"empty_exe_path":             "empty exe path",
-		"invalid_exe_path":           "invalid exe path",
-		"process_start_failed":       "process start failed",
-		"startup_check_failed":       "startup check failed",
-		"external_startup_timeout":   "external startup timeout",
-		"cancelled":                  "cancelled",
-		"started_only":               "started only",
-		"started_hidden":             "started hidden",
-		"already_running_skipped":    "already running skipped",
-		"already_running_managed":    "already running managed existing",
-		"no_window_managed":          "no window managed",
-		"invalid_process_name":       "invalid process name",
-		"no_existing_window_managed": "no existing window managed",
-		"managed":                    "managed",
-		"managed_existing":           "managed existing",
-		"hidden_to_tray":             "hidden to tray",
+		"empty_exe_path":                 "empty exe path",
+		"invalid_exe_path":               "invalid exe path",
+		"process_start_failed":           "process start failed",
+		"startup_check_failed":           "startup check failed",
+		"startup_frequency_limit":        "automatic startup limit reached",
+		"startup_frequency_check_failed": "automatic startup limit check failed",
+		"external_startup_timeout":       "external startup timeout",
+		"cancelled":                      "cancelled",
+		"started_only":                   "started only",
+		"started_hidden":                 "started hidden",
+		"already_running_skipped":        "already running skipped",
+		"already_running_managed":        "already running managed existing",
+		"no_window_managed":              "no window managed",
+		"invalid_process_name":           "invalid process name",
+		"no_existing_window_managed":     "no existing window managed",
+		"managed":                        "managed",
+		"managed_existing":               "managed existing",
+		"hidden_to_tray":                 "hidden to tray",
 	}
 	message, ok := messages[code]
 	if !ok {
@@ -523,6 +540,16 @@ func TranslateResultCode(language, code string) string {
 func TranslateResultMessage(language, message string) string {
 	msg := For(language)
 	switch message {
+	case "automatic startup limit reached":
+		if Resolve(language) == LangEnUS {
+			return "automatic launch limit reached; skipped"
+		}
+		return "已达到自动运行次数上限，本次跳过"
+	case "automatic startup limit check failed":
+		if Resolve(language) == LangEnUS {
+			return "automatic launch control failed; see the log and save settings again"
+		}
+		return "自动运行次数控制失败，请查看日志后重新保存设置"
 	case "empty exe path":
 		if Resolve(language) == LangEnUS {
 			return "empty executable path"

@@ -92,6 +92,7 @@ type appTaskSpec struct {
 	workingDir string
 	delay      int // seconds after sign-in
 	highest    bool
+	demandOnly bool // Frequency-limited entries are started only after WinTray admits them.
 }
 
 // Sync replaces only the login trigger. Existing native tasks remain owned by
@@ -115,10 +116,16 @@ func (t *AppTasks) Sync(settings config.Settings, allowElevated bool) error {
 	var apps []config.LogonTaskApp
 	if settings.RunAtLogon {
 		apps = config.LogonTaskApps(settings)
+		// An unlimited duplicate could otherwise launch the same executable
+		// around a limited entry's decision. Include every enabled entry.
+		for _, entry := range settings.ManagedApps {
+			if entry.RunOnStartup {
+				pathCounts[strings.ToLower(filepath.Clean(entry.ExePath))]++
+				idCounts[strings.ToLower(entry.ID)]++
+			}
+		}
 		for _, app := range apps {
 			wanted[t.namePrefix+app.Entry.ID] = true
-			pathCounts[strings.ToLower(filepath.Clean(app.Entry.ExePath))]++
-			idCounts[strings.ToLower(app.Entry.ID)]++
 		}
 	}
 	managed := make(map[string]bool)
@@ -142,6 +149,21 @@ func (t *AppTasks) Sync(settings config.Settings, allowElevated bool) error {
 	}
 	sort.Strings(obsolete)
 	var errs []error
+	if settings.RunAtLogon {
+		for _, entry := range settings.ManagedApps {
+			if !config.StartupFrequencyEnabled(entry) || strings.EqualFold(filepath.Ext(entry.ExePath), ".exe") {
+				continue
+			}
+			// Scripts launched by WinTray can be counted directly. An external
+			// interpreter/wrapper cannot be migrated as the script executable.
+			source, err := findEnabledStartupEntry(entry.ExePath, t.findEntries, func() ([]taskDefinition, string, error) { return inventory, t.userSID, nil })
+			if err != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", entry.Name, err))
+			} else if source != "" {
+				errs = append(errs, fmt.Errorf("%s: external script startup cannot be frequency-controlled: %s", entry.Name, source))
+			}
+		}
+	}
 	for _, name := range obsolete {
 		if err := t.releaseMigration(name, state, allowElevated); err != nil {
 			errs = append(errs, fmt.Errorf("restore original startup for %s: %w", name, err))
@@ -179,6 +201,7 @@ func (t *AppTasks) spec(app config.LogonTaskApp) appTaskSpec {
 		workingDir: filepath.Dir(app.Entry.ExePath),
 		delay:      app.DelaySeconds,
 		highest:    requiresElevationForLaunch(app.Entry.ExePath),
+		demandOnly: config.StartupFrequencyEnabled(app.Entry),
 	}
 }
 
@@ -318,6 +341,12 @@ func appTaskXML(userSID string, spec appTaskSpec) (string, string) {
     </Exec>
   </Actions>
 `, xmlText(userSID), delay, runLevel, xmlText(spec.exePath), xmlText(spec.args), workingDirectory)
+	if spec.demandOnly {
+		// The XML is our own fixed template; native definitions are edited by
+		// the token-based transformation in startup_frequency_windows.go.
+		end := strings.Index(body, "</Triggers>") + len("</Triggers>")
+		body = "  <Triggers/>" + body[end:]
+	}
 	sum := sha256.Sum256([]byte(body))
 	fingerprint := "wintray-app-" + hex.EncodeToString(sum[:8])
 	return `<?xml version="1.0" encoding="UTF-16"?>

@@ -2,7 +2,10 @@
 
 package ui
 
-import "github.com/lxn/walk"
+import (
+	"github.com/lxn/walk"
+	"github.com/lxn/win"
+)
 
 type managedListRow struct {
 	Name       string
@@ -75,7 +78,9 @@ func (m *managedListTableModel) StyleCell(style *walk.CellStyle) {
 		return
 	}
 	if !m.rows[row].Enabled {
-		style.TextColor = secondaryColor
+		// Native startup behavior uses the system's grey text, distinct from
+		// the blue-grey hints shown for active WinTray settings.
+		style.TextColor = walk.Color(win.GetSysColor(win.COLOR_GRAYTEXT))
 	}
 }
 

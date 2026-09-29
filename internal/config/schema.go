@@ -43,7 +43,10 @@ func LogonTaskApps(settings Settings) []LogonTaskApp {
 	apps := make([]LogonTaskApp, 0)
 	for i := range settings.ManagedApps {
 		entry := settings.ManagedApps[i]
-		if !entry.RunOnStartup || !entry.LaunchViaLogonTask {
+		if !entry.RunOnStartup || (!entry.LaunchViaLogonTask && !StartupFrequencyEnabled(entry)) {
+			continue
+		}
+		if !strings.EqualFold(filepath.Ext(entry.ExePath), ".exe") {
 			continue
 		}
 		apps = append(apps, LogonTaskApp{Entry: entry, DelaySeconds: LogonTaskDelaySeconds(entry)})
@@ -83,6 +86,22 @@ type Schedule struct {
 	StartDelayMinutes int `json:"startDelayMinutes"`
 	// AutoExitMinutes is how long the program may run; 0 never ends it.
 	AutoExitMinutes int `json:"autoExitMinutes"`
+	// Frequency limits automatic launches within the preceding Days * 24 hours.
+	// It is independent of auto-exit and never restricts manual launches.
+	FrequencyEnabled bool `json:"frequencyEnabled"`
+	FrequencyDays    int  `json:"frequencyDays"`
+	FrequencyRuns    int  `json:"frequencyRuns"`
+}
+
+const MaxFrequencyDays = 365
+const MaxFrequencyRuns = 1000
+
+func ClampFrequencyDays(days int) int { return min(max(days, 1), MaxFrequencyDays) }
+func ClampFrequencyRuns(runs int) int { return min(max(runs, 1), MaxFrequencyRuns) }
+
+// StartupFrequencyEnabled is the single gate shared by scheduling and takeover.
+func StartupFrequencyEnabled(entry ManagedAppEntry) bool {
+	return entry.RunOnStartup && entry.Schedule.Enabled && entry.Schedule.FrequencyEnabled
 }
 
 // ClampScheduleMinutes keeps a scheduled time inside the supported range.
@@ -130,7 +149,7 @@ type ManagedAppEntry struct {
 // time, so switching a schedule on starts from it rather than from "never".
 func (e *ManagedAppEntry) UnmarshalJSON(b []byte) error {
 	type plain ManagedAppEntry
-	decoded := plain{Schedule: Schedule{AutoExitMinutes: DefaultAutoExitMinutes}}
+	decoded := plain{Schedule: Schedule{AutoExitMinutes: DefaultAutoExitMinutes, FrequencyDays: 1, FrequencyRuns: 1}}
 	if err := json.Unmarshal(b, &decoded); err != nil {
 		return err
 	}

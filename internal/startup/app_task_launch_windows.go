@@ -26,6 +26,14 @@ func LaunchAppTaskNow(entry config.ManagedAppEntry) error {
 func (t *AppTasks) launchNow(entry config.ManagedAppEntry) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if config.StartupFrequencyEnabled(entry) {
+		name, err := t.frequencyTaskName(entry)
+		if err != nil {
+			return err
+		}
+		_, err = t.run("/Run", "/TN", name)
+		return err
+	}
 	inventory, err := readTaskInventory(t.run)
 	if err != nil {
 		return err
@@ -46,9 +54,7 @@ func (t *AppTasks) launchNow(entry config.ManagedAppEntry) error {
 			action := task.Actions.Exec[0]
 			matches := sameExecutablePath(action.Command, entry.ExePath)
 			if sameExecutablePath(action.Command, t.selfExe) {
-				args, parseErr := windows.DecomposeCommandLine(action.Arguments)
-				matches = parseErr == nil && len(args) == 3 &&
-					(args[0] == AppTaskHelperRun || args[0] == AppTaskHelperShortcut || args[0] == AppTaskHelperConfigured) && sameExecutablePath(args[2], entry.ExePath)
+				matches = matchesStartupHelper(action.Arguments, entry.ExePath)
 			}
 			if !matches {
 				return errors.New("registered task targets another executable; save settings again before testing")
@@ -64,4 +70,13 @@ func (t *AppTasks) launchNow(entry config.ManagedAppEntry) error {
 		return fmt.Errorf("run original startup task %s: %w", name, err)
 	}
 	return nil
+}
+
+func matchesStartupHelper(arguments, exePath string) bool {
+	args, err := windows.DecomposeCommandLine(arguments)
+	if len(args) == 4 && args[0] == AppTaskHelperHidden {
+		args = args[1:]
+	}
+	return err == nil && len(args) == 3 &&
+		(args[0] == AppTaskHelperRun || args[0] == AppTaskHelperShortcut || args[0] == AppTaskHelperConfigured) && sameExecutablePath(args[2], exePath)
 }

@@ -46,7 +46,7 @@ func TestFormatManagedRules(t *testing.T) {
 			autoHide:        "收进托盘",
 			autoHideDelayed: "收进托盘（等 30 秒）",
 			hidden:          "后台启动",
-			paused:          "已暂停",
+			paused:          "原生行为",
 		},
 		{
 			language:        "en-US",
@@ -55,7 +55,7 @@ func TestFormatManagedRules(t *testing.T) {
 			autoHide:        "Close to tray",
 			autoHideDelayed: "Close to tray (after 30 s)",
 			hidden:          "Run in background",
-			paused:          "Paused",
+			paused:          "Native behavior",
 		},
 		{
 			language:        "unknown",
@@ -64,7 +64,7 @@ func TestFormatManagedRules(t *testing.T) {
 			autoHide:        "收进托盘",
 			autoHideDelayed: "收进托盘（等 30 秒）",
 			hidden:          "后台启动",
-			paused:          "已暂停",
+			paused:          "原生行为",
 		},
 	}
 

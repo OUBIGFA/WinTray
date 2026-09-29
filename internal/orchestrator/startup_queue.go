@@ -86,7 +86,7 @@ func (s *Service) StartManagedApps(ctx context.Context, settings config.Settings
 			continue
 		}
 		queued := queuedStart{entry: entry}
-		if entry.LaunchViaLogonTask {
+		if entry.LaunchViaLogonTask && !config.StartupFrequencyEnabled(entry) {
 			// Task Scheduler starts it at the delay the task was registered
 			// with (config.LogonTaskApps); the wait only needs to cover that
 			// delay plus a margin.
