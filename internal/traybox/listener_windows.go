@@ -117,6 +117,11 @@ type listener struct {
 	closing    bool
 	done       chan struct{}
 	stopResult chan error
+
+	// Pointer state, like window ordering, belongs to the listener thread.
+	pointerHook     uintptr
+	pointerYielded  bool
+	pointerResumeAt time.Time
 }
 
 // registeredClasses keeps window classes registered for the life of the
@@ -205,6 +210,14 @@ func (l *listener) run(ready chan<- error) {
 	l.mu.Lock()
 	l.hwnd = hwnd
 	l.mu.Unlock()
+	if l.cfg.raise {
+		if err := l.startPointerHook(); err != nil {
+			win.DestroyWindow(hwnd)
+			ready <- err
+			return
+		}
+		defer l.stopPointerHook()
+	}
 	// Programs running elevated may still reach WinTray when it runs elevated.
 	procChangeWindowMessageFilterEx.Call(uintptr(hwnd), win.WM_COPYDATA, msgfltAllow, 0)
 	procChangeWindowMessageFilterEx.Call(uintptr(hwnd), uintptr(l.taskbarCreated), msgfltAllow, 0)
@@ -608,10 +621,13 @@ func (l *listener) onTimer(id uintptr) {
 	}
 }
 
-// keepOnTop makes this the Shell_TrayWnd programs find first and gives it
-// the taskbar's bounds: callers turn icon positions relative to it.
+// keepOnTop makes this the Shell_TrayWnd programs find first, except during
+// native taskbar gestures. Its bounds preserve callers' relative coordinates.
 func (l *listener) keepOnTop() {
 	if !l.cfg.raise {
+		return
+	}
+	if l.pointerYielded && l.pointerBusy(time.Now(), pointerButtonDown()) {
 		return
 	}
 	class, _ := syscall.UTF16PtrFromString(l.cfg.className)
