@@ -4,6 +4,7 @@ package traybox
 
 import (
 	"fmt"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -20,9 +21,10 @@ var (
 	procUnhookWindowsHookEx = user32.NewProc("UnhookWindowsHookEx")
 	procCallNextHookEx      = user32.NewProc("CallNextHookEx")
 	procGetAsyncKeyState    = user32.NewProc("GetAsyncKeyState")
+	procPostPointerMessage  = user32.NewProc("PostThreadMessageW")
 	pointerHookProc         = syscall.NewCallback(func(code int32, message, data uintptr) uintptr {
 		if code >= 0 {
-			if l := activeListener.Load(); l != nil && !l.closing {
+			if l := activeListener.Load(); l != nil && !l.pointerStopping.Load() {
 				switch uint32(message) {
 				case win.WM_LBUTTONDOWN, win.WM_LBUTTONUP, win.WM_RBUTTONDOWN, win.WM_RBUTTONUP:
 					// MSLLHOOKSTRUCT begins with a screen-coordinate POINT. Copy
@@ -37,50 +39,104 @@ var (
 	})
 )
 
-// startPointerHook runs on the listener's message-loop thread. A timer alone
-// cannot yield before Explorer processes a fast press-and-drag gesture.
+// startPointerHook gives the hook a dedicated native message queue. Windows
+// waits for this queue on every mouse event, including movement, so it cannot
+// share the collector's filesystem, Shell calls or logging work.
 func (l *listener) startPointerHook() error {
-	hook, _, err := procSetWindowsHookExW.Call(whMouseLL, pointerHookProc, uintptr(win.GetModuleHandle(nil)), 0)
-	if hook == 0 {
-		return fmt.Errorf("install taskbar pointer guard: %w", err)
+	l.pointerDone = make(chan struct{})
+	l.pointerStopping.Store(false)
+	ready := make(chan error, 1)
+	go func() {
+		runtime.LockOSThread()
+		defer close(l.pointerDone)
+		var msg win.MSG
+		var pinned runtime.Pinner
+		pinned.Pin(&msg)
+		defer pinned.Unpin()
+		// Create the queue before publishing its thread ID to the stopper.
+		win.PeekMessage(&msg, 0, 0, 0, win.PM_NOREMOVE)
+		l.pointerThreadID = win.GetCurrentThreadId()
+		hook, _, err := procSetWindowsHookExW.Call(whMouseLL, pointerHookProc, uintptr(win.GetModuleHandle(nil)), 0)
+		if hook == 0 {
+			ready <- fmt.Errorf("install taskbar pointer guard: %w", err)
+			return
+		}
+		l.pointerHook = hook
+		defer func() {
+			if ok, _, err := procUnhookWindowsHookEx.Call(hook); ok == 0 {
+				l.logger.Warn(fmt.Sprintf("tray box: remove taskbar pointer guard: %v", err))
+			}
+		}()
+		ready <- nil
+		for {
+			switch win.GetMessage(&msg, 0, 0, 0) {
+			case -1:
+				l.logger.Warn("tray box: taskbar pointer message loop failed")
+				return
+			case 0:
+				return
+			}
+			win.TranslateMessage(&msg)
+			win.DispatchMessage(&msg)
+		}
+	}()
+	if err := <-ready; err != nil {
+		<-l.pointerDone
+		l.pointerDone = nil
+		l.pointerThreadID = 0
+		return err
 	}
-	l.pointerHook = hook
 	return nil
 }
 
-func (l *listener) stopPointerHook() {
-	if l.pointerHook != 0 {
-		if ok, _, err := procUnhookWindowsHookEx.Call(l.pointerHook); ok == 0 {
-			l.logger.Warn(fmt.Sprintf("tray box: remove taskbar pointer guard: %v", err))
-		}
-		l.pointerHook = 0
+func (l *listener) stopPointerHook() error {
+	if l.pointerDone == nil {
+		return nil
 	}
+	l.pointerStopping.Store(true)
+	if ok, _, err := procPostPointerMessage.Call(uintptr(l.pointerThreadID), win.WM_QUIT, 0, 0); ok == 0 {
+		select {
+		case <-l.pointerDone: // the native loop already ended
+		default:
+			l.pointerStopping.Store(false)
+			return fmt.Errorf("stop taskbar pointer guard: %w", err)
+		}
+	}
+	<-l.pointerDone
+	l.pointerHook, l.pointerThreadID, l.pointerDone = 0, 0, nil
+	return nil
 }
 
-// onPointer yields only our invisible window, before the native taskbar sees
-// the button-down. Leaving the proxy first makes Windows 11's in-place icon
-// reorder target the wrong Shell_TrayWnd; merely skipping timer raises is not
-// enough. No Explorer styles, window procedures or z-order are changed here.
+// onPointer requests that only our invisible window yield on taskbar presses.
+// Leaving the proxy first makes Windows 11's in-place icon reorder target the
+// wrong Shell_TrayWnd; merely skipping timer raises is not enough. Explorer's
+// styles, window procedures and z-order are never changed here.
 func (l *listener) onPointer(message uint32, point win.POINT) {
 	switch message {
 	case win.WM_LBUTTONDOWN, win.WM_RBUTTONDOWN:
 		var bounds win.RECT
-		tray := l.cfg.target(l.hwnd)
+		tray := win.HWND(l.pointerTarget.Load())
 		if tray == 0 || !win.GetWindowRect(tray, &bounds) ||
 			point.X < bounds.Left || point.X >= bounds.Right || point.Y < bounds.Top || point.Y >= bounds.Bottom {
 			return
 		}
+		l.pointerMu.Lock()
 		l.pointerYielded = true
 		l.pointerResumeAt = time.Now().Add(pointerReleaseDelay)
-		if !win.SetWindowPos(l.hwnd, win.HWND_BOTTOM, 0, 0, 0, 0, win.SWP_NOMOVE|win.SWP_NOSIZE|win.SWP_NOACTIVATE) {
-			l.logger.Warn("tray box: could not yield to the native taskbar for a pointer gesture")
+		l.pointerMu.Unlock()
+		// The proxy belongs to the busy collector thread. Queue its move rather
+		// than synchronously sending it window-position messages from the hook.
+		if !win.SetWindowPos(l.hwnd, win.HWND_BOTTOM, 0, 0, 0, 0, win.SWP_NOMOVE|win.SWP_NOSIZE|win.SWP_NOACTIVATE|win.SWP_ASYNCWINDOWPOS) {
+			l.pointerFailed.Store(true) // report from maintenance, outside the hook
 		}
 	case win.WM_LBUTTONUP, win.WM_RBUTTONUP:
+		l.pointerMu.Lock()
 		if l.pointerYielded {
 			// The hook runs before Explorer gets button-up. Allow its drop to
 			// complete before restoring interception, even for a quick click.
 			l.pointerResumeAt = time.Now().Add(pointerReleaseDelay)
 		}
+		l.pointerMu.Unlock()
 	}
 }
 
@@ -97,17 +153,22 @@ func pointerButtonDown() bool {
 // pointerBusy also recovers if a release happened on another input desktop:
 // the physical button state, not an indefinitely latched hook event, decides.
 func (l *listener) pointerBusy(now time.Time, buttonsDown bool) bool {
+	l.pointerMu.Lock()
 	if !l.pointerYielded {
+		l.pointerMu.Unlock()
 		return false
 	}
 	if buttonsDown {
 		l.pointerResumeAt = now.Add(pointerReleaseDelay)
+		l.pointerMu.Unlock()
 		return true
 	}
 	if now.Before(l.pointerResumeAt) {
+		l.pointerMu.Unlock()
 		return true
 	}
 	l.pointerYielded = false
+	l.pointerMu.Unlock()
 	// New icons could have registered directly with Explorer while yielding.
 	// Reuse the existing refresh path to collect them once priority is back.
 	win.SetTimer(l.hwnd, timerRefresh, uint32(refreshDelay.Milliseconds()), 0)

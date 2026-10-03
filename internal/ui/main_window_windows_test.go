@@ -500,6 +500,9 @@ func testSettingsFirstOpenFitsContent(t *testing.T, extraHint string) {
 	if os.Getenv("WINTRAY_UI_TEST") != "1" {
 		t.Skip("set WINTRAY_UI_TEST=1 on an interactive Windows desktop")
 	}
+	if runWindowTestInChild(t) {
+		return
+	}
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	discardStaleMessages()

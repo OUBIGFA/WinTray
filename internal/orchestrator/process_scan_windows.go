@@ -49,7 +49,14 @@ func forEachRunningProcessByIdentity(expectedPath, expectedName string, fn func(
 	if expectedPath == "" && targetIdentity == "" {
 		return
 	}
+	visitRunningProcesses(func(pid uint32, name string) bool {
+		return !processIdentityMatches(pid, name, expectedPath, targetIdentity) || fn(pid)
+	})
+}
 
+// visitRunningProcesses owns one snapshot for the whole operation. Callers
+// can match several executables without enumerating the desktop once per app.
+func visitRunningProcesses(visit func(uint32, string) bool) {
 	hSnapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
 	if err != nil {
 		return
@@ -63,13 +70,74 @@ func forEachRunningProcessByIdentity(expectedPath, expectedName string, fn func(
 	}
 
 	for {
-		if processIdentityMatches(pe.ProcessID, windows.UTF16ToString(pe.ExeFile[:]), expectedPath, targetIdentity) && !fn(pe.ProcessID) {
+		if !visit(pe.ProcessID, windows.UTF16ToString(pe.ExeFile[:])) {
 			return
 		}
 		if err = windows.Process32Next(hSnapshot, &pe); err != nil {
 			return
 		}
 	}
+}
+
+// runningProcessStartsByPath returns the oldest instance of each requested
+// executable. Results belong only to this check: caching across checks would
+// confuse restarted processes or reused PIDs. Keys are normalized lower-case
+// paths, and names only prefilter candidates; a full path must still match.
+func runningProcessStartsByPath(paths []string) map[string]time.Time {
+	if len(paths) == 0 {
+		return nil
+	}
+	wanted := make(map[string][]string)
+	for _, path := range paths {
+		path = strings.ToLower(normalizePath(path))
+		if path == "" {
+			continue
+		}
+		base := filepath.Base(path)
+		name := normalizeIdentity(strings.TrimSuffix(base, filepath.Ext(base)))
+		wanted[name] = append(wanted[name], path)
+	}
+	if len(wanted) == 0 {
+		return nil
+	}
+	starts := make(map[string]time.Time)
+	buf := make([]uint16, windows.MAX_LONG_PATH)
+	visitRunningProcesses(func(pid uint32, name string) bool {
+		name = strings.TrimSpace(name)
+		candidates := wanted[normalizeIdentity(strings.TrimSuffix(name, filepath.Ext(name)))]
+		if pid == 0 || len(candidates) == 0 {
+			return true
+		}
+		h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+		if err != nil {
+			return true
+		}
+		defer windows.CloseHandle(h)
+		size := uint32(len(buf))
+		if windows.QueryFullProcessImageName(h, 0, &buf[0], &size) != nil {
+			return true
+		}
+		path := normalizePath(windows.UTF16ToString(buf[:size]))
+		// Read identity and creation time from the same handle so a PID reused
+		// during the scan cannot lend its age to a different executable.
+		var creation, exit, kernel, user windows.Filetime
+		if windows.GetProcessTimes(h, &creation, &exit, &kernel, &user) != nil {
+			return true
+		}
+		started := time.Unix(0, creation.Nanoseconds())
+		for _, expectedPath := range candidates {
+			// Preserve EqualFold semantics for Unicode directory names;
+			// lower-case map equality alone is not equivalent.
+			if !strings.EqualFold(path, expectedPath) {
+				continue
+			}
+			if previous, ok := starts[expectedPath]; !ok || started.Before(previous) {
+				starts[expectedPath] = started
+			}
+		}
+		return true
+	})
+	return starts
 }
 
 func processIdentityMatches(pid uint32, exeName, expectedPath, targetIdentity string) bool {

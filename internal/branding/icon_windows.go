@@ -10,10 +10,8 @@ import (
 	"sync"
 
 	"github.com/lxn/walk"
+	"github.com/lxn/win"
 )
-
-//go:embed assets/logo.png
-var logoPNG []byte
 
 // github.png is generated from assets/github.svg by build/svg2png.py.
 //
@@ -32,7 +30,14 @@ var (
 
 func AppIcon() (*walk.Icon, error) {
 	appIconOnce.Do(func() {
-		appIcon, appIconErr = decodeIcon(logoPNG, 96)
+		// The linked resource contains the same logo. Native loading chooses
+		// the window/tray size at each DPI instead of keeping an 800px bitmap
+		// and decoding hundreds of thousands of pixels during every startup.
+		// Group icon 1 is supplied by rsrc_windows_amd64.syso.
+		appIcon, appIconErr = walk.NewIconFromResourceIdWithSize(1, walk.Size{
+			Width:  int(win.GetSystemMetricsForDpi(win.SM_CXICON, 96)),
+			Height: int(win.GetSystemMetricsForDpi(win.SM_CYICON, 96)),
+		})
 	})
 
 	return appIcon, appIconErr

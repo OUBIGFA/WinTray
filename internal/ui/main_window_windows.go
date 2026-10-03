@@ -4,6 +4,7 @@ package ui
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/lxn/walk"
 	"github.com/lxn/win"
@@ -140,19 +141,78 @@ type MainWindow struct {
 	blankSurfaces map[win.HWND]walk.Window
 }
 
+// NewBackgroundWindow owns the tray and message loop before settings are opened.
+func NewBackgroundWindow(initial config.Settings, callbacks Callbacks) (*MainWindow, error) {
+	return newMainWindow(initial, callbacks, true)
+}
+
 func NewMainWindow(initial config.Settings, callbacks Callbacks) (*MainWindow, error) {
+	return newMainWindow(initial, callbacks, false)
+}
+
+func newMainWindow(initial config.Settings, callbacks Callbacks, background bool) (*MainWindow, error) {
 	mw, err := walk.NewMainWindow()
 	if err != nil {
 		return nil, err
 	}
-	if appIcon, iconErr := branding.AppIcon(); iconErr == nil && appIcon != nil {
-		if err = mw.SetIcon(appIcon); err != nil {
+	succeeded := false
+	defer func() {
+		if !succeeded {
+			mw.Dispose()
+		}
+	}()
+	appIcon, err := branding.AppIcon()
+	if err != nil {
+		return nil, err
+	}
+	if err = mw.SetIcon(appIcon); err != nil {
+		return nil, err
+	}
+	w := &MainWindow{mw: mw, settings: initial, callbacks: callbacks}
+	mw.SetTitle(i18n.For(initial.Language).WindowTitle)
+	mw.Closing().Attach(func(canceled *bool, reason walk.CloseReason) {
+		if !w.allowClose {
+			*canceled = true
+			w.mw.Hide()
+			w.mw.SetVisible(false)
+			if w.callbacks.OnHideToTray != nil {
+				w.callbacks.OnHideToTray()
+			}
+		}
+	})
+	if !background {
+		if err = w.ensureContents(); err != nil {
 			return nil, err
 		}
 	}
-	w := &MainWindow{mw: mw, settings: initial, callbacks: callbacks}
+	succeeded = true
+	return w, nil
+}
+
+// ensureContents runs only on the UI thread. Background sessions need the
+// message window for activation and tray ownership, but not the editor, its
+// fonts, file icons or input hook until the user actually opens settings.
+func (w *MainWindow) ensureContents() (err error) {
+	if w.headerRow != nil {
+		return nil
+	}
+	mw := w.mw
+	before := *w
+	defer func() {
+		if err != nil {
+			// Keep the message window and background tasks alive on failure.
+			// Remove partial controls so reopening can retry without duplicating
+			// event handlers or changing the stored settings.
+			children := mw.Children()
+			for children.Len() > 0 {
+				children.At(children.Len() - 1).Dispose()
+			}
+			*w = before
+		}
+	}()
+	wasSuspended := mw.Suspended()
 	mw.SetSuspended(true)
-	defer mw.SetSuspended(false)
+	defer mw.SetSuspended(wasSuspended)
 
 	mw.SetSize(walk.Size{Width: 1040, Height: 780})
 	mw.SetMinMaxSize(walk.Size{Width: 1040, Height: 720}, walk.Size{})
@@ -166,20 +226,20 @@ func NewMainWindow(initial config.Settings, callbacks Callbacks) (*MainWindow, e
 	layout.SetMargins(walk.Margins{HNear: 24, VNear: 16, HFar: 24, VFar: 18})
 	layout.SetSpacing(16)
 	if err = mw.SetLayout(layout); err != nil {
-		return nil, err
+		return err
 	}
 
 	if err = w.buildHeader(); err != nil {
-		return nil, err
+		return err
 	}
 	if err = w.buildProgramsView(); err != nil {
-		return nil, err
+		return err
 	}
 	if err = w.buildSettingsView(); err != nil {
-		return nil, err
+		return err
 	}
 	if err = w.installBlankClickReset(); err != nil {
-		return nil, err
+		return err
 	}
 
 	w.showSettings(false)
@@ -187,18 +247,7 @@ func NewMainWindow(initial config.Settings, callbacks Callbacks) (*MainWindow, e
 	w.applyLanguage(w.settings.Language)
 	w.refreshManagedList()
 
-	mw.Closing().Attach(func(canceled *bool, reason walk.CloseReason) {
-		if !w.allowClose {
-			*canceled = true
-			w.mw.Hide()
-			w.mw.SetVisible(false)
-			if w.callbacks.OnHideToTray != nil {
-				w.callbacks.OnHideToTray()
-			}
-		}
-	})
-
-	return w, nil
+	return nil
 }
 
 // buildHeader holds the program page title, language and settings button.
@@ -278,6 +327,9 @@ func (w *MainWindow) applyLanguage(language string) {
 	defer func() { w.applyingLocale = false }()
 
 	w.mw.SetTitle(msg.WindowTitle)
+	if w.headerRow == nil {
+		return // Store language before the editor is constructed.
+	}
 	w.applyPageTitle()
 	w.backBtn.SetText(msg.BackToPrograms)
 	w.settingsBtn.SetText(msg.OpenSettings)
@@ -354,6 +406,11 @@ func (w *MainWindow) save() {
 // tray starts on the program list, whichever page it was closed on.
 func (w *MainWindow) ShowMainWindow() {
 	w.synchronize(func() {
+		if err := w.ensureContents(); err != nil {
+			msg := i18n.For(w.settings.Language)
+			w.ShowError(msg.WindowTitle, fmt.Sprintf(msg.OpenSettingsFailed, err))
+			return
+		}
 		if !w.mw.Visible() && w.onSettingsPage {
 			w.showSettings(false)
 		}

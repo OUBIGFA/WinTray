@@ -847,10 +847,10 @@ func (w *MainWindow) SetCheckUpdateBusy(busy bool) {
 }
 
 func (w *MainWindow) setCheckUpdateBusy(busy bool) {
+	w.checkingUpdate = busy
 	if w.checkUpdateBtn == nil {
 		return
 	}
-	w.checkingUpdate = busy
 	msg := i18n.For(w.settings.Language)
 	if busy {
 		w.checkUpdateBtn.SetText(msg.CheckUpdateBusy)
@@ -876,10 +876,10 @@ func (w *MainWindow) SetLaunchNowBusy(busy bool) {
 }
 
 func (w *MainWindow) setLaunchNowBusy(busy bool) {
+	w.launchNowBusy = busy
 	if w.launchNowBtn == nil || w.managedList == nil {
 		return
 	}
-	w.launchNowBusy = busy
 	msg := i18n.For(w.settings.Language)
 	if busy {
 		w.launchNowBtn.SetText(msg.ManagedLaunchNowBusy)
@@ -1058,6 +1058,9 @@ func (w *MainWindow) managedRow(app config.ManagedAppEntry) managedListRow {
 
 // updateManagedRow redraws one program's row, keeping selection and focus.
 func (w *MainWindow) updateManagedRow(idx int) {
+	if w.managedListModel == nil {
+		return
+	}
 	w.managedListModel.SetRow(idx, w.managedRow(w.settings.ManagedApps[idx]))
 }
 

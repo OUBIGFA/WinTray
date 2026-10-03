@@ -16,6 +16,7 @@ const (
 type Messages struct {
 	WindowTitle                    string
 	OpenSettings                   string
+	OpenSettingsFailed             string
 	BackToPrograms                 string
 	SettingsTitle                  string
 	LogonOffNotice                 string
@@ -162,6 +163,7 @@ type Messages struct {
 var zhCN = Messages{
 	WindowTitle:                    "WinTray",
 	OpenSettings:                   "更多功能",
+	OpenSettingsFailed:             "无法打开设置：%s\n请再次从托盘打开 WinTray",
 	BackToPrograms:                 "← 返回",
 	SettingsTitle:                  "设置",
 	LogonOffNotice:                 "WinTray 未开启开机启动；不再安排列表任务，程序自身的自启仍会保留或恢复",
@@ -308,6 +310,7 @@ var zhCN = Messages{
 var enUS = Messages{
 	WindowTitle:                    "WinTray",
 	OpenSettings:                   "More Features",
+	OpenSettingsFailed:             "Could not open settings: %s\nOpen WinTray from the tray again",
 	BackToPrograms:                 "← Back",
 	SettingsTitle:                  "Settings",
 	LogonOffNotice:                 "WinTray startup is off; list tasks are not scheduled, and apps' own startup remains or is restored",

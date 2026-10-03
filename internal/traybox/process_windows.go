@@ -19,15 +19,32 @@ const hwndMessage = ^uintptr(2)
 // processesByPath maps the IDs of running processes to their lower-case
 // image path, for the wanted lower-case paths only.
 func processesByPath(wanted map[string]bool) map[uint32]string {
+	if len(wanted) == 0 {
+		return nil
+	}
 	out := make(map[uint32]string)
 	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
 	if err != nil {
 		return out
 	}
 	defer windows.CloseHandle(snap)
+	// Browsers and other multi-process apps share image paths. Resolve each
+	// image only once per snapshot, with no stale cache across restarts or
+	// junction changes. The large query buffer also belongs to this scan.
+	resolved := make(map[string]string)
+	buf := make([]uint16, windows.MAX_LONG_PATH)
 	entry := windows.ProcessEntry32{Size: uint32(unsafe.Sizeof(windows.ProcessEntry32{}))}
 	for err = windows.Process32First(snap, &entry); err == nil; err = windows.Process32Next(snap, &entry) {
-		if path := processPath(entry.ProcessID); wanted[path] {
+		image := processImagePath(entry.ProcessID, buf)
+		if image == "" {
+			continue
+		}
+		path, ok := resolved[image]
+		if !ok {
+			path = canonicalIconPath(image)
+			resolved[image] = path
+		}
+		if wanted[path] {
 			out[entry.ProcessID] = path
 		}
 	}
@@ -35,17 +52,23 @@ func processesByPath(wanted map[string]bool) map[uint32]string {
 }
 
 func processPath(pid uint32) string {
+	buf := make([]uint16, windows.MAX_LONG_PATH)
+	return canonicalIconPath(processImagePath(pid, buf))
+}
+
+// processImagePath leaves canonicalization to the caller so a snapshot can
+// reuse both its path buffer and the resolution of repeated image paths.
+func processImagePath(pid uint32, buf []uint16) string {
 	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
 	if err != nil {
 		return ""
 	}
 	defer windows.CloseHandle(h)
-	buf := make([]uint16, windows.MAX_LONG_PATH)
 	size := uint32(len(buf))
 	if windows.QueryFullProcessImageName(h, 0, &buf[0], &size) != nil {
 		return ""
 	}
-	return canonicalIconPath(windows.UTF16ToString(buf[:size]))
+	return windows.UTF16ToString(buf[:size])
 }
 
 func canonicalIconPath(path string) string {

@@ -30,9 +30,30 @@ type RunLimitCheck struct {
 // ends for good: all of its processes and the processes they started.
 func (s *Service) EndOverduePrograms(entries []config.ManagedAppEntry, now time.Time) RunLimitCheck {
 	var check RunLimitCheck
-	for path := range ambiguousRunLimitPaths(entries) {
-		expectedName := stringutil.TrimExt(filepath.Base(path))
-		if _, ok := runningProcessStartLookup(path, expectedName); !ok {
+	hasLimit := false
+	for _, entry := range entries {
+		if entry.ExePath != "" && config.ScheduledRunLimit(entry) > 0 {
+			hasLimit = true
+			break
+		}
+	}
+	if !hasLimit {
+		return check
+	}
+	ambiguous := ambiguousRunLimitPaths(entries)
+	limited := uniqueRunLimitEntries(entries)
+	paths := make([]string, 0, len(ambiguous)+len(limited))
+	for path := range ambiguous {
+		paths = append(paths, path)
+	}
+	for _, entry := range limited {
+		paths = append(paths, entry.ExePath)
+	}
+	// One fresh scan serves every schedule, including ambiguous duplicates.
+	// Termination and its survivor check below still query live processes.
+	starts := runningProcessStartsByPath(paths)
+	for path := range ambiguous {
+		if _, ok := starts[path]; !ok {
 			continue
 		}
 		// The executable identity cannot distinguish these entries, so ending
@@ -44,11 +65,11 @@ func (s *Service) EndOverduePrograms(entries []config.ManagedAppEntry, now time.
 		}
 		s.logger.Warn(fmt.Sprintf("scheduled run time skipped: executable %s has ambiguous duplicate entries (different arguments or limits); process left running", path))
 	}
-	for _, entry := range uniqueRunLimitEntries(entries) {
+	for _, entry := range limited {
 		limit := time.Duration(config.ScheduledRunLimit(entry)) * time.Minute
 		expectedPath := normalizePath(entry.ExePath)
 		expectedName := stringutil.TrimExt(filepath.Base(entry.ExePath))
-		started, ok := runningProcessStartLookup(expectedPath, expectedName)
+		started, ok := starts[strings.ToLower(expectedPath)]
 		if !ok {
 			continue
 		}

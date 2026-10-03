@@ -118,8 +118,15 @@ type listener struct {
 	done       chan struct{}
 	stopResult chan error
 
-	// Pointer state, like window ordering, belongs to the listener thread.
+	// The low-level mouse hook has its own message thread: icon forwarding,
+	// path lookup and recovery must never stall desktop-wide input delivery.
 	pointerHook     uintptr
+	pointerThreadID uint32
+	pointerDone     chan struct{}
+	pointerStopping atomic.Bool
+	pointerTarget   atomic.Uintptr
+	pointerFailed   atomic.Bool
+	pointerMu       sync.Mutex // gesture state only; never held across native calls
 	pointerYielded  bool
 	pointerResumeAt time.Time
 }
@@ -210,18 +217,22 @@ func (l *listener) run(ready chan<- error) {
 	l.mu.Lock()
 	l.hwnd = hwnd
 	l.mu.Unlock()
+	l.keepOnTop() // publish the real taskbar before the hook can receive input
 	if l.cfg.raise {
 		if err := l.startPointerHook(); err != nil {
 			win.DestroyWindow(hwnd)
 			ready <- err
 			return
 		}
-		defer l.stopPointerHook()
+		defer func() {
+			if err := l.stopPointerHook(); err != nil {
+				l.logger.Warn(fmt.Sprintf("tray box: %v", err))
+			}
+		}()
 	}
 	// Programs running elevated may still reach WinTray when it runs elevated.
 	procChangeWindowMessageFilterEx.Call(uintptr(hwnd), win.WM_COPYDATA, msgfltAllow, 0)
 	procChangeWindowMessageFilterEx.Call(uintptr(hwnd), uintptr(l.taskbarCreated), msgfltAllow, 0)
-	l.keepOnTop()
 	if l.cfg.raise {
 		win.SetTimer(hwnd, timerRaise, uint32(raiseInterval.Milliseconds()), 0)
 	}
@@ -627,7 +638,14 @@ func (l *listener) keepOnTop() {
 	if !l.cfg.raise {
 		return
 	}
-	if l.pointerYielded && l.pointerBusy(time.Now(), pointerButtonDown()) {
+	// Resolve Explorer here, never from the input callback. A restarted shell
+	// is picked up by the next maintenance pass.
+	tray := l.cfg.target(l.hwnd)
+	l.pointerTarget.Store(uintptr(tray))
+	if l.pointerFailed.Swap(false) {
+		l.logger.Warn("tray box: could not yield to the native taskbar for a pointer gesture")
+	}
+	if l.pointerBusy(time.Now(), pointerButtonDown()) {
 		return
 	}
 	class, _ := syscall.UTF16PtrFromString(l.cfg.className)
@@ -635,7 +653,7 @@ func (l *listener) keepOnTop() {
 		win.SetWindowPos(l.hwnd, win.HWND_TOPMOST, 0, 0, 0, 0, win.SWP_NOMOVE|win.SWP_NOSIZE|win.SWP_NOACTIVATE)
 	}
 	var want, have win.RECT
-	if tray := l.cfg.target(l.hwnd); tray != 0 && win.GetWindowRect(tray, &want) && win.GetWindowRect(l.hwnd, &have) && want != have {
+	if tray != 0 && win.GetWindowRect(tray, &want) && win.GetWindowRect(l.hwnd, &have) && want != have {
 		win.SetWindowPos(l.hwnd, 0, want.Left, want.Top, want.Right-want.Left, want.Bottom-want.Top, win.SWP_NOZORDER|win.SWP_NOACTIVATE)
 	}
 }
@@ -685,8 +703,11 @@ func (l *listener) sync() {
 	}
 	clear(l.pending)
 	l.mu.Unlock()
+	// A selection change can contain many programs. Share one process/window
+	// scan for the whole batch rather than repeating it for every path.
+	refreshed := postTaskbarCreated(pending, l.taskbarCreated)
 	for _, p := range pending {
-		n := postTaskbarCreated(p, l.taskbarCreated)
+		n := refreshed[p]
 		// These icons live in WinTray, so the hosted executable's process
 		// enumeration cannot find them when collection is enabled later.
 		if l.cfg.hostedOwners != nil {
@@ -753,11 +774,23 @@ func (l *listener) shutdown() error {
 		l.mu.Unlock()
 		return err
 	}
+	// Join the input thread before destroying its target window, so a late
+	// gesture cannot address a recycled HWND. Failed restores keep it alive.
+	if err := l.stopPointerHook(); err != nil {
+		l.mu.Lock()
+		l.closing = false
+		l.mu.Unlock()
+		return err
+	}
 	if !win.DestroyWindow(l.hwnd) {
 		l.mu.Lock()
 		l.closing = false
 		l.mu.Unlock()
-		return errors.New("could not stop the tray icon listener")
+		err := errors.New("could not stop the tray icon listener")
+		if l.cfg.raise {
+			err = errors.Join(err, l.startPointerHook())
+		}
+		return err
 	}
 	// DestroyWindow also removes its timers.
 	l.mu.Lock()
@@ -884,20 +917,32 @@ func windowProcessPath(hwnd uint32) string {
 	return processPath(pid)
 }
 
-// postTaskbarCreated tells every window of the program's processes that the
-// taskbar was created, which makes programs register their icons again.
-func postTaskbarCreated(path string, msg uint32) int {
-	pids := processesByPath(map[string]bool{path: true})
-	n := 0
+// postTaskbarCreated tells each selected process's windows that the taskbar
+// was created. Counts stay per executable for diagnostics and hosted icons.
+func postTaskbarCreated(paths []string, msg uint32) map[string]int {
+	if len(paths) == 0 {
+		return nil
+	}
+	wanted := make(map[string]bool, len(paths))
+	for _, path := range paths {
+		if path != "" {
+			wanted[path] = true
+		}
+	}
+	pids := processesByPath(wanted)
+	if len(pids) == 0 {
+		return nil
+	}
+	counts := make(map[string]int)
 	for _, hwnd := range allWindows() {
 		if l := activeListener.Load(); l != nil && hwnd == l.hwnd {
 			continue // never ask our listener to re-register itself
 		}
 		var pid uint32
 		win.GetWindowThreadProcessId(hwnd, &pid)
-		if _, ok := pids[pid]; ok && win.PostMessage(hwnd, msg, 0, 0) != 0 {
-			n++
+		if path, ok := pids[pid]; ok && win.PostMessage(hwnd, msg, 0, 0) != 0 {
+			counts[path]++
 		}
 	}
-	return n
+	return counts
 }

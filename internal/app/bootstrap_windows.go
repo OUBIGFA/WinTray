@@ -400,7 +400,11 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 	}
 
 	var err error
-	mainWindow, err = ui.NewMainWindow(settings, ui.Callbacks{
+	createMainWindow := ui.NewMainWindow
+	if !state.settingsOpen {
+		createMainWindow = ui.NewBackgroundWindow
+	}
+	mainWindow, err = createMainWindow(settings, ui.Callbacks{
 		OnSave: func(s config.Settings) {
 			if saveErr := store.Save(s); saveErr != nil {
 				logger.Warn(fmt.Sprintf("save settings failed: %v", saveErr))
@@ -542,7 +546,7 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 		})
 	}
 
-	logger.Info(fmt.Sprintf("startup: settings window ready after %s", time.Since(started).Round(time.Millisecond)))
+	logger.Info(fmt.Sprintf("startup: message window ready after %s (settings=%t)", time.Since(started).Round(time.Millisecond), state.settingsOpen))
 
 	createTray := func() error {
 		current := mainWindow.Settings()

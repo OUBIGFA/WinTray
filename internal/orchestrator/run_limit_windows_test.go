@@ -21,16 +21,18 @@ func (l *runLimitTestLogger) Warn(message string) { l.warnings = append(l.warnin
 func (l *runLimitTestLogger) Error(string)        {}
 
 func TestEndOverdueProgramsSkipsAmbiguousDuplicateExecutable(t *testing.T) {
-	first := config.ManagedAppEntry{Name: "first", ExePath: `C:\Apps\tool.exe`, Args: "--first", Schedule: config.Schedule{Enabled: true, AutoExitMinutes: 30}}
+	first := startupTestEntry(t)
+	first.Schedule = config.Schedule{Enabled: true, AutoExitMinutes: 30}
+	cmd, err := startProcess(first.ExePath, first.Args, launchNoWindow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
 	duplicate := first
 	duplicate.Name = "second"
 	duplicate.Args = "--second"
 	logger := &runLimitTestLogger{}
 	svc := NewService(&testEnumerator{}, &testManager{}, logger)
-	original := runningProcessStartLookup
-	runningProcessStartLookup = func(string, string) (time.Time, bool) { return time.Now().Add(-time.Hour), true }
-	defer func() { runningProcessStartLookup = original }()
-
 	check := svc.EndOverduePrograms([]config.ManagedAppEntry{first, duplicate}, time.Now())
 	if check.Running != 1 || check.Next.IsZero() || time.Until(check.Next) < 20*time.Second {
 		t.Fatalf("ambiguous duplicate run limit = %+v, want pending check", check)
@@ -51,13 +53,6 @@ func TestEndOverdueProgramsIgnoresDuplicatesWithoutRunLimits(t *testing.T) {
 			second.Args = "--second"
 			logger := &runLimitTestLogger{}
 			svc := NewService(&testEnumerator{}, &testManager{}, logger)
-			original := runningProcessStartLookup
-			runningProcessStartLookup = func(string, string) (time.Time, bool) {
-				t.Error("programs without a run limit must not be polled")
-				return time.Now().Add(-time.Hour), true
-			}
-			defer func() { runningProcessStartLookup = original }()
-
 			check := svc.EndOverduePrograms([]config.ManagedAppEntry{first, second}, time.Now())
 			if check.Running != 0 || !check.Next.IsZero() || len(logger.warnings) != 0 {
 				t.Fatalf("unlimited duplicates keep WinTray alive: check=%+v warnings=%q", check, logger.warnings)

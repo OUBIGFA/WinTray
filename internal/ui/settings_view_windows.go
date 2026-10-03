@@ -97,6 +97,9 @@ func (w *MainWindow) buildSettingsView() error {
 // window is shown. The settings hints have a minimum width close to their
 // actual column width, so their height hint reflects wrapped copy.
 func (w *MainWindow) fitWindowToPages() {
+	if w.headerRow == nil {
+		return // A background-only message window has no pages to measure.
+	}
 	bounds := w.mw.BoundsPixels()
 	margins := w.mw.Layout().Margins()
 	chrome := bounds.Height - w.mw.ClientBoundsPixels().Height
@@ -231,6 +234,9 @@ func (w *MainWindow) setRunAtLogon(on bool) {
 }
 
 func (w *MainWindow) syncLogonState() {
+	if w.runAtLogon == nil {
+		return
+	}
 	wasSuspended := w.mw.Suspended()
 	w.mw.SetSuspended(true)
 	defer w.mw.SetSuspended(wasSuspended)
