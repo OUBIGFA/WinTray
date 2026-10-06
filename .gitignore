@@ -35,3 +35,5 @@ settings.json
 
 # Ignore scratch directories at any depth, after all keep rules.
 _temp/
+
+AGENTS.md
