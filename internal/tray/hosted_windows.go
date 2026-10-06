@@ -42,6 +42,7 @@ type Host struct {
 	lookupWindow func(pid uint32) uintptr
 	onEmpty      func()
 	box          *traybox.Box
+	dispatch     func(func())
 
 	mu    sync.Mutex
 	items map[uint32]*hostedItem
@@ -76,6 +77,10 @@ func NewHost(language string, logger Logger, lookupWindow func(pid uint32) uintp
 // SetTrayBox connects hosted icon identities to the shared collection box.
 // Set it on the UI thread before adding any programs.
 func (h *Host) SetTrayBox(box *traybox.Box) { h.box = box }
+
+// SetDispatcher uses the application's event loop when the visible desktop
+// is owned by mygo. The detached legacy host retains Walk's own message loop.
+func (h *Host) SetDispatcher(dispatch func(func())) { h.dispatch = dispatch }
 
 // SetOnEmpty registers a callback invoked (on the UI thread) when the last
 // hosted program goes away.
@@ -425,6 +430,10 @@ func (item *hostedItem) releaseHosting() {
 // disposes the icon's owner window, so it must not run inside that window's
 // own menu callback. Tests replace it to run f at once.
 var deferOnUIThread = func(item *hostedItem, f func()) {
+	if item.host.dispatch != nil {
+		item.host.dispatch(f)
+		return
+	}
 	item.form.Synchronize(f)
 	win.PostMessage(item.form.Handle(), win.WM_NULL, 0, 0)
 }
@@ -463,7 +472,7 @@ func (item *hostedItem) watchProcess(h windows.Handle, wakeWindow win.HWND) {
 			} else {
 				item.host.logger.Info(fmt.Sprintf("tray host: %s pid=%d exited", item.info.Name, item.info.ProcessID))
 			}
-			item.form.Synchronize(func() {
+			deferOnUIThread(item, func() {
 				if item.closed {
 					return
 				}

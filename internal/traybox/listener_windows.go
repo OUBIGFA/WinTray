@@ -32,6 +32,10 @@ var (
 	procAllowSetForegroundWindow    = user32.NewProc("AllowSetForegroundWindow")
 	procIsWindow                    = user32.NewProc("IsWindow")
 	procShellNotifyIconGetRect      = shell32.NewProc("Shell_NotifyIconGetRect")
+	procGetPropW                    = user32.NewProc("GetPropW")
+	procSetPropW                    = user32.NewProc("SetPropW")
+	procRemovePropW                 = user32.NewProc("RemovePropW")
+	taskbandProperty                = syscall.StringToUTF16Ptr("TaskbandHWND")
 )
 
 func isWindow(hwnd win.HWND) bool {
@@ -220,6 +224,7 @@ func (l *listener) run(ready chan<- error) {
 	l.keepOnTop() // publish the real taskbar before the hook can receive input
 	if l.cfg.raise {
 		if err := l.startPointerHook(); err != nil {
+			procRemovePropW.Call(uintptr(hwnd), uintptr(unsafe.Pointer(taskbandProperty)))
 			win.DestroyWindow(hwnd)
 			ready <- err
 			return
@@ -641,6 +646,7 @@ func (l *listener) keepOnTop() {
 	// Resolve Explorer here, never from the input callback. A restarted shell
 	// is picked up by the next maintenance pass.
 	tray := l.cfg.target(l.hwnd)
+	l.syncTaskband(tray)
 	l.pointerTarget.Store(uintptr(tray))
 	if l.pointerFailed.Swap(false) {
 		l.logger.Warn("tray box: could not yield to the native taskbar for a pointer gesture")
@@ -655,6 +661,29 @@ func (l *listener) keepOnTop() {
 	var want, have win.RECT
 	if tray != 0 && win.GetWindowRect(tray, &want) && win.GetWindowRect(l.hwnd, &have) && want != have {
 		win.SetWindowPos(l.hwnd, 0, want.Left, want.Top, want.Right-want.Left, want.Bottom-want.Top, win.SWP_NOZORDER|win.SWP_NOACTIVATE)
+	}
+}
+
+// ITaskbarList::HrInit resolves TaskbandHWND on the first Shell_TrayWnd.
+// Preserve Explorer's endpoint before raising our window, otherwise native
+// clients get E_NOTIMPL and cannot hide their own menu/taskbar buttons. Refresh
+// the borrowed handle on maintenance passes so Explorer restarts are covered.
+func (l *listener) syncTaskband(tray win.HWND) {
+	name := uintptr(unsafe.Pointer(taskbandProperty))
+	var want uintptr
+	if tray != 0 {
+		want, _, _ = procGetPropW.Call(uintptr(tray), name)
+	}
+	have, _, _ := procGetPropW.Call(uintptr(l.hwnd), name)
+	if want == have {
+		return
+	}
+	if want == 0 {
+		procRemovePropW.Call(uintptr(l.hwnd), name)
+		return
+	}
+	if ok, _, err := procSetPropW.Call(uintptr(l.hwnd), name, want); ok == 0 {
+		l.logger.Warn(fmt.Sprintf("tray box: could not preserve the native taskbar endpoint: %v", err))
 	}
 }
 
@@ -782,6 +811,7 @@ func (l *listener) shutdown() error {
 		l.mu.Unlock()
 		return err
 	}
+	procRemovePropW.Call(uintptr(l.hwnd), uintptr(unsafe.Pointer(taskbandProperty)))
 	if !win.DestroyWindow(l.hwnd) {
 		l.mu.Lock()
 		l.closing = false

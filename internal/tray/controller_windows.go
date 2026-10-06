@@ -3,6 +3,7 @@
 package tray
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"syscall"
@@ -37,6 +38,8 @@ type Controller struct {
 	exitRequested bool
 	box           *traybox.Box
 	logger        Logger
+	dispatch      func(func())
+	openCancel    context.CancelFunc
 }
 
 func New(
@@ -196,6 +199,10 @@ func appendBox(hMenu win.HMENU, icons []traybox.Icon) []win.HBITMAP {
 
 // runBoxAction clicks a collected icon on the user's behalf.
 func (c *Controller) runBoxAction(icons []traybox.Icon, id uint32, action traybox.Action) {
+	if c.openCancel != nil {
+		c.openCancel()
+		c.openCancel = nil
+	}
 	i := int(id - trayBoxedBase)
 	if i < 0 || i >= len(icons) {
 		return
@@ -215,6 +222,41 @@ func (c *Controller) runBoxAction(icons []traybox.Icon, id uint32, action traybo
 			c.showBoxError(icon, traybox.ErrIconGone)
 			return
 		}
+	}
+	if action == traybox.ActionClick {
+		ctx, cancel := context.WithCancel(context.Background())
+		c.openCancel = cancel
+		go func() {
+			defer cancel()
+			latest := func() (traybox.Icon, error) {
+				type result struct {
+					icon traybox.Icon
+					err  error
+				}
+				done := make(chan result, 1)
+				c.deferUI(func() {
+					if c.box != nil && !c.exitRequested {
+						for _, current := range c.box.Icons() {
+							if icon.SameIcon(current) {
+								done <- result{icon: current}
+								return
+							}
+						}
+					}
+					done <- result{err: traybox.ErrIconGone}
+				})
+				select {
+				case r := <-done:
+					return r.icon, r.err
+				case <-ctx.Done():
+					return traybox.Icon{}, ctx.Err()
+				}
+			}
+			if err := traybox.OpenIcon(ctx, icon, latest); err != nil && !errors.Is(err, context.Canceled) {
+				c.deferUI(func() { c.showBoxError(icon, err) })
+			}
+		}()
+		return
 	}
 	if err := traybox.Activate(icon, action); err != nil {
 		c.logger.Warn(fmt.Sprintf("tray box click failed: %s %v", icon.ExePath, err))
@@ -291,6 +333,16 @@ func (c *Controller) SetLanguage(language string) {
 	_ = c.notifyIcon.SetToolTip(i18n.For(language).TrayToolTip)
 }
 
+func (c *Controller) SetDispatcher(dispatch func(func())) { c.dispatch = dispatch }
+func (c *Controller) deferUI(f func()) {
+	if c.dispatch != nil {
+		c.dispatch(f)
+		return
+	}
+	c.window.Synchronize(f)
+	win.PostMessage(c.window.Handle(), win.WM_NULL, 0, 0)
+}
+
 func (c *Controller) SetVisible(visible bool) error {
 	if c == nil || c.notifyIcon == nil {
 		return nil
@@ -303,6 +355,10 @@ func (c *Controller) Dispose() {
 		return
 	}
 	c.exitRequested = true
+	if c.openCancel != nil {
+		c.openCancel()
+		c.openCancel = nil
+	}
 	disposeNotifyIcon(c.notifyIcon)
 	c.notifyIcon = nil
 }

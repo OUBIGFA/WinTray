@@ -44,7 +44,9 @@ type Messages struct {
 	ManagedListHint                string
 	ManagedListEmpty               string
 	ManagedListEmptyHint           string
+	ManagedExampleName             string
 	ManagedColumnName              string
+	ManagedColumnOrder             string
 	ManagedColumnRule              string
 	BrowseProgram                  string
 	BrowseProgramHint              string
@@ -184,10 +186,12 @@ var zhCN = Messages{
 	SecondsUnit:                    "秒",
 	LanguageLabel:                  "语言 / Language",
 	ManagedListTitle:               "开机启动项",
-	ManagedListHint:                "程序名称列勾选开机启动，托盘收纳列勾选收纳图标；拖动程序可调整启动顺序",
+	ManagedListHint:                "选择序号调整启动顺序；勾选程序开机启动，勾选托盘收纳隐藏原图标",
 	ManagedListEmpty:               "还没有添加程序",
+	ManagedExampleName:             "示例程序",
 	ManagedListEmptyHint:           "添加开机时想自动启动的程序，WinTray 会依次启动它们，并按你的设置收进托盘或在后台运行",
 	ManagedColumnName:              "程序名称",
+	ManagedColumnOrder:             "序号",
 	ManagedColumnRule:              "启动动作",
 	BrowseProgram:                  "更换…",
 	BrowseProgramHint:              "换成另一个程序文件",
@@ -331,10 +335,12 @@ var enUS = Messages{
 	SecondsUnit:                    "seconds",
 	LanguageLabel:                  "Language / 语言",
 	ManagedListTitle:               "Startup programs",
-	ManagedListHint:                "Check a program to start it at sign-in; check Tray icon to collect its icon; drag programs to set their start order",
+	ManagedListHint:                "Choose a number to set the start order; check a program for sign-in or its tray icon for collection",
 	ManagedListEmpty:               "No programs yet",
+	ManagedExampleName:             "Example program",
 	ManagedListEmptyHint:           "Add the programs you want to start at sign-in; WinTray starts them one by one and can close them to the tray or run them in the background",
 	ManagedColumnName:              "Program name",
+	ManagedColumnOrder:             "Order",
 	ManagedColumnRule:              "Start action",
 	BrowseProgram:                  "Change…",
 	BrowseProgramHint:              "Use a different program file",

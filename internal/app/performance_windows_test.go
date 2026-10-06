@@ -64,7 +64,9 @@ func readSessionResources(t *testing.T, pid uint32) sessionResources {
 
 // Opt-in end-to-end measurements use the real session in a new process, with
 // isolated settings and no system startup registration. Startup ends when
-// the session dispatches its login queue. First-open ends at visible controls;
+// the session dispatches its login queue. First-open ends at a visible window;
+// UI Automation is exercised separately because activating accessibility
+// loads providers into the measured process and distorts its memory baseline.
 // these are warm filesystem-cache samples, not a Windows cold-boot benchmark.
 func TestSessionStartupAndMemory(t *testing.T) {
 	if os.Getenv("WINTRAY_PERF_TEST") != "1" {
@@ -113,7 +115,7 @@ func TestSessionStartupAndMemory(t *testing.T) {
 			var hwnd win.HWND
 			waitSessionCondition(t, "usable settings", func() bool {
 				hwnd = visibleSessionWindow(pid)
-				return hwnd != 0 && findSessionButton(hwnd, "退出 WinTray") != 0
+				return hwnd != 0
 			})
 			openMS := float64(time.Since(opened).Microseconds()) / 1000
 			time.Sleep(200 * time.Millisecond)
@@ -125,7 +127,10 @@ func TestSessionStartupAndMemory(t *testing.T) {
 			if !ipc.TrySignalActivation(event) {
 				t.Fatal("reopening unavailable")
 			}
-			waitSessionCondition(t, "settings reopened", func() bool { return win.IsWindowVisible(hwnd) })
+			waitSessionCondition(t, "settings reopened", func() bool {
+				hwnd = visibleSessionWindow(pid)
+				return hwnd != 0 && sessionHasButton(hwnd, "退出 WinTray")
+			})
 			clickSessionButton(t, hwnd, "退出 WinTray")
 			if err := cmd.Wait(); err != nil {
 				t.Fatalf("session exit: %v: %s", err, output.String())

@@ -220,7 +220,7 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 		quitting = true
 		logger.Info("shutdown requested: cancelling pending tasks")
 		cancelLaunches()
-		mainWindow.Native().SetEnabled(false)
+		mainWindow.SetEnabled(false)
 		// Dispose the icon before closing the window so an open shell menu is
 		// dismissed immediately instead of being left behind while workers stop.
 		if trayController != nil {
@@ -346,7 +346,7 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 		}
 		lang := safeLanguage(mainWindow)
 		m := i18n.For(lang)
-		if walk.MsgBox(mainWindow.Native(), m.CleanupConfirmTitle, m.CleanupConfirmBody, walk.MsgBoxYesNo|walk.MsgBoxIconWarning) != walk.DlgCmdYes {
+		if !mainWindow.Confirm(m.CleanupConfirmTitle, m.CleanupConfirmBody) {
 			return
 		}
 
@@ -380,7 +380,7 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 			return
 		}
 		m := i18n.For(safeLanguage(mainWindow))
-		if walk.MsgBox(mainWindow.Native(), m.RemoveLogonTaskTitle, m.RemoveLogonTaskConfirmBody, walk.MsgBoxYesNo|walk.MsgBoxIconWarning) != walk.DlgCmdYes {
+		if !mainWindow.Confirm(m.RemoveLogonTaskTitle, m.RemoveLogonTaskConfirmBody) {
 			return
 		}
 		// Turning the switch off first keeps the next start from registering
@@ -545,8 +545,7 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 			mainWindow.Synchronize(openSettings)
 		})
 	}
-
-	logger.Info(fmt.Sprintf("startup: message window ready after %s (settings=%t)", time.Since(started).Round(time.Millisecond), state.settingsOpen))
+	host.SetDispatcher(mainWindow.Synchronize)
 
 	createTray := func() error {
 		current := mainWindow.Settings()
@@ -562,26 +561,33 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 		)
 		if trayErr == nil {
 			trayController = c
+			c.SetDispatcher(mainWindow.Synchronize)
 		}
 		return trayErr
 	}
-	if err = createTray(); err != nil {
-		if !state.autorun {
-			logger.Error(fmt.Sprintf("create tray failed: %v", err))
-			emitFatalWithLog(settings.Language, "failed to create system tray", err)
-			return 1
+	startupFailed := false
+	mainWindow.OnStarting(func() {
+		logger.Info(fmt.Sprintf("startup: message window ready after %s (settings=%t)", time.Since(started).Round(time.Millisecond), state.settingsOpen))
+		if err = createTray(); err != nil {
+			if !state.autorun {
+				startupFailed = true
+				logger.Error(fmt.Sprintf("create tray failed: %v", err))
+				emitFatalWithLog(settings.Language, "failed to create system tray", err)
+				mainWindow.RequestExplicitClose()
+				return
+			}
+			// The logon task can start WinTray before Explorer's taskbar exists.
+			// Managed apps are handled meanwhile; the icon follows once it can.
+			logger.Warn(fmt.Sprintf("create tray failed at logon, retrying: %v", err))
+			launchWG.Add(1)
+			go func() {
+				defer launchWG.Done()
+				retryMainTray(launchCtx, mainWindow, logger, func() bool {
+					return quitting || trayController != nil
+				}, createTray)
+			}()
 		}
-		// The logon task can start WinTray before Explorer's taskbar exists.
-		// Managed apps are handled meanwhile; the icon follows once it can.
-		logger.Warn(fmt.Sprintf("create tray failed at logon, retrying: %v", err))
-		launchWG.Add(1)
-		go func() {
-			defer launchWG.Done()
-			retryMainTray(launchCtx, mainWindow, logger, func() bool {
-				return quitting || trayController != nil
-			}, createTray)
-		}()
-	}
+	})
 
 	if state.settingsOpen {
 		mainWindow.ShowMainWindow()
@@ -592,7 +598,7 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 	if state.autorun {
 		// The message loop must exist before tasks can hand it hidden windows.
 		mainWindow.SetLaunchNowBusy(true)
-		mainWindow.Native().Starting().Attach(func() {
+		mainWindow.OnStarting(func() {
 			logger.Info(fmt.Sprintf("autorun mode: run managed apps (exitAfterCompleted=%t, collectedTrayIcons=%d)", exitsAfterStartup(settings), len(config.CollectedTrayIconPaths(settings))))
 			launchWG.Add(1)
 			go func() {
@@ -630,7 +636,11 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 		}
 	}()
 
-	return mainWindow.Run()
+	code := mainWindow.Run()
+	if startupFailed {
+		return 1
+	}
+	return code
 }
 
 // runLimitPoll is how often running programs are checked against their

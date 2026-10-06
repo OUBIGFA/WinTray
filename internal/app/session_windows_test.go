@@ -299,31 +299,12 @@ func visibleSessionWindow(pid uint32) win.HWND {
 	return 0
 }
 
-// clickSessionButton sends the native button notification. BM_CLICK is
-// unreliable across processes when Windows refuses foreground activation.
+// Invoke the same named action exposed to screen readers.
 func clickSessionButton(t *testing.T, parent win.HWND, text string) {
 	t.Helper()
-	button := findSessionButton(parent, text)
-	if button == 0 {
-		t.Fatalf("%s button not found", text)
+	if err := sessionButton(parent, text, true); err != nil {
+		t.Fatal(err)
 	}
-	controlID, _, _ := windows.NewLazySystemDLL("user32.dll").NewProc("GetDlgCtrlID").Call(uintptr(button))
-	win.SendMessage(win.GetParent(button), win.WM_COMMAND, controlID, uintptr(button))
-}
-
-func findSessionButton(parent win.HWND, text string) win.HWND {
-	getText := windows.NewLazySystemDLL("user32.dll").NewProc("GetWindowTextW")
-	for child := win.GetWindow(parent, win.GW_CHILD); child != 0; child = win.GetWindow(child, win.GW_HWNDNEXT) {
-		var buf [128]uint16
-		getText.Call(uintptr(child), uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
-		if windows.UTF16ToString(buf[:]) == text {
-			return child
-		}
-		if found := findSessionButton(child, text); found != 0 {
-			return found
-		}
-	}
-	return 0
 }
 
 func countSessionProcesses(t *testing.T) int {
@@ -348,24 +329,14 @@ func TestMainSessionProcess(t *testing.T) {
 	if len(os.Args) != 6 || os.Args[2] != "--" {
 		return
 	}
-	dir, manifest, eventName := os.Args[3], os.Args[4], os.Args[5]
+	runTestMainThread(func() { runMainSessionProcess(t) })
+}
+
+func runMainSessionProcess(t *testing.T) {
+	dir, eventName := os.Args[3], os.Args[5]
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
-	source, err := windows.UTF16PtrFromString(manifest)
-	if err != nil {
-		t.Fatal(err)
-	}
-	act := win.CreateActCtx(&win.ACTCTX{Source: source})
-	if act == win.HANDLE(windows.InvalidHandle) {
-		t.Fatal("test manifest unavailable")
-	}
-	kernel := windows.NewLazySystemDLL("kernel32.dll")
-	defer kernel.NewProc("ReleaseActCtx").Call(uintptr(act))
-	cookie, ok := win.ActivateActCtx(act)
-	if !ok {
-		t.Fatal("activate test manifest")
-	}
-	defer kernel.NewProc("DeactivateActCtx").Call(0, cookie)
+	// Mygo owns COM and common-controls initialization on this main thread.
 	store := config.NewStore(filepath.Join(dir, "settings.json"))
 	settings, err := store.LoadWithError()
 	if err != nil {

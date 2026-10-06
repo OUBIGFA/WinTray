@@ -83,13 +83,14 @@ var (
 			}
 			return 0
 		}
-		f.mu.Lock()
-		defer f.mu.Unlock()
 		switch {
 		case hwnd == f.program && msg == fakeTaskbar:
+			f.mu.Lock()
 			f.refreshed++
+			f.mu.Unlock()
 			return 0
 		}
+		// DefWindowProc may reenter during ShowWindow/SetWindowPos.
 		return win.DefWindowProc(hwnd, msg, wParam, lParam)
 	})
 )

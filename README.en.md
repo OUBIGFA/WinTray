@@ -8,7 +8,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-lightgrey.svg)]()
-[![Go 1.25](https://img.shields.io/badge/Go-1.25-00ADD8.svg)]()
+[![Go 1.27.1](https://img.shields.io/badge/Go-1.27.1-00ADD8.svg)]()
 
 English | [简体中文](README.md)
 
@@ -86,7 +86,7 @@ Console programs with no tray icon of their own (`syncthing.exe`, `frpc.exe`, �
 Check **Tray icon** in the program list to move the program's existing tray icons into WinTray's right-click menu. Requires Windows 11 and an `.exe` program.
 
 - Icons disappear from the taskbar and the `^` flyout; menu entries use the program's current icon and name
-- Left-click acts as clicking the original icon; right-click opens the program's own tray menu
+- Click to open the program; if no window appears, WinTray sends a double-click. Right-click opens its own tray menu
 - Unchecking the option or exiting WinTray normally restores the icons; unselected programs keep their native tray icons
 - Failed collection attempts restore the original icon where possible and log the cause
 
@@ -102,7 +102,7 @@ Only the startup trigger is replaced; the program's own startup configuration is
 
 ### Custom Timing
 
-When checked, configure:
+All fields remain editable when "Start this program at sign-in" is off:
 
 - **Start delay**: **0–1440 minutes** after sign-in, default **0**.
 - **Auto-quit**: quit after **0–1440 minutes**, including child processes; default **30**, **0** means never quit. Still applies when "Start this program at sign-in" is off.
@@ -110,11 +110,11 @@ When checked, configure:
 
 The limit applies only to automatic sign-in launches. Manual launches and "Launch Now" are unrestricted. Enabling it takes over original sign-in startup; disabling it restores the previous startup arrangement. Takeover failures show an error; administrator tasks require one confirmation.
 
-Unchecking "Custom timing" disables all three settings.
+Start delay and launch limits apply when "Start this program at sign-in" is on; auto-quit can work independently. Unchecking "Custom timing" disables all three settings.
 
 ### Staggered Startup
 
-The **Delay between programs** in Settings sets the minimum gap between launches — **3 seconds** by default, adjustable from **0–120 seconds**. Programs start in list order (drag to reorder); "Launch Now" is unaffected.
+The **Delay between programs** in Settings sets the minimum gap between launches — **3 seconds** by default, adjustable from **0–120 seconds**. Choose a number in each program's **Order** dropdown to change the start order; "Launch Now" is unaffected.
 
 ---
 
@@ -148,7 +148,7 @@ The source and release package support Windows only; cross-platform builds are n
 | ----------------- | -------------------------------------------------- |
 | OS                | Windows 10 / 11                                    |
 | Runtime           | No additional dependencies (standalone executable) |
-| Build from source | Go 1.25+                                           |
+| Build from source | Go 1.27.1+                                         |
 
 ---
 

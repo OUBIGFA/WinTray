@@ -5,9 +5,16 @@ package ui
 import (
 	"context"
 	"fmt"
+	"log"
+	"os"
+	"sync"
+	"syscall"
 
+	"github.com/egoist/mygo"
+	native "github.com/egoist/mygo/ui"
 	"github.com/lxn/walk"
 	"github.com/lxn/win"
+	"golang.org/x/sys/windows"
 	"wintray/internal/branding"
 	"wintray/internal/config"
 	"wintray/internal/i18n"
@@ -27,359 +34,303 @@ type Callbacks struct {
 	OnHideToTray     func()
 }
 
-// MainWindow has two pages: the program list, which is what people open
-// WinTray for, with the language, version and update check at hand; and a
-// settings page for options that are set once, such as running at sign-in,
-// timing and troubleshooting.
+// MainWindow owns the mygo desktop and an invisible owner for the existing
+// native tray icons. Only mygo renders controls; the tray owner exists even
+// before the first settings window and has no fonts, file icons or renderer.
 type MainWindow struct {
-	mw             *walk.MainWindow
-	allowClose     bool
-	settings       config.Settings
-	callbacks      Callbacks
-	applyingLocale bool
-	updatingEditor bool
-	launchNowBusy  bool
-	checkingUpdate bool
-	// onSettingsPage tracks the current page itself: while the window is
-	// hidden, all of its children report themselves as invisible.
-	onSettingsPage      bool
-	pageSelectedProgram int
-	settingsFitPending  bool
-
-	headerRow     *walk.Composite
-	backBtn       *walk.PushButton
-	pageTitle     *walk.Label
-	settingsTitle *walk.Label
-	languageCombo *walk.ComboBox
-	settingsBtn   *walk.PushButton
-
-	programsView      *walk.Composite
-	logonNotice       *walk.Composite
-	logonNoticeText   *walk.Label
-	enableLogonBtn    *walk.PushButton
-	programsBody      *walk.Composite
-	managedTitle      *walk.Label
-	managedHint       *walk.Label
-	addProgramBtn     *walk.PushButton
-	managedList       *walk.TableView
-	managedListModel  *managedListTableModel
-	emptyList         *walk.Composite
-	emptyTitle        *walk.Label
-	emptyHint         *walk.TextLabel
-	emptyAddBtn       *walk.PushButton
-	detailPane        *walk.Composite
-	editor            *walk.Composite
-	appName           *walk.Label
-	appPath           *walk.Label
-	browseLink        *walk.LinkLabel
-	launchNowBtn      *walk.PushButton
-	appEnabled        *walk.CheckBox
-	appEnabledHint    *walk.TextLabel
-	modeLabel         *walk.Label
-	modeBlock         *walk.Composite
-	modeTray          *walk.RadioButton
-	modeHidden        *walk.RadioButton
-	modeTask          *walk.RadioButton
-	modeNormal        *walk.RadioButton
-	modeHint          *walk.TextLabel
-	delayBlock        *walk.Composite
-	delayLabel        *walk.Label
-	delayEdit         *walk.LineEdit
-	delayUnit         *walk.Label
-	delayHint         *walk.TextLabel
-	scheduleRow       *walk.Composite
-	scheduleEnabled   *walk.CheckBox
-	scheduleBlock     *walk.Composite
-	scheduleStart     *walk.Label
-	startDelayEdit    *walk.LineEdit
-	startDelayUnit    *walk.Label
-	scheduleExit      *walk.Label
-	autoExitEdit      *walk.LineEdit
-	autoExitUnit      *walk.Label
-	scheduleHint      *walk.TextLabel
-	frequencyEnabled  *walk.CheckBox
-	frequencyBlock    *walk.Composite
-	frequencyDaysEdit *walk.LineEdit
-	frequencyDaysUnit *walk.Label
-	frequencyRunsEdit *walk.LineEdit
-	frequencyRunsUnit *walk.Label
-	frequencyHint     *walk.TextLabel
-	argsLabel         *walk.Label
-	argsBlock         *walk.Composite
-	argsEdit          *walk.LineEdit
-	argsHint          *walk.TextLabel
-	removeBtn         *walk.PushButton
-	versionLabel      *walk.Label
-	githubLink        *walk.LinkLabel
-	checkUpdateBtn    *walk.PushButton
-	silentBtn         *walk.PushButton
-	exitBtn           *walk.PushButton
-
-	settingsView      *walk.ScrollView
-	startupTitle      *walk.Label
-	logonRow          *settingRow
-	runAtLogon        *walk.CheckBox
-	hideAtLogonRow    *settingRow
-	hideAtLogon       *walk.CheckBox
-	exitOnDoneRow     *settingRow
-	exitOnDone        *walk.CheckBox
-	timingTitle       *walk.Label
-	intervalRow       *settingRow
-	intervalEdit      *walk.LineEdit
-	intervalUnit      *walk.Label
-	retryRow          *settingRow
-	retryEdit         *walk.LineEdit
-	retryUnit         *walk.Label
-	troubleshootTitle *walk.Label
-	logsRow           *settingRow
-	openLogsBtn       *walk.PushButton
-	removeLogonRow    *settingRow
-	removeLogonBtn    *walk.PushButton
-	cleanupRow        *settingRow
-	cleanupBtn        *walk.PushButton
-
-	blankSurfaces map[win.HWND]walk.Window
+	mw                            *walk.MainWindow
+	settings                      config.Settings
+	callbacks                     Callbacks
+	desktop                       desktopState
+	onSettingsPage                bool
+	launchNowBusy, checkingUpdate bool
+	allowClose                    bool
+	starting                      []func()
+	bounds                        mygo.Rectangle
+	queueMu                       sync.Mutex
+	queue                         []func()
+	disposed                      bool
+	iconsCancel                   context.CancelFunc
 }
 
-// NewBackgroundWindow owns the tray and message loop before settings are opened.
+const dispatchMessage = win.WM_APP + 0x51
+
+var dispatcherWindows sync.Map
+var commonControls = windows.NewLazySystemDLL("comctl32.dll")
+var defSubclass = commonControls.NewProc("DefSubclassProc")
+var setSubclass = commonControls.NewProc("SetWindowSubclass")
+var dispatchProc = syscall.NewCallback(func(hwnd win.HWND, message uint32, wParam, lParam, subclassID, refData uintptr) uintptr {
+	if message == dispatchMessage {
+		if value, ok := dispatcherWindows.Load(hwnd); ok {
+			value.(*MainWindow).drain()
+		}
+		return 0
+	}
+	result, _, _ := defSubclass.Call(uintptr(hwnd), uintptr(message), wParam, lParam)
+	return result
+})
+
 func NewBackgroundWindow(initial config.Settings, callbacks Callbacks) (*MainWindow, error) {
-	return newMainWindow(initial, callbacks, true)
+	return NewMainWindow(initial, callbacks)
 }
-
 func NewMainWindow(initial config.Settings, callbacks Callbacks) (*MainWindow, error) {
-	return newMainWindow(initial, callbacks, false)
-}
-
-func newMainWindow(initial config.Settings, callbacks Callbacks, background bool) (*MainWindow, error) {
-	mw, err := walk.NewMainWindow()
-	if err != nil {
-		return nil, err
-	}
-	succeeded := false
-	defer func() {
-		if !succeeded {
-			mw.Dispose()
-		}
-	}()
-	appIcon, err := branding.AppIcon()
-	if err != nil {
-		return nil, err
-	}
-	if err = mw.SetIcon(appIcon); err != nil {
-		return nil, err
-	}
-	w := &MainWindow{mw: mw, settings: initial, callbacks: callbacks}
-	mw.SetTitle(i18n.For(initial.Language).WindowTitle)
-	mw.Closing().Attach(func(canceled *bool, reason walk.CloseReason) {
-		if !w.allowClose {
-			*canceled = true
-			w.mw.Hide()
-			w.mw.SetVisible(false)
-			if w.callbacks.OnHideToTray != nil {
-				w.callbacks.OnHideToTray()
-			}
-		}
-	})
-	if !background {
-		if err = w.ensureContents(); err != nil {
-			return nil, err
-		}
-	}
-	succeeded = true
+	w := &MainWindow{settings: initial, callbacks: callbacks}
+	w.settings.ManagedApps = append([]config.ManagedAppEntry(nil), initial.ManagedApps...)
 	return w, nil
 }
 
-// ensureContents runs only on the UI thread. Background sessions need the
-// message window for activation and tray ownership, but not the editor, its
-// fonts, file icons or input hook until the user actually opens settings.
-func (w *MainWindow) ensureContents() (err error) {
-	if w.headerRow != nil {
-		return nil
-	}
-	mw := w.mw
-	before := *w
-	defer func() {
-		if err != nil {
-			// Keep the message window and background tasks alive on failure.
-			// Remove partial controls so reopening can retry without duplicating
-			// event handlers or changing the stored settings.
-			children := mw.Children()
-			for children.Len() > 0 {
-				children.At(children.Len() - 1).Dispose()
-			}
-			*w = before
-		}
-	}()
-	wasSuspended := mw.Suspended()
-	mw.SetSuspended(true)
-	defer mw.SetSuspended(wasSuspended)
-
-	mw.SetSize(walk.Size{Width: 1040, Height: 780})
-	mw.SetMinMaxSize(walk.Size{Width: 1040, Height: 720}, walk.Size{})
-	if font, fontErr := walk.NewFont(uiFontFamily, bodyTextSize, 0); fontErr == nil {
-		mw.SetFont(font)
-	}
-	if bg, bgErr := walk.NewSolidColorBrush(walk.RGB(248, 249, 251)); bgErr == nil {
-		mw.SetBackground(bg)
-	}
-	layout := walk.NewVBoxLayout()
-	layout.SetMargins(walk.Margins{HNear: 24, VNear: 16, HFar: 24, VFar: 18})
-	layout.SetSpacing(16)
-	if err = mw.SetLayout(layout); err != nil {
-		return err
-	}
-
-	if err = w.buildHeader(); err != nil {
-		return err
-	}
-	if err = w.buildProgramsView(); err != nil {
-		return err
-	}
-	if err = w.buildSettingsView(); err != nil {
-		return err
-	}
-	if err = w.installBlankClickReset(); err != nil {
-		return err
-	}
-
-	w.showSettings(false)
-	w.syncLogonState()
-	w.applyLanguage(w.settings.Language)
-	w.refreshManagedList()
-
-	return nil
-}
-
-// buildHeader holds the program page title, language and settings button.
-func (w *MainWindow) buildHeader() error {
-	row, err := newRow(w.mw, 12)
+// Mygo must initialize common controls before any tray-owner window exists.
+// Sharing its activation context also avoids two frameworks owning nested
+// application-wide initialization lifetimes.
+func (w *MainWindow) initOwner() error {
+	owner, err := walk.NewMainWindow()
 	if err != nil {
 		return err
 	}
-	w.headerRow = row
-	if w.pageTitle, err = newTitleLabel(row, pageTitleSize); err != nil {
-		return err
+	w.queueMu.Lock()
+	w.mw = owner
+	w.queueMu.Unlock()
+	dispatcherWindows.Store(owner.Handle(), w)
+	if ok, _, _ := setSubclass.Call(uintptr(owner.Handle()), dispatchProc, dispatchMessage, 0); ok == 0 {
+		dispatcherWindows.Delete(owner.Handle())
+		owner.Dispose()
+		return fmt.Errorf("install main-thread dispatcher")
 	}
-	if _, err = walk.NewHSpacer(row); err != nil {
-		return err
+	owner.SetTitle("WinTray tray owner")
+	return nil
+}
+
+// Synchronize is asynchronous even on the UI thread. Native menus must finish
+// dispatching before callbacks destroy an icon or its owner. One message
+// drains a batch; background work never needs a polling timer to wake the UI.
+func (w *MainWindow) Synchronize(f func()) {
+	w.queueMu.Lock()
+	if w.disposed {
+		w.queueMu.Unlock()
+		return
 	}
-	if w.languageCombo, err = walk.NewComboBox(row); err != nil {
-		return err
+	first := len(w.queue) == 0
+	w.queue = append(w.queue, f)
+	var hwnd win.HWND
+	if w.mw != nil {
+		hwnd = w.mw.Handle()
 	}
-	w.languageCombo.SetMinMaxSize(walk.Size{Width: 110}, walk.Size{Width: 110})
-	w.languageCombo.CurrentIndexChanged().Attach(func() {
-		if w.applyingLocale {
+	w.queueMu.Unlock()
+	if first && hwnd != 0 {
+		win.PostMessage(hwnd, dispatchMessage, 0, 0)
+	}
+}
+func (w *MainWindow) synchronize(f func()) { w.Synchronize(f) }
+func (w *MainWindow) drain() {
+	w.queueMu.Lock()
+	pending := w.queue
+	w.queue = nil
+	w.queueMu.Unlock()
+	for _, f := range pending {
+		f()
+	}
+	if w.desktop.window != nil {
+		w.desktop.window.Invalidate()
+	}
+}
+func (w *MainWindow) OnStarting(f func()) { w.starting = append(w.starting, f) }
+
+func (w *MainWindow) Run() int {
+	defer func() {
+		if w.iconsCancel != nil {
+			w.iconsCancel()
+		}
+		w.queueMu.Lock()
+		w.disposed = true
+		w.queue = nil
+		w.queueMu.Unlock()
+		if w.mw != nil {
+			dispatcherWindows.Delete(w.mw.Handle())
+			w.mw.Dispose()
+		}
+	}()
+	// This mostly-static utility is faster and smaller with mygo's dirty-rect
+	// CPU renderer; avoid loading a D3D driver for a settings window. Keep an
+	// explicit MYGO_GPU override available for diagnostics.
+	if _, set := os.LookupEnv("MYGO_GPU"); !set {
+		if err := os.Setenv("MYGO_GPU", "0"); err != nil {
+			log.Printf("configure native renderer: %v", err)
+			return 1
+		}
+	}
+	mygo.App.SetName("WinTray")
+	mygo.App.OnWindowAllClosed(func() {})
+	var initErr error
+	mygo.App.WhenReady(func() {
+		if initErr = w.initOwner(); initErr != nil {
+			mygo.App.Quit()
 			return
 		}
-		language := "zh-CN"
-		if w.languageCombo.CurrentIndex() == 1 {
-			language = "en-US"
+		for _, f := range w.starting {
+			f()
 		}
-		w.applyLanguage(language)
-		w.refreshManagedList()
+		w.starting = nil
+		win.PostMessage(w.mw.Handle(), dispatchMessage, 0, 0)
+	})
+	if err := mygo.App.Run(); err != nil {
+		log.Printf("desktop: %v", err)
+		return 1
+	}
+	if initErr != nil {
+		log.Printf("tray owner: %v", initErr)
+		return 1
+	}
+	return 0
+}
+
+func (w *MainWindow) ShowMainWindow() {
+	w.Synchronize(func() {
+		if w.allowClose {
+			return
+		}
+		if w.desktop.window == nil {
+			// Releasing the whole surface when hidden keeps GPU and text
+			// caches out of the long-lived, background-only tray session.
+			w.onSettingsPage = false
+			width, height := 1200, 850
+			if w.bounds.Width > 0 {
+				width, height = w.bounds.Width, w.bounds.Height
+			}
+			w.desktop.window = mygo.NewWindow(mygo.WindowOptions{
+				Title: i18n.For(w.settings.Language).WindowTitle, Width: width, Height: height, MinWidth: 1040, MinHeight: 720, Hidden: true, Content: native.View(w.nativeView),
+			})
+			window := w.desktop.window
+			if w.bounds.Width > 0 {
+				window.SetBounds(w.bounds)
+			}
+			if icon, err := branding.AppIcon(); err == nil {
+				hwnd := win.HWND(window.NativeHandle())
+				if err = w.mw.SetIcon(icon); err == nil {
+					win.SendMessage(hwnd, win.WM_SETICON, 1, win.SendMessage(w.mw.Handle(), win.WM_GETICON, 1, 0))
+					win.SendMessage(hwnd, win.WM_SETICON, 0, win.SendMessage(w.mw.Handle(), win.WM_GETICON, 0, 0))
+				}
+			}
+			window.OnClose(func(e *mygo.CloseEvent) {
+				if w.allowClose {
+					return
+				}
+				e.PreventDefault()
+				w.Synchronize(func() {
+					w.HideMainWindow()
+					if w.callbacks.OnHideToTray != nil {
+						w.callbacks.OnHideToTray()
+					}
+				})
+			})
+			w.loadNativeIcons()
+		}
+		w.desktop.window.Show()
+		w.desktop.window.Restore()
+		w.desktop.window.Focus()
+	})
+}
+
+func (w *MainWindow) HideMainWindow() {
+	w.commitNativeEdits()
+	if w.iconsCancel != nil {
+		w.iconsCancel()
+		w.iconsCancel = nil
+	}
+	if window := w.desktop.window; window != nil {
+		first, _ := w.desktop.list.Visible()
+		w.bounds = window.Bounds()
+		w.desktop.window = nil
+		window.Destroy()
+		w.desktop.icons = nil
+		w.desktop.numberCommits = nil
+		w.desktop.frameNumberCommits = nil
+		w.resetNativeList(first)
+	}
+}
+
+func (w *MainWindow) RequestExplicitClose() {
+	w.Synchronize(func() {
+		if w.allowClose {
+			return
+		}
+		w.commitNativeEdits()
+		w.allowClose = true
+		if w.desktop.window != nil {
+			w.desktop.window.Destroy()
+			w.desktop.window = nil
+		}
+		mygo.App.Quit()
+	})
+}
+
+// Native is exclusively the never-shown owner of native tray menus/icons.
+func (w *MainWindow) Native() *walk.MainWindow { return w.mw }
+func (w *MainWindow) SetEnabled(on bool) {
+	if w.desktop.window != nil {
+		win.EnableWindow(win.HWND(w.desktop.window.NativeHandle()), on)
+	}
+}
+func (w *MainWindow) Settings() config.Settings {
+	s := w.settings
+	s.ManagedApps = append([]config.ManagedAppEntry(nil), s.ManagedApps...)
+	return s
+}
+func (w *MainWindow) save() {
+	if w.callbacks.OnSave != nil {
+		w.callbacks.OnSave(w.Settings())
+	}
+}
+func (w *MainWindow) TurnOffRunAtLogon() {
+	if w.settings.RunAtLogon {
+		w.settings.RunAtLogon = false
 		w.save()
-	})
-	w.settingsBtn, err = newActionButton(row, func() { w.showSettings(true) })
-	return err
-}
-
-// showSettings switches between the program list and the settings page. The
-// program selection is kept, so going back returns to the same program.
-func (w *MainWindow) showSettings(show bool) {
-	wasSuspended := w.mw.Suspended()
-	w.mw.SetSuspended(true)
-	defer w.mw.SetSuspended(wasSuspended)
-	wasOnSettings := w.onSettingsPage
-	w.onSettingsPage = show
-	if show {
-		w.pageSelectedProgram = w.managedList.CurrentIndex()
-	}
-	w.headerRow.SetVisible(!show)
-	w.programsView.SetVisible(!show)
-	w.settingsView.SetVisible(show)
-	if !show && wasOnSettings && w.pageSelectedProgram >= 0 && w.pageSelectedProgram < len(w.settings.ManagedApps) {
-		w.managedList.SetCurrentIndex(w.pageSelectedProgram)
-	}
-	w.applyPageTitle()
-	if show && w.mw.Visible() {
-		w.settingsFitPending = true
-		// Let Walk finish laying out the newly visible page before measuring it.
-		w.synchronize(w.fitSettingsToScreen)
-	}
-	if w.mw.Visible() {
-		w.focusDefaultControl()
 	}
 }
-
-func (w *MainWindow) applyPageTitle() {
-	msg := i18n.For(w.settings.Language)
-	w.pageTitle.SetText(msg.WindowTitle)
-	w.settingsTitle.SetText(msg.SettingsTitle)
-}
-
-func (w *MainWindow) applyLanguage(language string) {
-	wasSuspended := w.mw.Suspended()
-	w.mw.SetSuspended(true)
-	defer w.mw.SetSuspended(wasSuspended)
-	msg := i18n.For(language)
-	w.settings.Language = string(i18n.Resolve(language))
-	w.applyingLocale = true
-	defer func() { w.applyingLocale = false }()
-
-	w.mw.SetTitle(msg.WindowTitle)
-	if w.headerRow == nil {
-		return // Store language before the editor is constructed.
+func (w *MainWindow) SetCollectedTrayIcon(id string, on bool) {
+	for i := range w.settings.ManagedApps {
+		if w.settings.ManagedApps[i].ID == id {
+			w.settings.ManagedApps[i].CollectTrayIcon = on
+			break
+		}
 	}
-	w.applyPageTitle()
-	w.backBtn.SetText(msg.BackToPrograms)
-	w.settingsBtn.SetText(msg.OpenSettings)
-	_ = w.languageCombo.SetModel([]string{msg.LanguageZhLabel, msg.LanguageEnLabel})
-	if w.settings.Language == string(i18n.LangEnUS) {
-		w.languageCombo.SetCurrentIndex(1)
-	} else {
-		w.languageCombo.SetCurrentIndex(0)
-	}
-	w.languageCombo.SetToolTipText(msg.LanguageLabel)
-	_ = w.languageCombo.Accessibility().SetName(msg.LanguageLabel)
-	w.applyProgramsLanguage(msg)
-	w.applySettingsLanguage(msg)
-	w.syncManagedEditor()
 }
-
 func (w *MainWindow) SetLanguage(language string) {
-	w.synchronize(func() {
-		w.applyLanguage(language)
-		w.refreshManagedList()
+	w.Synchronize(func() {
+		w.settings.Language = string(i18n.Resolve(language))
+		if w.desktop.window != nil {
+			w.desktop.window.SetTitle(i18n.For(language).WindowTitle)
+		}
 	})
 }
+func (w *MainWindow) SetLaunchNowBusy(busy bool)   { w.Synchronize(func() { w.launchNowBusy = busy }) }
+func (w *MainWindow) SetCheckUpdateBusy(busy bool) { w.Synchronize(func() { w.checkingUpdate = busy }) }
 
-// synchronize queues f on the UI thread and wakes the message loop. walk only
-// drains its queue after it has dispatched a window message, so an idle window
-// would otherwise hold background results (status updates, dialogs) until the
-// user happened to touch the UI again.
-func (w *MainWindow) synchronize(f func()) {
-	w.mw.Synchronize(f)
-	if hwnd := w.mw.Handle(); hwnd != 0 {
-		win.PostMessage(hwnd, win.WM_NULL, 0, 0)
+func (w *MainWindow) ShowInfo(title, body string)  { w.showMessage(title, body, mygo.MessageInfo) }
+func (w *MainWindow) ShowError(title, body string) { w.showMessage(title, body, mygo.MessageError) }
+func (w *MainWindow) showMessage(title, body string, kind mygo.MessageType) {
+	w.Synchronize(func() {
+		if _, err := mygo.Dialog.Message(mygo.MessageOptions{Parent: w.desktop.window, Title: title, Message: body, Type: kind}); err != nil {
+			log.Printf("show dialog: %v", err)
+		}
+	})
+}
+func (w *MainWindow) Confirm(title, body string) bool {
+	yes, no := "是", "否"
+	if w.settings.Language == "en-US" {
+		yes, no = "Yes", "No"
 	}
+	result, err := mygo.Dialog.Message(mygo.MessageOptions{Parent: w.desktop.window, Title: title, Message: body, Type: mygo.MessageQuestion, Buttons: []string{yes, no}, DefaultButton: 1, CancelButton: 1})
+	if err != nil {
+		log.Printf("show confirmation: %v", err)
+		return false
+	}
+	return result.Button == 0
 }
-
-// Synchronize schedules application-owned state changes on the UI thread.
-func (w *MainWindow) Synchronize(f func()) { w.synchronize(f) }
-
-func (w *MainWindow) ShowInfo(title, body string) {
-	w.synchronize(func() {
-		walk.MsgBox(w.mw, title, body, walk.MsgBoxIconInformation)
-	})
-}
-
-// ConfirmContext asks on the UI thread without trapping a worker if shutdown
-// ends the message loop before the question is displayed.
 func (w *MainWindow) ConfirmContext(ctx context.Context, title, body string) bool {
 	answer := make(chan bool, 1)
-	w.synchronize(func() {
+	w.Synchronize(func() {
 		if ctx.Err() == nil {
-			answer <- walk.MsgBox(w.mw, title, body, walk.MsgBoxYesNo|walk.MsgBoxIconQuestion) == walk.DlgCmdYes
+			answer <- w.Confirm(title, body)
 		}
 	})
 	select {
@@ -390,98 +341,48 @@ func (w *MainWindow) ConfirmContext(ctx context.Context, title, body string) boo
 	}
 }
 
-func (w *MainWindow) ShowError(title, body string) {
-	w.synchronize(func() {
-		walk.MsgBox(w.mw, title, body, walk.MsgBoxIconError)
-	})
-}
-
-func (w *MainWindow) save() {
-	if w.callbacks.OnSave != nil {
-		w.callbacks.OnSave(w.settings)
+// File icon loading belongs to a worker, never the render function. One small
+// bitmap per path is shared by visible rows and dropped with the desktop.
+func (w *MainWindow) loadNativeIcons() {
+	if w.iconsCancel != nil {
+		w.iconsCancel()
 	}
-}
-
-// ShowMainWindow brings the window to the front. A window reopened from the
-// tray starts on the program list, whichever page it was closed on.
-func (w *MainWindow) ShowMainWindow() {
-	w.synchronize(func() {
-		if err := w.ensureContents(); err != nil {
-			msg := i18n.For(w.settings.Language)
-			w.ShowError(msg.WindowTitle, fmt.Sprintf(msg.OpenSettingsFailed, err))
-			return
-		}
-		if !w.mw.Visible() && w.onSettingsPage {
-			w.showSettings(false)
-		}
-		w.fitWindowToPages()
-		hwnd := w.mw.Handle()
-		if hwnd != 0 {
-			win.ShowWindow(hwnd, win.SW_RESTORE)
-			win.ShowWindow(hwnd, win.SW_SHOW)
-			win.SetForegroundWindow(hwnd)
-		}
-		w.mw.Show()
-		w.mw.SetVisible(true)
-		w.focusDefaultControl()
-	})
-}
-
-// focusDefaultControl gives keyboard focus to the program list, to the add
-// button while the list is empty, or to the back button on the settings page.
-// Focus has to land on a child: walk otherwise moves it to the first tab stop
-// after a layout pass, whose text then shows up selected. Moving focus is also
-// what commits a field still being edited.
-func (w *MainWindow) focusDefaultControl() {
-	switch {
-	case w.onSettingsPage:
-		_ = w.backBtn.SetFocus()
-	case w.managedList != nil && w.managedList.Visible():
-		_ = w.managedList.SetFocus()
-	case w.emptyAddBtn != nil:
-		_ = w.emptyAddBtn.SetFocus()
+	ctx, cancel := context.WithCancel(context.Background())
+	w.iconsCancel = cancel
+	window := w.desktop.window
+	paths := make([]string, 0, len(w.settings.ManagedApps))
+	for _, entry := range w.settings.ManagedApps {
+		paths = append(paths, entry.ExePath)
 	}
-}
-
-func (w *MainWindow) HideMainWindow() {
-	w.mw.Hide()
-}
-
-func (w *MainWindow) Run() int {
-	w.fitWindowToPages()
-	return w.mw.Run()
-}
-
-func (w *MainWindow) RequestExplicitClose() {
-	if w == nil || w.mw == nil {
-		return
-	}
-	w.synchronize(func() {
-		if w.mw.IsDisposed() {
-			return
+	go func() {
+		icons := make(map[string]*native.Bitmap)
+		for _, path := range paths {
+			if ctx.Err() != nil {
+				return
+			}
+			if _, ok := icons[path]; ok {
+				continue
+			}
+			icon, err := walk.NewIconExtractedFromFileWithSize(path, 0, 24)
+			if err != nil {
+				continue
+			}
+			bmp, err := walk.NewBitmapFromIconForDPI(icon, walk.Size{Width: 24, Height: 24}, 96)
+			icon.Dispose()
+			if err != nil {
+				continue
+			}
+			img, err := bmp.ToImage()
+			bmp.Dispose()
+			if err == nil {
+				icons[path] = native.NewBitmap(img)
+			}
 		}
-		w.allowClose = true
-		w.mw.Close()
-		if app := walk.App(); app != nil {
-			app.Exit(0)
-		}
-	})
-}
-
-func (w *MainWindow) Native() *walk.MainWindow {
-	return w.mw
-}
-
-func (w *MainWindow) SetCollectedTrayIcon(id string, on bool) {
-	for i := range w.settings.ManagedApps {
-		if w.settings.ManagedApps[i].ID == id {
-			w.settings.ManagedApps[i].CollectTrayIcon = on
-			w.updateManagedRow(i)
-			break
-		}
-	}
-}
-
-func (w *MainWindow) Settings() config.Settings {
-	return w.settings
+		w.Synchronize(func() {
+			defer cancel()
+			if w.desktop.window == window && ctx.Err() == nil {
+				w.desktop.icons = icons
+			}
+		})
+	}()
 }

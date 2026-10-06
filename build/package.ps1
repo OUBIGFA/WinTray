@@ -1,5 +1,6 @@
 param(
   [string]$OutputDir = "dist",
+  [string]$PackageDir = "publish",
   [string]$Version = ""
 )
 
@@ -51,7 +52,7 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [System.IO.File]::WriteAllText($checksumsPath, "WinTray.exe  $hash`n", $utf8NoBom)
 Write-Host "Built: $exe"
 
-$publishDir = Join-Path $root "publish"
+$publishDir = Join-Path $root $PackageDir
 if (!(Test-Path $publishDir)) {
   New-Item -ItemType Directory -Path $publishDir | Out-Null
 }
@@ -70,6 +71,27 @@ Copy-Item -Path $checksumsPath -Destination $portableChecksums -Force
 if (Test-Path $manifestTarget) {
   Copy-Item -Path $manifestTarget -Destination $portableManifest -Force
 }
+
+# Ship notices for the modules actually linked into this executable, using
+# the same resolved versions as the build. Cache paths never enter the file.
+$dependencyRows = & $goCommand list -deps -f '{{if .Module}}{{.Module.Path}}|{{.Module.Version}}|{{.Module.Dir}}{{end}}' ./cmd/wintray
+if ($LASTEXITCODE -ne 0) { throw "Could not list executable dependencies" }
+$noticeParts = [System.Collections.Generic.List[string]]::new()
+$goRoot = & $goCommand env GOROOT
+if ($LASTEXITCODE -ne 0) { throw "Could not resolve Go license" }
+$noticeParts.Add("Go" + [Environment]::NewLine + [IO.File]::ReadAllText((Join-Path $goRoot 'LICENSE')))
+foreach ($dependency in ($dependencyRows | Where-Object { $_ } | Sort-Object -Unique)) {
+  $parts = $dependency -split '\|', 3
+  if ($parts[0] -eq 'wintray') { continue }
+  $licensePath = @('LICENSE', 'LICENSE.txt', 'LICENSE.md', 'COPYING') |
+    ForEach-Object { Join-Path $parts[2] $_ } |
+    Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
+    Select-Object -First 1
+  if (!$licensePath) { throw "Missing license for $($parts[0])" }
+  $noticeParts.Add($parts[0] + ' ' + $parts[1] + [Environment]::NewLine + [IO.File]::ReadAllText($licensePath))
+}
+[IO.File]::WriteAllText((Join-Path $portableDir 'ThirdPartyNotices.txt'), ($noticeParts -join ([Environment]::NewLine + [Environment]::NewLine)), $utf8NoBom)
+Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination (Join-Path $portableDir 'LICENSE.txt') -Force
 
 $zipName = "WinTray-Portable.zip"
 $zipTarget = Join-Path $publishDir $zipName

@@ -32,43 +32,51 @@ func TestTrayMenuActionsDoNotReopenMenu(t *testing.T) {
 	if os.Getenv("WINTRAY_UI_TEST") != "1" {
 		t.Skip("set WINTRAY_UI_TEST=1 on an interactive Windows desktop")
 	}
+	if runWindowTestInChild(t) {
+		return
+	}
+	runTestMainThread(func() { testTrayMenuActions(t) })
+}
+
+func testTrayMenuActions(t *testing.T) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
-	deactivate := activateTestManifest(t)
-	defer deactivate()
 
 	w, err := NewMainWindow(config.DefaultSettings(), Callbacks{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer w.mw.Dispose()
 
 	var opened, silent, exited atomic.Int32
 	var shown, popupCount atomic.Int32
 	box := traybox.NewBox("", nil)
-	controller, err := tray.New(w.Native(), func() {
-		opened.Add(1)
-		w.ShowMainWindow()
-	}, func() {
-		silent.Add(1)
-		w.HideMainWindow()
-	}, func() {
-		exited.Add(1)
-	}, "en-US", true, box, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer controller.Dispose()
-	w.mw.VisibleChanged().Attach(func() {
-		if w.mw.Visible() {
-			shown.Add(1)
+	var controller *tray.Controller
+	defer func() {
+		if controller != nil {
+			controller.Dispose()
 		}
-	})
-	w.HideMainWindow()
-	hwnd := w.mw.Handle()
+	}()
 	failure := make(chan string, 1)
-
-	w.mw.Starting().Attach(func() {
+	w.OnStarting(func() {
+		controller, err = tray.New(w.Native(), func() {
+			opened.Add(1)
+			w.ShowMainWindow()
+			w.Synchronize(func() {
+				if w.desktop.window != nil && w.desktop.window.IsVisible() {
+					shown.Add(1)
+				}
+			})
+		}, func() {
+			silent.Add(1)
+			w.HideMainWindow()
+		}, func() {
+			exited.Add(1)
+		}, "en-US", true, box, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		w.HideMainWindow()
+		hwnd := w.mw.Handle()
 		go func() {
 			// The exit callback deliberately does not dispose the controller:
 			// a declined exit (for example a failed icon restore) must be retryable.
@@ -106,7 +114,9 @@ func TestTrayMenuActionsDoNotReopenMenu(t *testing.T) {
 		}()
 	})
 
-	w.Run()
+	if code := w.Run(); code != 0 {
+		t.Errorf("desktop exit %d", code)
+	}
 	select {
 	case message := <-failure:
 		t.Error(message)
