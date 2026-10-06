@@ -128,7 +128,7 @@ func runningProcessStartsByPath(paths []string) map[string]time.Time {
 		for _, expectedPath := range candidates {
 			// Preserve EqualFold semantics for Unicode directory names;
 			// lower-case map equality alone is not equivalent.
-			if !strings.EqualFold(path, expectedPath) {
+			if !executablePathsMatch(path, expectedPath) {
 				continue
 			}
 			if previous, ok := starts[expectedPath]; !ok || started.Before(previous) {
@@ -166,7 +166,7 @@ func processIdentityMatches(pid uint32, exeName, expectedPath, targetIdentity st
 	if fullPath == "" {
 		return false
 	}
-	return strings.EqualFold(normalizePath(fullPath), expectedPath)
+	return executablePathsMatch(fullPath, expectedPath)
 }
 
 func processExecutablePath(pid uint32) string {

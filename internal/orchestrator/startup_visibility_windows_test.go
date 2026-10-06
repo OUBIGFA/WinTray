@@ -77,8 +77,12 @@ func TestStartupVisibilityProcess(t *testing.T) {
 	}
 	owner := win.CreateWindowEx(0, class, nil, win.WS_POPUP, -32000, -32000, 1, 1, 0, 0, wc.HInstance, nil)
 	fixture.Owner = uintptr(owner)
+	formOwner := owner
+	if os.Args[4] == "taskbar" {
+		formOwner = 0 // unowned windows participate in the real taskbar lifecycle
+	}
 	for i := 0; i < 2; i++ {
-		form := win.CreateWindowEx(0, class, syscall.StringToUTF16Ptr("Fixture UI"), win.WS_OVERLAPPEDWINDOW, -32000, -32000, 120, 80, owner, 0, wc.HInstance, nil)
+		form := win.CreateWindowEx(0, class, syscall.StringToUTF16Ptr("Fixture UI"), win.WS_OVERLAPPEDWINDOW, -32000, -32000, 120, 80, formOwner, 0, wc.HInstance, nil)
 		fixture.Forms = append(fixture.Forms, uintptr(form))
 		if os.Args[4] == "layered" {
 			win.SetWindowLong(form, win.GWL_EXSTYLE, exLayered)

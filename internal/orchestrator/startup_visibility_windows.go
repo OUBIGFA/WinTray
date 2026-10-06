@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -215,11 +214,11 @@ func (g *startupVisibility) track(hwnd uintptr) {
 		_, path = processInfo(pid)
 		g.paths[pid] = path
 	}
-	if !strings.EqualFold(normalizePath(path), g.path) {
+	if !executablePathsMatch(path, g.path) {
 		return
 	}
 	// Revalidate a positive cache hit before changing another process's UI.
-	if _, currentPath := processInfo(pid); !strings.EqualFold(normalizePath(currentPath), g.path) {
+	if _, currentPath := processInfo(pid); !executablePathsMatch(currentPath, g.path) {
 		return
 	}
 	style := win.GetWindowLong(win.HWND(hwnd), win.GWL_STYLE)
@@ -242,7 +241,12 @@ func (g *startupVisibility) track(hwnd uintptr) {
 			return
 		}
 	}
-	v.addedStyle = (exLayered | exNoActivate | exToolWindow) &^ exStyle
+	// Keep the shell's window classification intact. Adding TOOLWINDOW or
+	// NOACTIVATE to an already registered taskbar window suppresses its later
+	// HSHELL_WINDOWDESTROYED notification when the app hides it on close.
+	// Explorer then retains an unresponsive button even after styles restore.
+	// Transparency is best effort; it must not alter the native tray lifecycle.
+	v.addedStyle = exLayered &^ exStyle
 	if ok, _, _ := procSetProp.Call(hwnd, uintptr(unsafe.Pointer(visibilityProperty)), g.token); ok == 0 {
 		g.warn(hwnd, "window property access denied")
 		return
@@ -275,7 +279,6 @@ func (g *startupVisibility) candidates() []ManagedWindowInfo {
 				continue
 			}
 			w := windowInfo(hwnd, 0, nil)
-			w.IsToolWindow = false // only the temporary shield set this bit
 			result = append(result, w)
 		}
 	}, false)

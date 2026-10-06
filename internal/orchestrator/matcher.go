@@ -9,7 +9,7 @@ import (
 // closeAllowedScoreThreshold is the minimum confidence score required before
 // any window action (close/hide) is taken. The scoring system works as follows:
 //   - +1000: exact PID match (launched by us)
-//   - +500:  exact executable path match
+//   - +500:  executable path match (including a verified launcher/main pair)
 //   - +250:  process name match (case-insensitive)
 //   - +200:  window not in pre-launch baseline (new window)
 //   - +50:   window has a non-empty title
@@ -71,7 +71,7 @@ func containsNormalizedIdentity(haystack, needle string) bool {
 func matchesExecutable(window ManagedWindowInfo, expectedExePath, expectedProcessName string) bool {
 	norm := normalizePath(window.ProcessPath)
 	if norm != "" && expectedExePath != "" {
-		return strings.EqualFold(norm, expectedExePath)
+		return executablePathsMatch(norm, expectedExePath)
 	}
 	return expectedProcessName != "" && strings.EqualFold(window.ProcessName, expectedProcessName)
 }
@@ -81,7 +81,7 @@ func hasTrustedWindowIdentity(window ManagedWindowInfo, expectedExePath string, 
 		return true
 	}
 	path := normalizePath(window.ProcessPath)
-	return path != "" && expectedExePath != "" && strings.EqualFold(path, expectedExePath)
+	return executablePathsMatch(path, expectedExePath)
 }
 
 func matchesExecutableWithIdentityFallback(window ManagedWindowInfo, expectedExePath, expectedProcessName string) bool {
@@ -106,7 +106,7 @@ func computeCandidateScore(window ManagedWindowInfo, expectedExePath, expectedPr
 	if launchedPID != nil && window.ProcessID == *launchedPID {
 		score += 1000
 	}
-	if p := normalizePath(window.ProcessPath); p != "" && expectedExePath != "" && strings.EqualFold(p, expectedExePath) {
+	if executablePathsMatch(window.ProcessPath, expectedExePath) {
 		score += 500
 	}
 	if expectedProcessName != "" && normalizeIdentity(window.ProcessName) == normalizeIdentity(expectedProcessName) {

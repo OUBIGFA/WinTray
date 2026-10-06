@@ -84,6 +84,7 @@ WinTray tries to hide startup windows. It closes the window after **Wait before 
 - **Start of the wait**: The time when the target process was created. This also applies when the program starts through its own startup entry.
 - **Program sign-in**: WinTray does not detect whether sign-in is complete. Set the wait longer than the actual sign-in time. Use **Start normally** if manual sign-in is required.
 - **Window limits**: Some programs can briefly display a window. A graphical program that does not support closing to the tray can exit when its window closes.
+- **Launchers**: WinTray can recognize a main executable with the same filename in a subdirectory of the launcher when both files have the same valid signing certificate. If this relationship cannot be verified, add the actual main `.exe` instead.
 
 Select **Close to tray** for console programs such as `syncthing.exe` and `frpc.exe` to give them a WinTray-hosted tray icon. Left-click the icon to show or hide the window. Right-click it to show the window, hide it, stop hosting and show it, or quit the program.
 
