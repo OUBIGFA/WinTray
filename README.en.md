@@ -21,6 +21,7 @@ WinTray starts selected programs when you sign in to Windows. It can close their
 - **Close to tray**: Closes program windows. Programs that support closing to the tray keep running. WinTray provides tray icons for console programs.
 - **Run in background**: Starts scripts or command-line tools without a console window.
 - **Tray icon**: Moves selected programs' tray icons into the WinTray menu. This feature requires Windows 11.
+- **Tray icon recovery**: Restores the original icons of running programs automatically if WinTray is force-closed.
 - **Launch at boot**: Uses a scheduled task at sign-in, with the original startup arguments and privileges when available.
 - **Custom timing**: Sets a start delay, an automatic exit time, and a limit on automatic launches.
 - **Wait before closing**: Waits until the program has run for the specified time before closing its window.
