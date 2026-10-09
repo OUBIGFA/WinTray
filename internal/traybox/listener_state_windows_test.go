@@ -278,10 +278,10 @@ func TestListenerRejectedRegistrationDoesNotBlockRestoration(t *testing.T) {
 	}
 	allowAdd.Store(true)
 	send(l, add)
-	// A rejected duplicate ADD must still keep the real icon, since its
-	// explicit hiding MODIFY succeeds against an existing registration.
-	if result := send(l, add); result != 0 {
-		t.Fatal("fake shell accepted a duplicate registration")
+	// A duplicate ADD becomes an update of the existing registration. The
+	// application must see native success and remain able to re-register.
+	if result := send(l, add); result != 1 {
+		t.Fatal("duplicate registration did not report the successful native update")
 	}
 	if icons := l.snapshot(); len(icons) != 1 {
 		t.Fatalf("a real icon was lost after duplicate registration: %+v", icons)

@@ -78,12 +78,12 @@ Clear **Start this program at sign-in** to stop WinTray from scheduling the prog
 
 ### Close to tray and wait before closing
 
-WinTray tries to hide startup windows. It closes the window after **Wait before closing** expires. If closing fails or the operation is cancelled, WinTray tries to restore the window.
+WinTray tries to make startup windows transparent and temporarily remove ordinary window buttons from the taskbar. It closes the window after **Wait before closing** expires. If closing fails or the operation is cancelled, WinTray tries to restore the window and its taskbar entry. A successfully closed window can still be reopened through the program's native tray icon.
 
 - **Range**: 0–600 seconds. The default is 0 seconds, which adds no wait.
 - **Start of the wait**: The time when the target process was created. This also applies when the program starts through its own startup entry.
 - **Program sign-in**: WinTray does not detect whether sign-in is complete. Set the wait longer than the actual sign-in time. Use **Start normally** if manual sign-in is required.
-- **Window limits**: Some programs can briefly display a window. A graphical program that does not support closing to the tray can exit when its window closes.
+- **Window limits**: The visual shield and taskbar suppression use asynchronous, non-injected monitoring. They cannot guarantee a flash-free first frame or prevent every program from taking focus, and do not hide pinned taskbar shortcuts. Some windows do not support transparency or are restricted by permissions. A graphical program that does not support closing to the tray can exit when its window closes.
 - **Launchers**: WinTray can recognize a main executable with the same filename in a subdirectory of the launcher when both files have the same valid signing certificate. If this relationship cannot be verified, add the actual main `.exe` instead.
 
 Select **Close to tray** for console programs such as `syncthing.exe` and `frpc.exe` to give them a WinTray-hosted tray icon. Left-click the icon to show or hide the window. Right-click it to show the window, hide it, stop hosting and show it, or quit the program.
@@ -95,7 +95,10 @@ Select **Tray icon** in the program list to move the program's existing tray ico
 - The original icons are hidden from the system tray and its `^` panel. The WinTray menu uses the program's current icon and name.
 - Click a program icon in the menu to pass a click to the program. If no window appears, WinTray also sends a double-click.
 - Right-click the program icon to open its own tray menu.
-- Clear **Tray icon**, or exit WinTray normally, to restore the original icons.
+- Clear **Tray icon**, or exit WinTray normally, to restore the original icons. Enabling collection again or reopening WinTray can collect icons from the same running programs without restarting them.
+- If an older WinTray version has already caused a program to stop responding to tray rebuild requests, exit and reopen that program once after upgrading. Subsequent WinTray restarts and collection cycles no longer require restarting it.
+- If Task Manager forcibly ends `WinTray.exe`, an independent recovery process restores the original icons of programs that are still running. Icons hidden or deleted by their own program keep that state.
+- Keep `WinTray-Recovery.exe` beside the main executable. It runs while collection is enabled and exits after recovery or normal shutdown. If it cannot start, WinTray does not hide the original icons. Ending both processes, such as terminating the entire process tree, prevents this automatic recovery.
 - If collection fails, WinTray tries to restore the original icons and records the cause in the log.
 
 This setting affects only selected programs.

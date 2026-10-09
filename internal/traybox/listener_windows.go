@@ -85,11 +85,13 @@ type trackedIcon struct {
 	collectionFailed bool
 	nativeRestored   bool
 	// template is the program's latest request, reused for state changes.
-	template       []byte
-	seq            uint64
-	versionSeq     uint64
-	versionApplied uint64 // latest successful SETVERSION, not merely latest request
-	revision       uint64 // protects a newer update from a pending restore
+	template        []byte
+	seq             uint64
+	versionSeq      uint64
+	versionApplied  uint64 // latest successful SETVERSION, not merely latest request
+	revision        uint64 // protects a newer update from a pending restore
+	recoveryPID     uint32
+	recoveryCreated uint64
 }
 
 type listenerConfig struct {
@@ -100,7 +102,8 @@ type listenerConfig struct {
 	// target returns the window requests are passed on to.
 	target func(self win.HWND) win.HWND
 	// raise keeps the listener above Explorer's taskbar.
-	raise bool
+	raise       bool
+	newRecovery func() (*recoveryClient, error)
 }
 
 // listener owns the Shell_TrayWnd window. Its window procedure and timers run
@@ -117,10 +120,12 @@ type listener struct {
 	icons   map[iconID]*trackedIcon
 	seq     uint64
 
-	hwnd       win.HWND
-	closing    bool
-	done       chan struct{}
-	stopResult chan error
+	hwnd           win.HWND
+	closing        bool
+	done           chan struct{}
+	stopResult     chan error
+	recovery       *recoveryClient
+	recoveryFailed bool // listener-thread only
 
 	// The low-level mouse hook has its own message thread: icon forwarding,
 	// path lookup and recovery must never stall desktop-wide input delivery.
@@ -204,6 +209,16 @@ func (l *listener) run(ready chan<- error) {
 		return
 	}
 	defer activeListener.Store(nil)
+	if l.cfg.newRecovery != nil {
+		var err error
+		l.recovery, err = l.cfg.newRecovery()
+		if err != nil {
+			ready <- err
+			return
+		}
+		// On an unexpected message-loop exit, closing the pipe also restores.
+		defer l.recovery.close()
+	}
 
 	instance := win.GetModuleHandle(nil)
 	className, err := registerListenerClass(l.cfg.className, instance)
@@ -316,7 +331,7 @@ func (l *listener) snapshot() []Icon {
 	l.mu.Lock()
 	entries := make([]entry, 0, len(l.icons))
 	for _, t := range l.icons {
-		if !t.hidden && !t.collectionFailed && l.paths[strings.ToLower(t.ExePath)] {
+		if !l.closing && !t.hidden && !t.collectionFailed && l.paths[strings.ToLower(t.ExePath)] {
 			entries = append(entries, entry{t.Icon, t.seq})
 		}
 	}
@@ -438,25 +453,63 @@ func (l *listener) onCopyData(wParam, lParam uintptr) uintptr {
 	// SendMessageTimeout may dispatch another request while forwarding.
 	// Record in arrival order, before that reentry can update or delete it.
 	isNew, revision := l.record(path, d, data, img)
+	if isNew {
+		l.logger.Info(fmt.Sprintf("tray box: received native icon from %s (hwnd=0x%X uid=%d message=%d flags=0x%X)", path, d.HWnd, d.UID, d.Message, d.Flags))
+	}
+	if err := l.syncRecovery(); err != nil {
+		l.failRecovery(err)
+		collect = false
+	}
 	out := data
 	if collect {
 		out = withHidden(data)
 	}
 	result, delivered := l.sendRequestResult(wParam, out)
-	// An icon first seen through NIM_MODIFY is still shown by Explorer, and a
-	// repeated NIM_ADD of an icon Explorer already has fails without changing
-	// its state; both are hidden explicitly.
+	// A refresh is not an Explorer restart: its original registration may
+	// still exist. An explicit duplicate ADD rejection can be translated to
+	// MODIFY, preserving all new icon/callback fields and the hidden state.
+	// Return that native success, or clients which cache the ADD result can
+	// disable future registrations (notably Flutter's system_tray).
 	needHide := isNew
 	if d.Message == nimAdd {
 		needHide = result == 0
 	}
 	if collect && d.Message != nimDelete && needHide {
-		hiddenResult, hiddenDelivered := l.hideCurrent(idOf(d), uintptr(d.HWnd))
+		var hiddenResult uintptr
+		var hiddenDelivered bool
+		if d.Message == nimAdd && delivered {
+			hiddenResult, hiddenDelivered = l.updateDuplicateAdd(wParam, idOf(d), out, revision)
+			if hiddenDelivered && hiddenResult != 0 {
+				if isNew {
+					l.logger.Info(fmt.Sprintf("tray box: existing native icon accepted for recollection: %s (hwnd=0x%X uid=%d)", path, d.HWnd, d.UID))
+				}
+				return hiddenResult
+			}
+		} else {
+			// A first-seen MODIFY needs a separate state-only hide. After an
+			// ADD timeout, do not replay fields/notifications of unknown outcome.
+			hiddenResult, hiddenDelivered = l.hideCurrent(idOf(d), uintptr(d.HWnd))
+		}
 		if isNew && delivered && result == 0 && hiddenDelivered && hiddenResult == 0 {
 			return l.rollbackRejectedCollection(wParam, path, d, data, revision, result)
 		}
 	}
 	return result
+}
+
+// updateDuplicateAdd only updates an existing native registration. A newer
+// reentrant request or selection change must never be overwritten by a replay.
+func (l *listener) updateDuplicateAdd(wParam uintptr, id iconID, data []byte, revision uint64) (uintptr, bool) {
+	l.mu.Lock()
+	t := l.icons[id]
+	current := t != nil && t.revision == revision && !t.collectionFailed && !l.closing && l.paths[strings.ToLower(t.ExePath)]
+	l.mu.Unlock()
+	if !current {
+		return 0, false
+	}
+	request := append([]byte(nil), data...)
+	put(request, offMessage, nimModify)
+	return l.sendRequestResult(wParam, request)
 }
 
 // rollbackRejectedCollection undoes a rejected rewrite, not a successful
@@ -526,15 +579,13 @@ func (l *listener) onIconRect(wParam, lParam uintptr, data []byte) uintptr {
 	// a hung shell must not block the application's click callback.
 	half := max(int32(1), win.GetSystemMetrics(win.SM_CXSMICON)/2)
 	left, top, right, bottom := cursor.X-half, cursor.Y-half, cursor.X+half, cursor.Y+half
-	// Shell32 uses a zero packed corner as 'not found'. Keep both corners
-	// nonzero even when the cursor straddles the desktop origin.
+	// Shell32 uses a zero packed position as 'not found'. Keep the origin
+	// nonzero even when the cursor straddles the desktop origin; the extent
+	// is always positive for a collected icon.
 	if left == 0 && top == 0 {
 		top--
 	}
-	if right == 0 && bottom == 0 {
-		bottom++
-	}
-	return rectAnswer(q.Corner, left, top, right, bottom)
+	return rectAnswer(q.Part, left, top, right, bottom)
 }
 
 // hideCurrent rechecks selection and identity after a reentrant shell call.
@@ -690,6 +741,19 @@ func (l *listener) syncTaskband(tray win.HWND) {
 // heal hides icons that reached Explorer directly, for example while another
 // window was briefly on top, and drops icons whose window is gone.
 func (l *listener) heal() {
+	if l.recovery != nil && !l.recoveryFailed {
+		select {
+		case <-l.recovery.done:
+			l.failRecovery(errors.New("tray recovery process exited"))
+		default:
+		}
+	}
+	if l.recoveryFailed {
+		if err := l.restoreIcons(true); err != nil {
+			l.logger.Warn(fmt.Sprintf("tray box: %v", err))
+		}
+		return
+	}
 	if err := l.restoreIcons(false); err != nil {
 		l.logger.Warn(fmt.Sprintf("tray box: %v", err))
 	}
@@ -709,6 +773,10 @@ func (l *listener) heal() {
 		}
 	}
 	l.mu.Unlock()
+	if err := l.syncRecovery(); err != nil {
+		l.failRecovery(err)
+		return
+	}
 	for _, c := range checks {
 		if shownByExplorer(c.template) {
 			l.logger.Info(fmt.Sprintf("tray box: icon hwnd=0x%X uid=%d appeared on the taskbar; hiding it again", c.id.hwnd, c.id.uid))
@@ -722,6 +790,24 @@ func (l *listener) heal() {
 func (l *listener) sync() {
 	if err := l.restoreIcons(false); err != nil {
 		l.logger.Warn(fmt.Sprintf("tray box: %v", err))
+	}
+	if err := l.syncRecovery(); err != nil {
+		l.failRecovery(err)
+		return
+	}
+	// A refresh timer can expire during a later taskbar gesture. Keep the
+	// pending selection until we own the native entry point again; otherwise
+	// duplicate ADDs bypass us, and clients may permanently stop registering.
+	if l.cfg.raise {
+		l.keepOnTop()
+		l.pointerMu.Lock()
+		yielded := l.pointerYielded
+		l.pointerMu.Unlock()
+		class := syscall.StringToUTF16Ptr(l.cfg.className)
+		if yielded || win.FindWindow(class, nil) != l.hwnd {
+			win.SetTimer(l.hwnd, timerRefresh, uint32(refreshDelay.Milliseconds()), 0)
+			return
+		}
 	}
 	l.mu.Lock()
 	pending := make([]string, 0, len(l.pending))
@@ -785,6 +871,11 @@ func (l *listener) restoreIcons(all bool) error {
 			continue
 		}
 		l.mu.Lock()
+		// A failed companion permanently releases collection for this listener.
+		// Retain failed restores for retry, but stop touching successful ones.
+		if l.recoveryFailed && l.icons[id] == t && t.revision == revision {
+			t.nativeRestored = true
+		}
 		if !all && l.icons[id] == t && t.revision == revision && !l.paths[strings.ToLower(t.ExePath)] {
 			delete(l.icons, id)
 		}
@@ -799,7 +890,7 @@ func (l *listener) shutdown() error {
 	l.mu.Unlock()
 	if err := l.restoreIcons(true); err != nil {
 		l.mu.Lock()
-		l.closing = false
+		l.closing = l.recoveryFailed
 		l.mu.Unlock()
 		return err
 	}
@@ -807,14 +898,14 @@ func (l *listener) shutdown() error {
 	// gesture cannot address a recycled HWND. Failed restores keep it alive.
 	if err := l.stopPointerHook(); err != nil {
 		l.mu.Lock()
-		l.closing = false
+		l.closing = l.recoveryFailed
 		l.mu.Unlock()
 		return err
 	}
 	procRemovePropW.Call(uintptr(l.hwnd), uintptr(unsafe.Pointer(taskbandProperty)))
 	if !win.DestroyWindow(l.hwnd) {
 		l.mu.Lock()
-		l.closing = false
+		l.closing = l.recoveryFailed
 		l.mu.Unlock()
 		err := errors.New("could not stop the tray icon listener")
 		if l.cfg.raise {
@@ -827,6 +918,13 @@ func (l *listener) shutdown() error {
 	clear(l.icons)
 	clear(l.paths)
 	l.mu.Unlock()
+	if l.recovery != nil && !l.recoveryFailed {
+		// Native restoration is already complete; a helper stop failure must
+		// be logged, but cannot resurrect the destroyed listener window.
+		if err := l.recovery.stop(); err != nil {
+			l.logger.Warn(fmt.Sprintf("tray box: stop recovery: %v", err))
+		}
+	}
 	return nil
 }
 

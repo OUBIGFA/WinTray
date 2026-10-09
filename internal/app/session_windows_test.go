@@ -23,6 +23,7 @@ import (
 	"wintray/internal/ipc"
 	"wintray/internal/logging"
 	"wintray/internal/orchestrator"
+	"wintray/internal/traybox"
 )
 
 // These opt-in tests exercise the real session/message loop, processes and
@@ -32,9 +33,20 @@ func TestMainSessionHostingLifecycle(t *testing.T) {
 	if os.Getenv("WINTRAY_UI_TEST") != "1" {
 		t.Skip("set WINTRAY_UI_TEST=1 on an interactive Windows desktop")
 	}
+	recoveryPath := filepath.Join(t.TempDir(), traybox.RecoveryExecutable)
+	if output, err := exec.Command("go", "build", "-o", recoveryPath, "../../cmd/tray-recovery").CombinedOutput(); err != nil {
+		t.Fatalf("build recovery companion: %v\n%s", err, output)
+	}
+	recoveryImage, err := os.ReadFile(recoveryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, mode := range []string{"last program exits", "manual exit restores", "exit during startup", "settings remain open", "silent keeps hosting", "no hosted programs", "startup before settings", "startup with collector before settings"} {
 		t.Run(mode, func(t *testing.T) {
 			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, traybox.RecoveryExecutable), recoveryImage, 0o600); err != nil {
+				t.Fatal(err)
+			}
 			t.Cleanup(func() {
 				if t.Failed() {
 					data, _ := os.ReadFile(filepath.Join(dir, "wintray.log"))

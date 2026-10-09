@@ -18,6 +18,17 @@ func TestHiddenRegistrationDoesNotActivateUninitializedLegacyState(t *testing.T)
 	}
 }
 
+func TestRectAnswerReturnsNativePositionAndSize(t *testing.T) {
+	for _, bounds := range [][4]int32{{3126, 1392, 3158, 1440}, {-120, -60, -88, -12}} {
+		position := rectAnswer(1, bounds[0], bounds[1], bounds[2], bounds[3])
+		size := rectAnswer(2, bounds[0], bounds[1], bounds[2], bounds[3])
+		if int16(position) != int16(bounds[0]) || int16(position>>16) != int16(bounds[1]) ||
+			int16(size) != int16(bounds[2]-bounds[0]) || int16(size>>16) != int16(bounds[3]-bounds[1]) {
+			t.Fatalf("bounds=%v produced position=0x%X size=0x%X; want origin and extent, not two corners", bounds, position, size)
+		}
+	}
+}
+
 func TestStateRequestPreservesUnknownShellExtensionBytes(t *testing.T) {
 	raw := trayRequest{message: nimAdd, hwnd: 17, uid: 4, flags: nifTip | nifMessage | nifIcon, tip: "native"}.bytes()
 	for i := trayDataSize; i < len(raw); i++ {

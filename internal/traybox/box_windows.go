@@ -3,6 +3,8 @@
 package traybox
 
 import (
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -30,7 +32,11 @@ func NewBox(selfPath string, logger Logger) *Box {
 	return &Box{
 		selfPath: selfPath,
 		logger:   logger,
-		config:   listenerConfig{className: trayWindowClass, target: explorerTray, raise: true},
+		config: listenerConfig{className: trayWindowClass, target: explorerTray, raise: true,
+			newRecovery: func() (*recoveryClient, error) {
+				return startRecovery(exec.Command(filepath.Join(filepath.Dir(selfPath), RecoveryExecutable), "--watch-tray"))
+			},
+		},
 	}
 }
 

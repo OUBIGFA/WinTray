@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -67,7 +68,7 @@ func TestStartupVisibilityProcess(t *testing.T) {
 		return
 	}
 	runtime.LockOSThread()
-	fixtureRefusesClose = os.Args[4] == "refuse"
+	fixtureRefusesClose = os.Args[4] == "refuse" || os.Args[4] == "taskbar-refuse"
 	fixturePartiallyRefusesClose = os.Args[4] == "partial"
 	class := syscall.StringToUTF16Ptr("WinTrayStartupVisibilityFixture")
 	wc := win.WNDCLASSEX{LpfnWndProc: fixtureProc, HInstance: win.GetModuleHandle(nil), LpszClassName: class}
@@ -78,7 +79,7 @@ func TestStartupVisibilityProcess(t *testing.T) {
 	owner := win.CreateWindowEx(0, class, nil, win.WS_POPUP, -32000, -32000, 1, 1, 0, 0, wc.HInstance, nil)
 	fixture.Owner = uintptr(owner)
 	formOwner := owner
-	if os.Args[4] == "taskbar" {
+	if strings.HasPrefix(os.Args[4], "taskbar") {
 		formOwner = 0 // unowned windows participate in the real taskbar lifecycle
 	}
 	for i := 0; i < 2; i++ {

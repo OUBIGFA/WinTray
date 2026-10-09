@@ -5,6 +5,7 @@ package ui
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"syscall"
 	"testing"
@@ -36,7 +37,21 @@ func TestHostedIconsCanBeCollectedAndReleased(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		cmd := exec.Command(self, "-test.run=^TestHostedIconsCanBeCollectedAndReleased$", "-test.v", "-test.timeout=30s")
+		// Exercise the same companion layout as the portable package. Running
+		// from go-build's executable directory alone cannot provide recovery.
+		dir := t.TempDir()
+		image, err := os.ReadFile(self)
+		if err != nil {
+			t.Fatal(err)
+		}
+		child := filepath.Join(dir, "hosted-collection.test.exe")
+		if err := os.WriteFile(child, image, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if output, err := exec.Command("go", "build", "-o", filepath.Join(dir, traybox.RecoveryExecutable), "../../cmd/tray-recovery").CombinedOutput(); err != nil {
+			t.Fatalf("build recovery companion: %v\n%s", err, output)
+		}
+		cmd := exec.Command(child, "-test.run=^TestHostedIconsCanBeCollectedAndReleased$", "-test.v", "-test.timeout=30s")
 		cmd.Env = append(os.Environ(), "WINTRAY_HOST_COLLECTION_CHILD=1")
 		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 		if output, err := cmd.CombinedOutput(); err != nil {

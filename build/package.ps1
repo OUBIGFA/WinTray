@@ -42,6 +42,12 @@ if ($LASTEXITCODE -ne 0) {
   throw "go build failed"
 }
 
+# Keep crash recovery in a separate process image so ending WinTray.exe by
+# name does not also end the component that restores collected tray icons.
+$recoveryExe = Join-Path $out "WinTray-Recovery.exe"
+& $goCommand build -trimpath -ldflags "-s -w -H=windowsgui" -o $recoveryExe ./cmd/tray-recovery
+if ($LASTEXITCODE -ne 0) { throw "tray recovery build failed" }
+
 if (Test-Path $manifestSource) {
   Copy-Item -Path $manifestSource -Destination $manifestTarget -Force
 }
@@ -49,7 +55,8 @@ if (Test-Path $manifestSource) {
 $hash = (Get-FileHash $exe -Algorithm SHA256).Hash
 $checksumsPath = Join-Path $out "checksums.txt"
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-[System.IO.File]::WriteAllText($checksumsPath, "WinTray.exe  $hash`n", $utf8NoBom)
+$recoveryHash = (Get-FileHash $recoveryExe -Algorithm SHA256).Hash
+[System.IO.File]::WriteAllText($checksumsPath, "WinTray.exe  $hash`nWinTray-Recovery.exe  $recoveryHash`n", $utf8NoBom)
 Write-Host "Built: $exe"
 
 $publishDir = Join-Path $root $PackageDir
@@ -67,6 +74,7 @@ $portableManifest = Join-Path $portableDir "WinTray.exe.manifest"
 $portableChecksums = Join-Path $portableDir "checksums.txt"
 
 Copy-Item -Path $exe -Destination $portableExe -Force
+Copy-Item -LiteralPath $recoveryExe -Destination (Join-Path $portableDir "WinTray-Recovery.exe") -Force
 Copy-Item -Path $checksumsPath -Destination $portableChecksums -Force
 if (Test-Path $manifestTarget) {
   Copy-Item -Path $manifestTarget -Destination $portableManifest -Force

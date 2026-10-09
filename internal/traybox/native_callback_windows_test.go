@@ -133,6 +133,10 @@ func TestCollectedIconLiveShell32Callback(t *testing.T) {
 			if got.hr != 0 || got.rect.Right <= got.rect.Left || got.rect.Bottom <= got.rect.Top {
 				t.Fatalf("native callback dropped its click: version=%d hr=%x rect=%+v", version, got.hr, got.rect)
 			}
+			size := max(int32(1), win.GetSystemMetrics(win.SM_CXSMICON)/2) * 2
+			if got.rect.Right-got.rect.Left != size || got.rect.Bottom-got.rect.Top != size {
+				t.Fatalf("native callback received an oversized anchor: rect=%+v want %dx%d", got.rect, size, size)
+			}
 			t.Logf("version %d: actual Shell32 query inside callback succeeded, rect=%+v", version, got.rect)
 		case <-time.After(5 * time.Second):
 			t.Fatal("native click callback did not complete")

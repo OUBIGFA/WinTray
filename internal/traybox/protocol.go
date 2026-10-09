@@ -143,15 +143,16 @@ func le(b []byte, off int) uint32 { return binary.LittleEndian.Uint32(b[off:]) }
 func put(b []byte, off int, v uint32) { binary.LittleEndian.PutUint32(b[off:], v) }
 
 // Shell_NotifyIconGetRect asks the Shell_TrayWnd window for an icon's
-// position with dwData 3: a signature, which corner is wanted (1 top-left,
-// 2 bottom-right), a size and reserved DWORD, then the icon identifier. This
-// 40-byte wire structure is distinct from the NIM_* request layout above.
-// The answer packs that corner's coordinates as MAKELONG(x, y).
+// position with dwData 3: a signature, the requested part (1 position, 2 size),
+// a size and reserved DWORD, then the icon identifier. This 40-byte wire
+// structure is distinct from the NIM_* request layout above. Shell32 adds the
+// returned size to the origin to produce the public RECT; part 2 is not an
+// absolute bottom-right corner.
 const (
-	rectCornerTopLeft     = 1
-	rectCornerBottomRight = 2
+	rectPartPosition = 1
+	rectPartExtent   = 2
 
-	offRectCorner = 4
+	offRectPart   = 4
 	offRectHWnd   = 16
 	offRectUID    = 20
 	offRectGUID   = 24
@@ -159,16 +160,16 @@ const (
 )
 
 type rectQuery struct {
-	Corner uint32
-	ID     iconID
+	Part uint32
+	ID   iconID
 }
 
 func parseRectQuery(b []byte) (rectQuery, bool) {
 	if len(b) < rectQuerySize || le(b, offSignature) != trayDataSignature {
 		return rectQuery{}, false
 	}
-	q := rectQuery{Corner: le(b, offRectCorner)}
-	if q.Corner != rectCornerTopLeft && q.Corner != rectCornerBottomRight {
+	q := rectQuery{Part: le(b, offRectPart)}
+	if q.Part != rectPartPosition && q.Part != rectPartExtent {
 		return rectQuery{}, false
 	}
 	var guid [16]byte
@@ -181,11 +182,11 @@ func parseRectQuery(b []byte) (rectQuery, bool) {
 	return q, true
 }
 
-// rectAnswer packs one corner of a rectangle as Explorer answers it.
-func rectAnswer(corner uint32, left, top, right, bottom int32) uintptr {
+// rectAnswer packs the origin or extent as Explorer answers it.
+func rectAnswer(part uint32, left, top, right, bottom int32) uintptr {
 	x, y := left, top
-	if corner == rectCornerBottomRight {
-		x, y = right, bottom
+	if part == rectPartExtent {
+		x, y = right-left, bottom-top
 	}
 	return uintptr(uint32(uint16(x)) | uint32(uint16(y))<<16)
 }

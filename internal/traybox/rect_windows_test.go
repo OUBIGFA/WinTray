@@ -44,9 +44,9 @@ func TestCollectedIconPositionUsesShell32WireLayout(t *testing.T) {
 			a := queryListenerRect(l, rectWire(owner, 37, 1, guid))
 			b := queryListenerRect(l, rectWire(owner, 37, 2, guid))
 			left, top := int16(a), int16(a>>16)
-			right, bottom := int16(b), int16(b>>16)
-			if right <= left || bottom <= top {
-				t.Errorf("collected icon has no usable rectangle: (%d,%d)-(%d,%d), guid=%x", left, top, right, bottom, guid)
+			width, height := int16(b), int16(b>>16)
+			if width <= 0 || height <= 0 {
+				t.Errorf("collected icon has no usable rectangle: origin=(%d,%d) size=(%d,%d), guid=%x", left, top, width, height, guid)
 			}
 			// A query for another icon must not invent a position.
 			if got := queryListenerRect(l, rectWire(owner, 99, 1, [16]byte{})); got != 0 {
