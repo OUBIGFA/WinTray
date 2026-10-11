@@ -86,7 +86,8 @@ type Schedule struct {
 	StartDelayMinutes int `json:"startDelayMinutes"`
 	// AutoExitMinutes is how long the program may run; 0 never ends it.
 	AutoExitMinutes int `json:"autoExitMinutes"`
-	// Frequency limits automatic launches within the preceding Days * 24 hours.
+	// Frequency limits automatic launches within Days local calendar days,
+	// including today, using the system time zone's midnight boundaries.
 	// It is independent of auto-exit and never restricts manual launches.
 	FrequencyEnabled bool `json:"frequencyEnabled"`
 	FrequencyDays    int  `json:"frequencyDays"`

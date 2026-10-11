@@ -26,7 +26,9 @@ type startupHistoryData struct {
 
 // Launch reserves a slot durably before invoking launch. Definite launch
 // failures refund it; a crash after reservation retains it to avoid exceeding
-// the limit. Future timestamps count too, so clock rollback cannot reset it.
+// the limit. The caller supplies its local clock (time.Now in the app), so
+// calendar-day boundaries follow the system time zone. Future timestamps count
+// too, so clock rollback cannot reset the limit.
 func (h *StartupHistory) Launch(entry ManagedAppEntry, now time.Time, launch func() error) (bool, error) {
 	if !StartupFrequencyEnabled(entry) {
 		return true, launch()
@@ -52,17 +54,22 @@ func (h *StartupHistory) Launch(entry ManagedAppEntry, now time.Time, launch fun
 		}
 	}
 	key := strings.ToLower(filepath.Clean(entry.ExePath))
-	cutoff := now.Add(-time.Duration(ClampFrequencyDays(entry.Schedule.FrequencyDays)) * 24 * time.Hour)
+	// Count today and the preceding N-1 local dates, not N elapsed 24-hour
+	// periods. Calendar arithmetic also handles 23/25-hour DST days.
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	cutoff := today.AddDate(0, 0, 1-ClampFrequencyDays(entry.Schedule.FrequencyDays))
+	retainSince := today.AddDate(0, 0, 1-MaxFrequencyDays)
 	retained := make([]time.Time, 0, len(state.Apps[key])+1)
 	count := 0
 	for _, stamp := range state.Apps[key] {
 		if stamp.IsZero() {
 			return false, errors.New("invalid startup timestamp")
 		}
-		if stamp.After(now.Add(-MaxFrequencyDays * 24 * time.Hour)) {
+		if !stamp.Before(retainSince) {
 			retained = append(retained, stamp)
 		}
-		if stamp.After(cutoff) {
+		// A launch at exactly 00:00 belongs to that date and must count.
+		if !stamp.Before(cutoff) {
 			count++
 		}
 	}

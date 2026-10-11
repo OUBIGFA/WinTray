@@ -42,6 +42,7 @@ type Messages struct {
 	CleanupRestoreTitle            string
 	ManagedListTitle               string
 	ManagedListHint                string
+	ManagedDropRejected            string
 	ManagedListEmpty               string
 	ManagedListEmptyHint           string
 	ManagedExampleName             string
@@ -93,7 +94,6 @@ type Messages struct {
 	ManagedLaunchNow               string
 	ManagedLaunchNowHint           string
 	ManagedLaunchNowBusy           string
-	LaunchNowDoneBody              string
 	AddProgram                     string
 	AddProgramHint                 string
 	RemoveSelected                 string
@@ -186,10 +186,11 @@ var zhCN = Messages{
 	SecondsUnit:                    "秒",
 	LanguageLabel:                  "语言 / Language",
 	ManagedListTitle:               "开机启动项",
-	ManagedListHint:                "选择序号调整启动顺序；勾选程序开机启动，勾选托盘收纳隐藏原图标",
+	ManagedListHint:                "拖入文件可添加；序号调整顺序；勾选开机启动或托盘收纳",
+	ManagedDropRejected:            "以下项目不存在、是文件夹或类型不受支持，未添加：\r\n%s\r\n\r\n请拖入 .exe、.bat、.cmd、.ps1、.py 或 .pyw 文件",
 	ManagedListEmpty:               "还没有添加程序",
 	ManagedExampleName:             "示例程序",
-	ManagedListEmptyHint:           "添加开机时想自动启动的程序，WinTray 会依次启动它们，并按你的设置收进托盘或在后台运行",
+	ManagedListEmptyHint:           "从资源管理器拖入程序或脚本，或点击“添加程序”，可一次添加多个",
 	ManagedColumnName:              "程序名称",
 	ManagedColumnOrder:             "序号",
 	ManagedColumnRule:              "启动动作",
@@ -229,7 +230,7 @@ var zhCN = Messages{
 	ManagedFrequency:               "限制自动运行次数",
 	ManagedFrequencyDays:           "天内最多自动运行",
 	ManagedFrequencyRuns:           "次",
-	ManagedFrequencyHint:           "按最近天数计次（1 天 = 24 小时），接管原有开机自启；手动打开不受限",
+	ManagedFrequencyHint:           "按系统时区计自然日（含当天），接管原有开机自启；手动打开不受限",
 	ManagedFrequencyInvalid:        "请输入整数：天数 1–365，次数 1–1000",
 	ManagedScheduleInvalid:         "时间必须是 0 到 1440 之间的整数（分钟）",
 	ManagedScheduleTag:             "%s · 定时",
@@ -238,7 +239,6 @@ var zhCN = Messages{
 	ManagedLaunchNow:               "立即启动",
 	ManagedLaunchNowHint:           "立即启动一次；未勾选开机启动时按正常方式启动",
 	ManagedLaunchNowBusy:           "启动中…",
-	LaunchNowDoneBody:              "已启动: %s",
 	AddProgram:                     "添加程序",
 	AddProgramHint:                 "选择要开机启动的程序或脚本，可以一次选多个",
 	RemoveSelected:                 "移除此程序",
@@ -335,10 +335,11 @@ var enUS = Messages{
 	SecondsUnit:                    "seconds",
 	LanguageLabel:                  "Language / 语言",
 	ManagedListTitle:               "Startup programs",
-	ManagedListHint:                "Choose a number to set the start order; check a program for sign-in or its tray icon for collection",
+	ManagedListHint:                "Drop files to add; choose numbers for start order; check sign-in or tray collection",
+	ManagedDropRejected:            "These items were not added because they are missing, folders, or unsupported file types:\r\n%s\r\n\r\nDrop .exe, .bat, .cmd, .ps1, .py or .pyw files",
 	ManagedListEmpty:               "No programs yet",
 	ManagedExampleName:             "Example program",
-	ManagedListEmptyHint:           "Add the programs you want to start at sign-in; WinTray starts them one by one and can close them to the tray or run them in the background",
+	ManagedListEmptyHint:           "Drag programs or scripts here from File Explorer, or select Add Program; you can add several at once",
 	ManagedColumnName:              "Program name",
 	ManagedColumnOrder:             "Order",
 	ManagedColumnRule:              "Start action",
@@ -378,7 +379,7 @@ var enUS = Messages{
 	ManagedFrequency:               "Limit automatic launches",
 	ManagedFrequencyDays:           "days: at most",
 	ManagedFrequencyRuns:           "launches",
-	ManagedFrequencyHint:           "Rolling days (1 day = 24 hours); takes over original sign-in startup; manual launches are unrestricted",
+	ManagedFrequencyHint:           "Calendar days including today, in the system time zone; manages original startup; manual launches are unrestricted",
 	ManagedFrequencyInvalid:        "Enter whole numbers: 1–365 days, 1–1000 launches",
 	ManagedScheduleInvalid:         "Times must be whole minutes from 0 to 1440",
 	ManagedScheduleTag:             "%s · timed",
@@ -387,7 +388,6 @@ var enUS = Messages{
 	ManagedLaunchNow:               "Launch Now",
 	ManagedLaunchNowHint:           "Starts it now; uses normal mode when start at sign-in is off",
 	ManagedLaunchNowBusy:           "Starting…",
-	LaunchNowDoneBody:              "Started: %s",
 	AddProgram:                     "Add Program",
 	AddProgramHint:                 "Pick programs or scripts to start at sign-in; you can select several at once",
 	RemoveSelected:                 "Remove",

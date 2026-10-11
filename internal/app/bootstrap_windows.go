@@ -479,12 +479,13 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 				if launchCtx.Err() != nil {
 					return
 				}
-				m := i18n.For(language)
 				mainWindow.SetLaunchNowBusy(false)
 				if result.Managed {
-					mainWindow.ShowInfo(m.WindowTitle, fmt.Sprintf(m.LaunchNowDoneBody, result.AppName))
+					// A successful manual launch (including an already-running
+					// program) only restores the button; dialogs are for errors.
 					return
 				}
+				m := i18n.For(language)
 				detail := i18n.TranslateResultCode(language, string(result.Code))
 				if detail == "" {
 					detail = i18n.TranslateResultMessage(language, result.Message)

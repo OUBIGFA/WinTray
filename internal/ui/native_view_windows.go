@@ -4,6 +4,7 @@ package ui
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -89,16 +90,22 @@ func (w *MainWindow) nativeView(c *native.Context) {
 	if height < 860 {
 		padding, gap = 10, 8
 	}
+	var dropped []string
 	native.Column(c).Fill().Padding(padding, 24).Gap(gap).Children(func() {
 		if w.onSettingsPage {
 			w.nativeSettings(c, m)
 		} else {
-			w.nativePrograms(c, m)
+			dropped = w.nativePrograms(c, m)
 		}
 		native.Divider(c)
 		w.nativeFooter(c, m)
 	})
 	w.desktop.numberCommits = w.desktop.frameNumberCommits
+	if len(dropped) > 0 {
+		// Finish the old rows and editor before appending entries and changing
+		// selection; nativeAddPaths commits their pending edits first.
+		w.nativeDropPaths(dropped)
+	}
 }
 
 // Drop toolkit layout caches when the desktop closes, preserving position.
@@ -111,7 +118,8 @@ func (w *MainWindow) resetNativeList(first int) {
 	w.desktop.list.ScrollTo(first, native.Start)
 }
 
-func (w *MainWindow) nativePrograms(c *native.Context, m i18n.Messages) {
+func (w *MainWindow) nativePrograms(c *native.Context, m i18n.Messages) []string {
+	var dropped []string
 	native.Row(c).Gap(12).Children(func() {
 		native.Text(c, m.WindowTitle).FontSize(22)
 		native.Spacer(c)
@@ -144,7 +152,14 @@ func (w *MainWindow) nativePrograms(c *native.Context, m i18n.Messages) {
 		})
 	}
 	native.Row(c).Grow(1).MinHeight(0).AlignItems(native.Stretch).Gap(14).Children(func() {
-		native.Column(c).Grow(1).Basis(0).MinWidth(0).Gap(8).Children(func() {
+		list := native.Column(c).Grow(1).Basis(0).MinWidth(0).Gap(8)
+		// The list, including its empty state and row controls, is the only
+		// drop target. The editor and settings page never accept file drops.
+		dropped = list.DroppedFiles()
+		if list.FileDragOver() {
+			list.Background(c.Theme().SurfaceHover)
+		}
+		list.Children(func() {
 			if len(w.settings.ManagedApps) == 0 {
 				native.Column(c).Grow(1).Center().Gap(14).Children(func() {
 					native.Icon(c, programIconSVG).Size(36, 36).TextColor(c.Theme().TextMuted)
@@ -233,6 +248,7 @@ func (w *MainWindow) nativePrograms(c *native.Context, m i18n.Messages) {
 		native.Divider(c)
 		native.Column(c).Width(523).Shrink(0).Gap(12).Children(func() { w.nativeEditor(c, m) })
 	})
+	return dropped
 }
 
 func (w *MainWindow) nativeSelected() (*config.ManagedAppEntry, bool) {
@@ -625,7 +641,32 @@ func (w *MainWindow) nativeChooseProgram(replace bool) {
 	w.nativeAddPaths(paths, replace)
 }
 
+// Explorer can offer directories and arbitrary file types, unlike the
+// program filter in the picker. Keep valid files in order and report rejected
+// items together; dropping files records their paths, never moves or runs them.
+func (w *MainWindow) nativeDropPaths(paths []string) {
+	var accepted, rejected []string
+	for _, path := range paths {
+		switch strings.ToLower(filepath.Ext(path)) {
+		case ".exe", ".bat", ".cmd", ".ps1", ".py", ".pyw":
+			if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() {
+				accepted = append(accepted, path)
+				continue
+			}
+		}
+		rejected = append(rejected, path)
+	}
+	w.nativeAddPaths(accepted, false)
+	if len(rejected) > 0 {
+		m := i18n.For(w.settings.Language)
+		w.ShowError(m.AddProgram, fmt.Sprintf(m.ManagedDropRejected, strings.Join(rejected, "\r\n")))
+	}
+}
+
 func (w *MainWindow) nativeAddPaths(paths []string, replace bool) {
+	if len(paths) == 0 {
+		return
+	}
 	w.commitNativeEdits()
 	if replace {
 		entry, ok := w.nativeSelected()

@@ -14,6 +14,16 @@ import (
 // UI Automation reaches mygo's rendered controls through their public
 // accessibility interface, without coordinates or test hooks in the app.
 func sessionButton(parent win.HWND, name string, invoke bool) error {
+	var pattern uintptr
+	if invoke {
+		pattern = 10000 // Invoke
+	}
+	return sessionControlAction(parent, name, pattern)
+}
+
+// Invoke and SelectionItem.Select are both the first method after IUnknown.
+// A zero pattern only checks that the named element exists.
+func sessionControlAction(parent win.HWND, name string, patternID uintptr) error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	ole := windows.NewLazySystemDLL("ole32.dll")
@@ -54,12 +64,12 @@ func sessionButton(parent win.HWND, name string, invoke bool) error {
 		return fmt.Errorf("button %q unavailable (%#x)", name, hr)
 	}
 	defer automationCall(element, 2)
-	if !invoke {
+	if patternID == 0 {
 		return nil
 	}
 	var pattern unsafe.Pointer
-	if hr = automationCall(element, 16, 10000, uintptr(unsafe.Pointer(&pattern))); int32(hr) < 0 || pattern == nil {
-		return fmt.Errorf("button %q has no Invoke pattern (%#x)", name, hr)
+	if hr = automationCall(element, 16, patternID, uintptr(unsafe.Pointer(&pattern))); int32(hr) < 0 || pattern == nil {
+		return fmt.Errorf("control %q has no pattern %d (%#x)", name, patternID, hr)
 	}
 	defer automationCall(pattern, 2)
 	if hr = automationCall(pattern, 3); int32(hr) < 0 {
