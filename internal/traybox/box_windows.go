@@ -3,6 +3,8 @@
 package traybox
 
 import (
+	"errors"
+	"fmt"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -16,7 +18,12 @@ type Box struct {
 	logger   Logger
 	paths    []string
 	listener *listener
+	bridge   *bridgeManager
 	config   listenerConfig
+
+	errorMu sync.Mutex
+	onError func(error)
+	errors  []error
 	// Hosted windows belong to WinTray, but their icons represent another
 	// executable. Keep identities across listener stop/start cycles.
 	hostedOwners sync.Map // uint32 HWND -> hostedIconOwner
@@ -29,14 +36,49 @@ type hostedIconOwner struct {
 }
 
 func NewBox(selfPath string, logger Logger) *Box {
-	return &Box{
-		selfPath: selfPath,
-		logger:   logger,
-		config: listenerConfig{className: trayWindowClass, target: explorerTray, raise: true,
-			newRecovery: func() (*recoveryClient, error) {
-				return startRecovery(exec.Command(filepath.Join(filepath.Dir(selfPath), RecoveryExecutable), "--watch-tray"))
-			},
+	if logger == nil {
+		logger = discardLogger{}
+	}
+	b := &Box{selfPath: selfPath, logger: logger}
+	b.config = listenerConfig{className: brokerWindowClass, target: explorerTray, native: true,
+		onError: b.reportError,
+		newRecovery: func() (*recoveryClient, error) {
+			return startRecovery(exec.Command(filepath.Join(filepath.Dir(selfPath), RecoveryExecutable), "--watch-tray"))
 		},
+	}
+	return b
+}
+
+type discardLogger struct{}
+
+func (discardLogger) Info(string) {}
+func (discardLogger) Warn(string) {}
+
+// SetErrorHandler receives background attachment/recovery failures. The
+// handler must enqueue UI work, not block the broker. Failures before the UI
+// exists are delivered when the handler is installed, rather than lost in logs.
+func (b *Box) SetErrorHandler(handler func(error)) {
+	b.errorMu.Lock()
+	b.onError = handler
+	pending := b.errors
+	if handler != nil {
+		b.errors = nil
+	}
+	b.errorMu.Unlock()
+	if handler != nil && len(pending) != 0 {
+		handler(errors.Join(pending...))
+	}
+}
+
+func (b *Box) reportError(err error) {
+	b.errorMu.Lock()
+	handler := b.onError
+	if handler == nil {
+		b.errors = append(b.errors, err)
+	}
+	b.errorMu.Unlock()
+	if handler != nil {
+		handler(err)
 	}
 }
 
@@ -48,7 +90,19 @@ func (b *Box) HasSelection() bool { return len(b.paths) != 0 }
 func (b *Box) RegisterHostedIcon(hwnd uintptr, exePath string, refresh func()) func() {
 	owner := uint32(hwnd)
 	b.hostedOwners.Store(owner, hostedIconOwner{canonicalIconPath(exePath), refresh})
-	return func() { b.hostedOwners.Delete(owner) }
+	if b.bridge != nil {
+		if err := b.bridge.updateHosted(); err != nil {
+			b.reportError(err)
+		}
+	}
+	return func() {
+		b.hostedOwners.Delete(owner)
+		if b.bridge != nil {
+			if err := b.bridge.updateHosted(); err != nil {
+				b.reportError(err)
+			}
+		}
+	}
 }
 
 // SetPaths collects the icons of exactly these programs. Icons of programs
@@ -57,15 +111,26 @@ func (b *Box) RegisterHostedIcon(hwnd uintptr, exePath string, refresh func()) f
 func (b *Box) SetPaths(paths []string) error {
 	var selected []string
 	for _, p := range paths {
-		if p != "" && !strings.EqualFold(p, b.selfPath) && !Contains(selected, p) {
+		p = canonicalIconPath(p)
+		if p != "" && !strings.EqualFold(p, canonicalIconPath(b.selfPath)) && !Contains(selected, p) {
 			selected = append(selected, p)
 		}
 	}
 	switch {
 	case len(selected) == 0:
 		if b.listener != nil {
-			if err := b.listener.stop(); err != nil {
+			stop := b.listener.stop
+			if b.bridge != nil {
+				stop = func() error { return b.bridge.apply(nil, b.listener.stop) }
+			}
+			if err := stop(); err != nil {
 				return err
+			}
+			if b.bridge != nil {
+				if err := b.bridge.close(); err != nil {
+					b.logger.Warn(fmt.Sprintf("tray box: close native bridge: %v", err))
+				}
+				b.bridge = nil
 			}
 			b.listener = nil
 			b.logger.Info("tray box: stopped")
@@ -73,14 +138,39 @@ func (b *Box) SetPaths(paths []string) error {
 	case b.listener == nil:
 		cfg := b.config
 		cfg.hostedOwners = &b.hostedOwners
-		l, err := startListener(cfg, b.selfPath, selected, b.logger)
+		// Start empty: no icon is hidden until the taskbar receiver has a
+		// confirmed route and the recovery companion is ready.
+		l, err := startListener(cfg, b.selfPath, nil, b.logger)
 		if err != nil {
 			return err
+		}
+		if cfg.native {
+			b.bridge, err = newBridgeManager(b.selfPath, l)
+			if err == nil {
+				err = b.bridge.apply(selected, func() error { return l.updatePaths(selected) })
+			}
+		} else {
+			err = l.updatePaths(selected)
+		}
+		if err != nil {
+			if b.bridge != nil {
+				err = errors.Join(err, b.bridge.close())
+				b.bridge = nil
+			}
+			return errors.Join(err, l.stop())
 		}
 		b.listener = l
 		b.logger.Info("tray box: started")
 	default:
-		b.listener.setPaths(selected)
+		change := func() error { return b.listener.updatePaths(selected) }
+		if b.bridge != nil {
+			change = func() error {
+				return b.bridge.apply(selected, func() error { return b.listener.updatePaths(selected) })
+			}
+		}
+		if err := change(); err != nil {
+			return err
+		}
 	}
 	b.paths = selected
 	return nil

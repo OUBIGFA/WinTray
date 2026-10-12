@@ -58,7 +58,7 @@ Settings and logs are stored in your user data directory. Before deleting WinTra
 
 Scripts always use **Run in background** and cannot use tray collection. Install the interpreter and packages that each script requires.
 
-Drag files of the types above into the program list. Dropping files records only their paths; it does not copy, move, or run them. Folders, shortcuts (`.lnk`), and other types are not added; a message lists the rejected items. If WinTray runs as administrator, Windows blocks drops from a non-elevated File Explorer; use **Add Program** or run WinTray without elevation.
+You can drag only the file types in the table into the list. If WinTray runs as administrator, use **Add Program**. To drag files, run WinTray without administrator rights.
 
 If an application has several `.exe` files, select the file that displays its main window. A launcher or updater might not match the main window.
 
@@ -81,13 +81,12 @@ Clear **Start this program at sign-in** to stop WinTray from scheduling the prog
 
 ### Close to tray and wait before closing
 
-WinTray tries to overlay startup windows transparently and to remove ordinary window buttons from the taskbar temporarily. It closes the window after **Wait before closing** expires. If closing fails or the operation is cancelled, WinTray tries to restore the window and its taskbar entry. A successfully closed window can still be reopened through the program's native tray icon.
+WinTray closes the program window after **Wait before closing** expires. Use the program's tray icon to open the window again.
 
 - **Range**: 0–600 seconds. The default is 0 seconds, which closes the window immediately.
 - **Start of the wait**: The time when the target process was created. This also applies when the program starts through its own startup entry.
 - **Program sign-in**: WinTray does not detect whether sign-in is complete. Set the wait longer than the actual sign-in time. Use **Start normally** if manual sign-in is required.
-- **Window limits**: WinTray cannot guarantee a flash-free first frame or prevent every program from taking focus, and does not hide pinned taskbar shortcuts. Some windows do not support transparency or are restricted by permissions. A graphical program that does not support closing to the tray can exit when its window closes.
-- **Launchers**: WinTray can recognize a main executable with the same filename in a subdirectory of the launcher when both files have the same valid signing certificate. Otherwise, add the actual main `.exe` instead.
+- **Window limits**: A window can briefly appear or take focus during startup. Pinned taskbar shortcuts remain visible. Graphical programs that do not support closing to the tray can exit.
 
 Select **Close to tray** for console programs such as `syncthing.exe` and `frpc.exe` to give them a WinTray-hosted tray icon. Left-click the icon to show or hide the window. Right-click it to show the window, hide it, stop hosting and show it, or quit the program.
 
@@ -95,14 +94,10 @@ Select **Close to tray** for console programs such as `syncthing.exe` and `frpc.
 
 Select **Tray icon** in the program list to move the program's existing tray icons into WinTray's right-click menu. This feature requires Windows 11 and an `.exe` file.
 
-- The original icons are hidden from the system tray and its `^` panel. The WinTray menu uses the program's current icon and name.
-- Click a program icon in the menu to forward the click to the program; if no window appears, WinTray also sends a double-click.
+- Collected icons no longer appear in the system tray or its `^` panel.
+- Click a program icon in the WinTray menu to open the program window.
 - Right-click the program icon to open its own tray menu.
-- Clear **Tray icon**, or exit WinTray normally, to restore the original icons. Enabling collection again or reopening WinTray can collect icons from the same running programs without restarting them.
-- An older WinTray version may have caused a program to stop responding to tray rebuild requests. After upgrading, exit and reopen that program once; subsequent WinTray restarts and collection cycles no longer require restarting it.
-- If Task Manager forcibly ends `WinTray.exe`, an independent recovery process restores the original icons of programs that are still running. Icons hidden or deleted by their own program keep that state.
-- Keep `WinTray-Recovery.exe` beside the main executable. It runs while collection is enabled and exits after recovery or normal shutdown. If it cannot start, WinTray does not hide the original icons; ending both processes, such as terminating the entire process tree, prevents automatic recovery.
-- If collection fails, WinTray tries to restore the original icons and records the cause in the log.
+- Clear **Tray icon**, or exit WinTray normally, to restore the original icons.
 
 ### Launch at boot
 
@@ -111,14 +106,14 @@ WinTray selects a scheduled task according to the program's existing startup ent
 | Original startup | WinTray behavior |
 | --- | --- |
 | An available scheduled task at sign-in | Reuses the task with its original arguments, privileges, and delay |
-| A supported current-user registry entry or Startup-folder shortcut | Creates a replacement task with the original command, silent behavior, and working directory. Backs up the enabled state and temporarily disables the original entry to prevent duplicate launches |
+| A supported current-user registry entry or Startup-folder shortcut | Keeps the original startup settings and temporarily disables the original entry to prevent duplicate launches |
 | No original startup entry | Creates a task with the program path and arguments configured in WinTray |
 
 New tasks start when WinTray and the desktop are ready and do not use the delay between programs. If **Custom timing** specifies a start delay, new tasks use that delay.
 
 Windows requests confirmation when a new task requires administrator privileges. After the settings are saved successfully, **Launch Now** runs the same registered task so you can check its behavior.
 
-WinTray reports an error when an original entry is disabled, removed after migration, unclear, or conflicts with another entry, or when the wait for startup conditions times out. Follow the error message and save the settings again, or use **Start normally**. WinTray keeps a backup of startup states that it could not restore.
+If setup fails, follow the error message and save the settings again, or use **Start normally**.
 
 When this mode and the launch limit are both off, WinTray removes the replacement task and restores the original entry's state. This also happens when you disable the program's startup, remove it from the list, or disable WinTray startup.
 
@@ -183,9 +178,7 @@ Select **Run silently** at the bottom of **Settings** or in the tray menu to hid
 | Operating system | Windows 10 / 11; tray collection requires Windows 11 |
 | WinTray runtime | No additional runtime installation |
 | Script environment | The required interpreter and script dependencies |
-| Build from source | Go 1.27.1 or later on Windows |
-
-The source and release package support Windows only. Cross-platform builds are not supported.
+| Build from source | Windows and Go 1.27.1 or later; packaging also requires Visual Studio C++ Build Tools (x86/x64 tools and Windows SDK) |
 
 ## Data directory
 

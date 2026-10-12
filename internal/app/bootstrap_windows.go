@@ -194,7 +194,8 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 	// native controls and loading program icons can block on the busy Shell
 	// at sign-in, so release helpers before any of that work. The collector
 	// has its own message thread and is already able to receive their icons.
-	if boxErr := box.SetPaths(config.CollectedTrayIconPaths(settings)); boxErr != nil {
+	boxErr := box.SetPaths(config.CollectedTrayIconPaths(settings))
+	if boxErr != nil {
 		logger.Warn(fmt.Sprintf("collect tray icons failed; startup helpers remain blocked: %v", boxErr))
 	} else if release, readyErr := ipc.MarkReady(services.readyName); readyErr != nil {
 		logger.Warn(fmt.Sprintf("publish ready state failed: %v", readyErr))
@@ -436,7 +437,7 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 			// Collect or release the icons first; a failed save hands the
 			// previous selection back to the box.
 			if err := box.SetPaths(config.CollectedTrayIconPaths(next)); err != nil {
-				return err
+				return fmt.Errorf(i18n.For(next.Language).TrayBoxFailedBody, err)
 			}
 			if err := store.Save(next); err != nil {
 				if restoreErr := box.SetPaths(config.CollectedTrayIconPaths(before)); restoreErr != nil {
@@ -540,6 +541,18 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 		logger.Error(fmt.Sprintf("create main window failed: %v", err))
 		emitFatalWithLog(settings.Language, "failed to create main window", err)
 		return 1
+	}
+	box.SetErrorHandler(func(err error) {
+		mainWindow.Synchronize(func() {
+			if !quitting {
+				m := i18n.For(safeLanguage(mainWindow))
+				mainWindow.ShowError(m.TrayBoxFailedTitle, fmt.Sprintf(m.TrayBoxFailedBody, err))
+			}
+		})
+	})
+	if boxErr != nil {
+		m := i18n.For(settings.Language)
+		mainWindow.ShowError(m.TrayBoxFailedTitle, fmt.Sprintf(m.TrayBoxFailedBody, boxErr))
 	}
 	if activation != nil {
 		activation.Start(func() {

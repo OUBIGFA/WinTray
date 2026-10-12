@@ -63,7 +63,7 @@ func TestTaskbarIconsLiveReorderWithCollector(t *testing.T) {
 	}
 	run("Pin", "fixture")
 	run("Swap", "without collector")
-	l, err := startListener(listenerConfig{className: trayWindowClass, target: explorerTray, raise: true}, "",
+	l, err := startListener(listenerConfig{className: brokerWindowClass, target: explorerTray, native: true}, "",
 		[]string{`C:\WinTray-test-only\nothing.exe`}, quietLogger{})
 	if err != nil {
 		t.Fatal(err)
@@ -73,10 +73,11 @@ func TestTaskbarIconsLiveReorderWithCollector(t *testing.T) {
 			t.Error(err)
 		}
 	}()
+	attachNativeTestBridge(t, l)
 	run("Swap", "collector running")
 	// Simulate the broadcast on our listener only; do not restart Explorer or
 	// ask unrelated programs to re-register their icons in an automated test.
 	win.SendMessage(l.hwnd, l.taskbarCreated, 0, 0)
 	run("Swap", "after TaskbarCreated")
-	run("Swap", "after priority restoration")
+	run("Swap", "after broker maintenance")
 }

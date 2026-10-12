@@ -47,6 +47,15 @@ func TestMainSessionHostingLifecycle(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(dir, traybox.RecoveryExecutable), recoveryImage, 0o600); err != nil {
 				t.Fatal(err)
 			}
+			if mode == "startup with collector before settings" {
+				nativeDir := os.Getenv("WINTRAY_NATIVE_DIR")
+				if nativeDir == "" {
+					nativeDir = "../../dist/native"
+				}
+				if err := os.CopyFS(filepath.Join(dir, "native"), os.DirFS(nativeDir)); err != nil {
+					t.Fatalf("stage native bridge (run build/native.ps1 first): %v", err)
+				}
+			}
 			t.Cleanup(func() {
 				if t.Failed() {
 					data, _ := os.ReadFile(filepath.Join(dir, "wintray.log"))

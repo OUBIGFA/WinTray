@@ -12,7 +12,6 @@ import (
 	"syscall"
 	"testing"
 	"time"
-	"unsafe"
 
 	"github.com/lxn/win"
 	"golang.org/x/sys/windows"
@@ -192,31 +191,21 @@ func TestCollectedIconsReturnAfterForcedTerminationLive(t *testing.T) {
 	if os.Getenv("WINTRAY_TRAY_LIVE_TEST") != "1" {
 		t.Skip("set WINTRAY_TRAY_LIVE_TEST=1 with WinTray closed")
 	}
-	f := startFakeShell(t)
-	self, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
+	client := startNativeClient(t, nativeClientPath(t, "x64"), "--icon")
+	observer := nativeObserver(t)
+	for cycle := 0; cycle < 2; cycle++ {
+		cmd, collector, _ := startCrashCollector(t, 0, client.path)
+		waitFor(t, "native icon collected", func() bool { return !observer.visibleIcon(t, client.hwnd, false) })
+		if err := cmd.Process.Kill(); err != nil {
+			t.Fatal(err)
+		}
+		waitFor(t, "native Explorer icon visible after forced termination", func() bool {
+			return !isWindow(collector.hwnd) && observer.visibleIcon(t, client.hwnd, false)
+		})
+		if client.request(t, clientModify, uintptr(cycle+1), 0) == 0 {
+			t.Fatal("bridge did not pass native updates through after its host died")
+		}
 	}
-	cmd, collector, _ := startCrashCollector(t, 0, self)
-	nid := win.NOTIFYICONDATA{HWnd: f.program, UID: 71, UFlags: win.NIF_ICON | win.NIF_TIP, HIcon: win.LoadIcon(0, win.MAKEINTRESOURCE(win.IDI_APPLICATION))}
-	nid.CbSize = uint32(unsafe.Sizeof(nid))
-	if !win.Shell_NotifyIcon(win.NIM_ADD, &nid) {
-		t.Fatal("register native test icon")
-	}
-	defer win.Shell_NotifyIcon(win.NIM_DELETE, &nid)
-	request := trayRequest{hwnd: uint32(f.program), uid: 71}.bytes()
-	// The collector deliberately supplies a synthetic rectangle to clients.
-	// Probe Explorer directly while it is active to measure real visibility.
-	explorer := &listener{hwnd: explorerTray(0)}
-	waitFor(t, "native icon collected", func() bool {
-		a := queryListenerRect(explorer, rectWire(uint32(f.program), 71, 1, [16]byte{}))
-		b := queryListenerRect(explorer, rectWire(uint32(f.program), 71, 2, [16]byte{}))
-		return a == 0 || int16(b) <= 0 || int16(b>>16) <= 0
-	})
-	if err := cmd.Process.Kill(); err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, "native Explorer icon visible after forced termination", func() bool { return !isWindow(collector.hwnd) && shownByExplorer(request) })
 }
 
 func startCrashCollector(t *testing.T, target win.HWND, selected string) (*exec.Cmd, *listener, uint32) {
@@ -280,13 +269,18 @@ func TestCollectionCrashProcess(t *testing.T) {
 		},
 	}
 	if target == 0 {
-		cfg.className, cfg.target, cfg.raise = trayWindowClass, explorerTray, true
+		cfg.className, cfg.target, cfg.native = brokerWindowClass, explorerTray, true
 	}
 	var l *listener
 	if recoveryExe := os.Getenv("WINTRAY_RECOVERY_EXE"); target == 0 && recoveryExe != "" {
 		// Exercise the shipped executable and the production Box wiring when
 		// package validation supplies a companion, not a test-process helper.
 		b := NewBox(filepath.Join(filepath.Dir(recoveryExe), "WinTray.exe"), recoveryTestLogger{})
+		err = b.SetPaths([]string{os.Args[4]})
+		l = b.listener
+	} else if target == 0 {
+		b := NewBox(nativeTestSelfPath(t), recoveryTestLogger{})
+		b.config.newRecovery = cfg.newRecovery
 		err = b.SetPaths([]string{os.Args[4]})
 		l = b.listener
 	} else {

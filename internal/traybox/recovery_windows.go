@@ -311,7 +311,7 @@ func (l *listener) failRecovery(err error) {
 	l.closing = true // pass through future requests and stop healing them hidden
 	l.mu.Unlock()
 	l.recovery.abort()
-	l.logger.Warn(fmt.Sprintf("tray box: recovery unavailable; collection stopped: %v", err))
+	l.reportError(fmt.Errorf("recovery unavailable; collection stopped: %w", err))
 	if err := l.restoreIcons(true); err != nil {
 		l.logger.Warn(fmt.Sprintf("tray box: %v", err))
 	}

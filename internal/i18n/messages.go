@@ -119,6 +119,7 @@ type Messages struct {
 	TrayBoxHomeTitle               string
 	TrayBoxHomeHint                string
 	TrayBoxFailedTitle             string
+	TrayBoxFailedBody              string
 	TrayBoxIconGoneBody            string
 	TrayBoxNotClickableBody        string
 	TrayBoxClickFailedBody         string
@@ -264,6 +265,7 @@ var zhCN = Messages{
 	TrayBoxHomeTitle:               "托盘收纳",
 	TrayBoxHomeHint:                "将此程序的托盘图标从任务栏收进 WinTray 菜单；在菜单中左键单击等同单击原图标，右键打开程序自己的托盘菜单",
 	TrayBoxFailedTitle:             "托盘图标收纳",
+	TrayBoxFailedBody:              "托盘收纳发生错误\n请保留完整的 WinTray 文件，并查看日志后重新启用收纳\n\n错误详情：%v",
 	TrayBoxIconGoneBody:            "%s 的托盘图标已不存在，程序可能已经退出",
 	TrayBoxNotClickableBody:        "%s 的托盘图标不响应点击",
 	TrayBoxClickFailedBody:         "无法把点击交给 %s：%v",
@@ -413,6 +415,7 @@ var enUS = Messages{
 	TrayBoxHomeTitle:               "Tray icon",
 	TrayBoxHomeHint:                "Move this program's tray icon off the taskbar into WinTray's menu; left-click its entry to click the icon, right-click it for the program's own tray menu",
 	TrayBoxFailedTitle:             "Collected tray icons",
+	TrayBoxFailedBody:              "Tray collection encountered an error\nKeep the complete WinTray package and check the log before enabling collection again\n\nDetails: %v",
 	TrayBoxIconGoneBody:            "The tray icon of %s is gone; the program may have exited",
 	TrayBoxNotClickableBody:        "The tray icon of %s does not respond to clicks",
 	TrayBoxClickFailedBody:         "Could not pass the click to %s: %v",

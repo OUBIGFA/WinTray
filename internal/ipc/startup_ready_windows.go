@@ -47,7 +47,7 @@ func WaitStartupReady(ctx context.Context, name string, poll time.Duration) erro
 }
 
 // WaitDesktopShell waits for the actual desktop Shell and its own taskbar,
-// not another process's Shell_TrayWnd (such as WinTray's tray collector).
+// not another process's Shell_TrayWnd.
 // Readiness is probed immediately; poll only spaces unsuccessful probes.
 func WaitDesktopShell(ctx context.Context, poll time.Duration) error {
 	return waitReadiness(ctx, poll, "desktop Shell", nativeDesktopShell().check)

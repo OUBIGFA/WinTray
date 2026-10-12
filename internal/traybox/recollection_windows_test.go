@@ -7,47 +7,14 @@ import (
 	"os"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/lxn/win"
 )
 
-// A delayed refresh may expire during the next taskbar gesture. Sending it
-// while the proxy has yielded makes the client's duplicate ADD reach Explorer
-// directly, permanently disabling clients that remember a failed registration.
-func TestRefreshPreservesRegistrationDuringTaskbarGesture(t *testing.T) {
-	f := startFakeShell(t)
-	self, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	const className = "WinTrayTestGestureRefresh"
-	class, err := registerListenerClass(className, win.GetModuleHandle(nil))
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Both endpoints must share a class, exactly as Explorer and the real
-	// proxy do. Subclass only our disposable target on its message thread.
-	created := make(chan win.HWND, 1)
-	f.mu.Lock()
-	f.onEvent = func(win.HWND, uintptr, uintptr) {
-		target := win.CreateWindowEx(0, class, nil, win.WS_POPUP, -200, -100, 400, 40, 0, 0, win.GetModuleHandle(nil), nil)
-		if target != 0 {
-			win.SetWindowLongPtr(target, win.GWLP_WNDPROC, fakeShellWnd)
-			win.DestroyWindow(f.target)
-			f.target = target
-		}
-		created <- target
-	}
-	f.mu.Unlock()
-	win.SendMessage(f.program, testCallback, 0, 0)
-	f.mu.Lock()
-	f.onEvent = nil
-	f.mu.Unlock()
-	if <-created == 0 {
-		t.Fatal("create private native taskbar")
-	}
-	f.clear()
+// Refresh uses the private endpoint, not a temporary topmost taskbar window.
+// Repeated refreshes must preserve clients that remember their ADD result.
+func TestPrivateBrokerRefreshPreservesRegistration(t *testing.T) {
+	f, l := selectedListener(t)
 	var installed atomic.Bool
 	installed.Store(true)
 	f.setReply(func(d trayData) uintptr {
@@ -56,50 +23,24 @@ func TestRefreshPreservesRegistrationDuringTaskbarGesture(t *testing.T) {
 		}
 		return 1
 	})
-	firstTray := func() win.HWND {
-		return win.FindWindow(class, nil)
-	}
-	add := trayRequest{message: nimAdd, hwnd: uint32(f.program), uid: 31, flags: nifTip, tip: "gesture fixture"}
+	add := trayRequest{message: nimAdd, hwnd: uint32(f.program), uid: 31, flags: nifTip, tip: "refresh fixture"}
 	f.mu.Lock()
 	f.onRefresh = func() {
 		if installed.Load() {
-			// Resolve the current native z-order, as Shell_NotifyIcon does,
-			// instead of routing directly to the listener under test.
-			installed.Store(send(&listener{hwnd: firstTray()}, add) != 0)
+			installed.Store(send(l, add) != 0)
 		}
 	}
 	f.mu.Unlock()
-	l, err := startListener(listenerConfig{className: className, raise: true,
-		target: func(win.HWND) win.HWND { return f.target }}, "", []string{self}, quietLogger{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := l.stop(); err != nil {
-			t.Error(err)
+	for i := 0; i < 3; i++ {
+		_, _, before := f.snapshot()
+		win.SendMessage(l.hwnd, win.WM_TIMER, timerRefresh, 0)
+		waitFor(t, "private broker refresh", func() bool {
+			_, _, after := f.snapshot()
+			return after > before && len(l.snapshot()) == 1
+		})
+		if !installed.Load() {
+			t.Fatal("refresh disabled future native registrations")
 		}
-	})
-	waitFor(t, "initial registration", func() bool { return len(l.snapshot()) == 1 })
-	l.onPointer(win.WM_LBUTTONDOWN, win.POINT{X: -150, Y: -80})
-	l.pointerMu.Lock()
-	l.pointerResumeAt = time.Now().Add(time.Minute)
-	l.pointerMu.Unlock()
-	waitFor(t, "native taskbar gesture priority", func() bool { return firstTray() == f.target })
-	win.SendMessage(l.hwnd, win.WM_TIMER, timerRefresh, 0)
-	// The marker is queued after any refresh request, so the assertion does
-	// not race the application's message queue.
-	win.PostMessage(f.program, testCallback, 0, 0)
-	waitFor(t, "refresh queue drained", func() bool { _, events, _ := f.snapshot(); return len(events) != 0 })
-	if !installed.Load() {
-		t.Fatal("refresh bypassed the yielded collector and disabled future native registrations")
-	}
-	l.onPointer(win.WM_LBUTTONUP, win.POINT{X: 900, Y: 900})
-	waitFor(t, "collection priority restored", func() bool { return firstTray() == l.hwnd })
-	_, _, before := f.snapshot()
-	win.SendMessage(l.hwnd, win.WM_TIMER, timerRefresh, 0)
-	waitFor(t, "refresh after gesture", func() bool { _, _, after := f.snapshot(); return after > before })
-	if !installed.Load() || len(l.snapshot()) != 1 {
-		t.Fatal("registration did not survive the completed taskbar gesture")
 	}
 }
 

@@ -48,15 +48,24 @@ $recoveryExe = Join-Path $out "WinTray-Recovery.exe"
 & $goCommand build -trimpath -ldflags "-s -w -H=windowsgui" -o $recoveryExe ./cmd/tray-recovery
 if ($LASTEXITCODE -ne 0) { throw "tray recovery build failed" }
 
+# The private broker uses bitness-matched native bridges instead of creating
+# another Shell_TrayWnd. Both architectures are required by the portable app.
+& (Join-Path $PSScriptRoot 'native.ps1') -OutputDir (Join-Path $out 'native')
+
 if (Test-Path $manifestSource) {
   Copy-Item -Path $manifestSource -Destination $manifestTarget -Force
 }
 
-$hash = (Get-FileHash $exe -Algorithm SHA256).Hash
 $checksumsPath = Join-Path $out "checksums.txt"
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-$recoveryHash = (Get-FileHash $recoveryExe -Algorithm SHA256).Hash
-[System.IO.File]::WriteAllText($checksumsPath, "WinTray.exe  $hash`nWinTray-Recovery.exe  $recoveryHash`n", $utf8NoBom)
+$runtimeFiles = @('WinTray.exe', 'WinTray-Recovery.exe')
+foreach ($arch in @('x64', 'x86')) {
+  $runtimeFiles += "native/$arch/WinTray-Bridge.exe", "native/$arch/WinTray-ShellBridge.dll"
+}
+$checksums = foreach ($file in $runtimeFiles) {
+  "$file  $((Get-FileHash (Join-Path $out $file) -Algorithm SHA256).Hash)"
+}
+[System.IO.File]::WriteAllText($checksumsPath, ($checksums -join "`n") + "`n", $utf8NoBom)
 Write-Host "Built: $exe"
 
 $publishDir = Join-Path $root $PackageDir
@@ -69,12 +78,21 @@ if (!(Test-Path $portableDir)) {
   New-Item -ItemType Directory -Path $portableDir | Out-Null
 }
 
+# Remove only superseded app-side bridge files from our staging directory.
+# Never include stale injection components in the new receiving-end package.
+foreach ($arch in @('x64', 'x86')) {
+  $oldBridge = Join-Path $portableDir "native/$arch/WinTray-TrayBridge.dll"
+  if (Test-Path -LiteralPath $oldBridge) { Remove-Item -LiteralPath $oldBridge -Force }
+}
 $portableExe = Join-Path $portableDir "WinTray.exe"
 $portableManifest = Join-Path $portableDir "WinTray.exe.manifest"
 $portableChecksums = Join-Path $portableDir "checksums.txt"
 
-Copy-Item -Path $exe -Destination $portableExe -Force
-Copy-Item -LiteralPath $recoveryExe -Destination (Join-Path $portableDir "WinTray-Recovery.exe") -Force
+foreach ($file in $runtimeFiles) {
+  $target = Join-Path $portableDir $file
+  New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
+  Copy-Item -LiteralPath (Join-Path $out $file) -Destination $target -Force
+}
 Copy-Item -Path $checksumsPath -Destination $portableChecksums -Force
 if (Test-Path $manifestTarget) {
   Copy-Item -Path $manifestTarget -Destination $portableManifest -Force

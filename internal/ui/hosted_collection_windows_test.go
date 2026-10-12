@@ -51,6 +51,13 @@ func TestHostedIconsCanBeCollectedAndReleased(t *testing.T) {
 		if output, err := exec.Command("go", "build", "-o", filepath.Join(dir, traybox.RecoveryExecutable), "../../cmd/tray-recovery").CombinedOutput(); err != nil {
 			t.Fatalf("build recovery companion: %v\n%s", err, output)
 		}
+		nativeDir := os.Getenv("WINTRAY_NATIVE_DIR")
+		if nativeDir == "" {
+			nativeDir = "../../dist/native"
+		}
+		if err := os.CopyFS(filepath.Join(dir, "native"), os.DirFS(nativeDir)); err != nil {
+			t.Fatalf("stage native bridge (run build/native.ps1 first): %v", err)
+		}
 		cmd := exec.Command(child, "-test.run=^TestHostedIconsCanBeCollectedAndReleased$", "-test.v", "-test.timeout=30s")
 		cmd.Env = append(os.Environ(), "WINTRAY_HOST_COLLECTION_CHILD=1")
 		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}

@@ -4,6 +4,7 @@ package traybox
 
 import (
 	"cmp"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"image"
@@ -32,10 +33,6 @@ var (
 	procAllowSetForegroundWindow    = user32.NewProc("AllowSetForegroundWindow")
 	procIsWindow                    = user32.NewProc("IsWindow")
 	procShellNotifyIconGetRect      = shell32.NewProc("Shell_NotifyIconGetRect")
-	procGetPropW                    = user32.NewProc("GetPropW")
-	procSetPropW                    = user32.NewProc("SetPropW")
-	procRemovePropW                 = user32.NewProc("RemovePropW")
-	taskbandProperty                = syscall.StringToUTF16Ptr("TaskbandHWND")
 )
 
 func isWindow(hwnd win.HWND) bool {
@@ -46,21 +43,21 @@ func isWindow(hwnd win.HWND) bool {
 const (
 	trayWindowClass = "Shell_TrayWnd"
 
-	timerRaise   = 1
 	timerHeal    = 2
 	timerRefresh = 3
 
-	raiseInterval = 100 * time.Millisecond
-	healInterval  = time.Second
-	// Programs re-add their icons when Explorer restarts. Some reach the new
-	// taskbar before this window is on top again, so they are asked once more.
+	healInterval = time.Second
+	// Selected applications are refreshed after Explorer has recreated its
+	// notification area; no taskbar window or z-order is impersonated.
 	refreshDelay = 2 * time.Second
 
 	forwardTimeout = 4000 // milliseconds
 
 	// msgSync asks the listener thread to apply a changed program selection.
-	msgSync = win.WM_APP + 1
-	msgStop = win.WM_APP + 2
+	msgSync         = win.WM_APP + 1
+	msgStop         = win.WM_APP + 2
+	msgUpdatePaths  = win.WM_APP + 3
+	msgBridgeFailed = win.WM_APP + 4
 	// Explorer posts rather than sends this message; sending it can deadlock.
 	msgPostOnly = win.WM_USER + 372
 
@@ -101,13 +98,20 @@ type listenerConfig struct {
 	hostedOwners *sync.Map
 	// target returns the window requests are passed on to.
 	target func(self win.HWND) win.HWND
-	// raise keeps the listener above Explorer's taskbar.
-	raise       bool
+	// native receives Shell tray packets through the private broker.
+	// Protocol tests send packets directly to an isolated fake shell.
+	native      bool
 	newRecovery func() (*recoveryClient, error)
+	onError     func(error)
 }
 
-// listener owns the Shell_TrayWnd window. Its window procedure and timers run
-// on one locked OS thread; other goroutines only read snapshots or post.
+type selectionChange struct {
+	paths []string
+	done  chan error
+}
+
+// listener owns a private, non-topmost broker window. Its window procedure and
+// timers run on one locked OS thread; other goroutines only read or post.
 type listener struct {
 	cfg            listenerConfig
 	selfPath       string
@@ -126,18 +130,10 @@ type listener struct {
 	stopResult     chan error
 	recovery       *recoveryClient
 	recoveryFailed bool // listener-thread only
+	bridgeFailed   bool // retry restoration, never resume hiding after a lost route
 
-	// The low-level mouse hook has its own message thread: icon forwarding,
-	// path lookup and recovery must never stall desktop-wide input delivery.
-	pointerHook     uintptr
-	pointerThreadID uint32
-	pointerDone     chan struct{}
-	pointerStopping atomic.Bool
-	pointerTarget   atomic.Uintptr
-	pointerFailed   atomic.Bool
-	pointerMu       sync.Mutex // gesture state only; never held across native calls
-	pointerYielded  bool
-	pointerResumeAt time.Time
+	bridgeRefresh chan struct{}
+	changes       chan selectionChange
 }
 
 // registeredClasses keeps window classes registered for the life of the
@@ -180,6 +176,11 @@ var (
 var errListenerRunning = errors.New("the tray icon listener is already running")
 
 func startListener(cfg listenerConfig, selfPath string, paths []string, logger Logger) (*listener, error) {
+	// A global Shell_TrayWnd changes what unrelated taskbar clients find.
+	// Refuse it even in tests so the old interception path cannot return.
+	if strings.EqualFold(cfg.className, trayWindowClass) {
+		return nil, errors.New("the tray broker must not impersonate the Windows taskbar")
+	}
 	l := &listener{
 		cfg:            cfg,
 		selfPath:       selfPath,
@@ -190,6 +191,8 @@ func startListener(cfg listenerConfig, selfPath string, paths []string, logger L
 		icons:          map[iconID]*trackedIcon{},
 		done:           make(chan struct{}),
 		stopResult:     make(chan error, 1),
+		bridgeRefresh:  make(chan struct{}, 1),
+		changes:        make(chan selectionChange, 1),
 	}
 	l.setPaths(paths)
 	ready := make(chan error, 1)
@@ -227,7 +230,7 @@ func (l *listener) run(ready chan<- error) {
 		return
 	}
 	// The window is never shown. WS_EX_TOOLWINDOW keeps it off the taskbar.
-	hwnd := win.CreateWindowEx(win.WS_EX_TOOLWINDOW|win.WS_EX_TOPMOST, className, nil, win.WS_POPUP,
+	hwnd := win.CreateWindowEx(win.WS_EX_TOOLWINDOW, className, nil, win.WS_POPUP,
 		0, 0, 0, 0, 0, 0, instance, nil)
 	if hwnd == 0 {
 		ready <- fmt.Errorf("create the %s window failed", l.cfg.className)
@@ -236,30 +239,16 @@ func (l *listener) run(ready chan<- error) {
 	l.mu.Lock()
 	l.hwnd = hwnd
 	l.mu.Unlock()
-	l.keepOnTop() // publish the real taskbar before the hook can receive input
-	if l.cfg.raise {
-		if err := l.startPointerHook(); err != nil {
-			procRemovePropW.Call(uintptr(hwnd), uintptr(unsafe.Pointer(taskbandProperty)))
-			win.DestroyWindow(hwnd)
-			ready <- err
-			return
-		}
-		defer func() {
-			if err := l.stopPointerHook(); err != nil {
-				l.logger.Warn(fmt.Sprintf("tray box: %v", err))
-			}
-		}()
-	}
-	// Programs running elevated may still reach WinTray when it runs elevated.
+	// Permit native packets from same-user applications at different integrity
+	// levels; the bridge itself still obeys process access and injection policy.
 	procChangeWindowMessageFilterEx.Call(uintptr(hwnd), win.WM_COPYDATA, msgfltAllow, 0)
 	procChangeWindowMessageFilterEx.Call(uintptr(hwnd), uintptr(l.taskbarCreated), msgfltAllow, 0)
-	if l.cfg.raise {
-		win.SetTimer(hwnd, timerRaise, uint32(raiseInterval.Milliseconds()), 0)
-	}
 	win.SetTimer(hwnd, timerHeal, uint32(healInterval.Milliseconds()), 0)
 	ready <- nil
-	// Icons that already exist are registered again, now through this window.
-	l.sync()
+	// Icons that already exist are registered again through the broker.
+	if err := l.sync(); err != nil {
+		l.reportError(err)
+	}
 
 	// GetMessage can dispatch sent messages before writing its result. Those
 	// callbacks reenter Go and can move its stack. Pin the native output
@@ -274,9 +263,17 @@ func (l *listener) run(ready chan<- error) {
 	}
 }
 
-// setPaths replaces the selection. Safe from any goroutine; the listener
-// thread hides and restores icons afterwards.
+// setPaths replaces the selection and queues maintenance. Safe from any
+// goroutine; native visibility changes are applied on the listener thread.
 func (l *listener) setPaths(paths []string) {
+	if hwnd := l.replacePaths(paths); hwnd != 0 {
+		win.PostMessage(hwnd, msgSync, 0, 0)
+	}
+}
+
+// replacePaths does not post work, so a selection transaction can finish
+// restoring removals before publishing its additions or a refresh request.
+func (l *listener) replacePaths(paths []string) win.HWND {
 	next := make(map[string]bool, len(paths))
 	self := canonicalIconPath(l.selfPath)
 	for _, p := range paths {
@@ -293,8 +290,65 @@ func (l *listener) setPaths(paths []string) {
 	l.paths = next
 	hwnd := l.hwnd
 	l.mu.Unlock()
-	if hwnd != 0 {
-		win.PostMessage(hwnd, msgSync, 0, 0)
+	return hwnd
+}
+
+func (l *listener) updatePaths(paths []string) error {
+	change := selectionChange{paths: slices.Clone(paths), done: make(chan error, 1)}
+	l.changes <- change
+	if win.PostMessage(l.hwnd, msgUpdatePaths, 0, 0) == 0 {
+		<-l.changes
+		return errors.New("could not update tray collection selection")
+	}
+	select {
+	case err := <-change.done:
+		return err
+	case <-l.done:
+		return errors.New("tray broker stopped while updating selection")
+	}
+}
+
+func (l *listener) applyPathChange(change selectionChange) {
+	l.mu.Lock()
+	if l.closing {
+		l.mu.Unlock()
+		change.done <- errors.New("tray collection is unavailable until its recovery component is restarted")
+		return
+	}
+	before := make([]string, 0, len(l.paths))
+	for path := range l.paths {
+		before = append(before, path)
+	}
+	l.mu.Unlock()
+	var retained []string
+	for _, path := range change.paths {
+		if path = canonicalIconPath(path); Contains(before, path) {
+			retained = append(retained, path)
+		}
+	}
+	// Withhold additions until all removals and their recovery snapshot are
+	// confirmed. Shell forwarding can reenter here with a new native ADD;
+	// hiding it before commit would leave an orphan after a failed rollback.
+	l.replacePaths(retained)
+	err := l.restoreIcons(false)
+	if err == nil {
+		err = l.syncRecovery()
+		if err != nil {
+			l.failRecovery(err)
+		}
+	}
+	if err != nil {
+		l.setPaths(before) // refresh already restored members of the old set
+	} else {
+		l.setPaths(change.paths)
+	}
+	change.done <- err
+}
+
+func (l *listener) reportError(err error) {
+	l.logger.Warn(fmt.Sprintf("tray box: %v", err))
+	if l.cfg.onError != nil {
+		l.cfg.onError(err)
 	}
 }
 
@@ -354,13 +408,27 @@ func (l *listener) wndProc(msg uint32, wParam, lParam uintptr) uintptr {
 		l.onTimer(wParam)
 		return 0
 	case msgSync:
-		l.sync()
+		if err := l.sync(); err != nil {
+			l.reportError(err)
+		}
+		return 0
+	case msgUpdatePaths:
+		l.applyPathChange(<-l.changes)
 		return 0
 	case l.taskbarCreated:
-		// Explorer restarted: take the top position again before programs
-		// re-add their icons, and ask the selected ones again shortly after.
-		l.keepOnTop()
+		// Delay only re-registration, never reposition the native taskbar.
 		win.SetTimer(l.hwnd, timerRefresh, uint32(refreshDelay.Milliseconds()), 0)
+		return 0
+	case msgBridgeFailed:
+		l.bridgeFailed = true
+		// Execute restoration on this thread after any in-flight packet,
+		// so a lost receiving lease cannot keep stale hidden icons alive.
+		l.mu.Lock()
+		l.closing = true
+		l.mu.Unlock()
+		if err := l.restoreIcons(true); err != nil {
+			l.reportError(err)
+		}
 		return 0
 	case msgStop:
 		l.stopResult <- l.shutdown()
@@ -373,9 +441,6 @@ func (l *listener) wndProc(msg uint32, wParam, lParam uintptr) uintptr {
 	case win.WM_DESTROY:
 		win.PostQuitMessage(0)
 		return 0
-	}
-	if msg == win.WM_COMMAND || msg >= win.WM_USER {
-		return l.forward(msg, wParam, lParam)
 	}
 	return win.DefWindowProc(l.hwnd, msg, wParam, lParam)
 }
@@ -545,9 +610,9 @@ func (l *listener) rollbackRejectedCollection(wParam uintptr, path string, d tra
 	}
 	l.mu.Unlock()
 	if delivered && originalResult != 0 {
-		l.logger.Warn(fmt.Sprintf("tray box: native icon restored for %s; collection failed and remains disabled for this icon until reselected", path))
+		l.reportError(fmt.Errorf("could not collect %s; its original native icon was restored, and collection for this icon stays disabled until reselected", path))
 	} else {
-		l.logger.Warn(fmt.Sprintf("tray box: original native registration was not confirmed for %s (delivered=%t result=%d)", path, delivered, originalResult))
+		l.reportError(fmt.Errorf("could not confirm the original native registration for %s (delivered=%t result=%d)", path, delivered, originalResult))
 	}
 	return originalResult
 }
@@ -673,8 +738,6 @@ func (l *listener) record(path string, d trayData, raw []byte, img *image.NRGBA)
 
 func (l *listener) onTimer(id uintptr) {
 	switch id {
-	case timerRaise:
-		l.keepOnTop()
 	case timerHeal:
 		l.heal()
 	case timerRefresh:
@@ -684,62 +747,14 @@ func (l *listener) onTimer(id uintptr) {
 			l.pending[p] = true
 		}
 		l.mu.Unlock()
-		l.sync()
+		if err := l.sync(); err != nil {
+			l.reportError(err)
+		}
 	}
 }
 
-// keepOnTop makes this the Shell_TrayWnd programs find first, except during
-// native taskbar gestures. Its bounds preserve callers' relative coordinates.
-func (l *listener) keepOnTop() {
-	if !l.cfg.raise {
-		return
-	}
-	// Resolve Explorer here, never from the input callback. A restarted shell
-	// is picked up by the next maintenance pass.
-	tray := l.cfg.target(l.hwnd)
-	l.syncTaskband(tray)
-	l.pointerTarget.Store(uintptr(tray))
-	if l.pointerFailed.Swap(false) {
-		l.logger.Warn("tray box: could not yield to the native taskbar for a pointer gesture")
-	}
-	if l.pointerBusy(time.Now(), pointerButtonDown()) {
-		return
-	}
-	class, _ := syscall.UTF16PtrFromString(l.cfg.className)
-	if win.FindWindow(class, nil) != l.hwnd {
-		win.SetWindowPos(l.hwnd, win.HWND_TOPMOST, 0, 0, 0, 0, win.SWP_NOMOVE|win.SWP_NOSIZE|win.SWP_NOACTIVATE)
-	}
-	var want, have win.RECT
-	if tray != 0 && win.GetWindowRect(tray, &want) && win.GetWindowRect(l.hwnd, &have) && want != have {
-		win.SetWindowPos(l.hwnd, 0, want.Left, want.Top, want.Right-want.Left, want.Bottom-want.Top, win.SWP_NOZORDER|win.SWP_NOACTIVATE)
-	}
-}
-
-// ITaskbarList::HrInit resolves TaskbandHWND on the first Shell_TrayWnd.
-// Preserve Explorer's endpoint before raising our window, otherwise native
-// clients get E_NOTIMPL and cannot hide their own menu/taskbar buttons. Refresh
-// the borrowed handle on maintenance passes so Explorer restarts are covered.
-func (l *listener) syncTaskband(tray win.HWND) {
-	name := uintptr(unsafe.Pointer(taskbandProperty))
-	var want uintptr
-	if tray != 0 {
-		want, _, _ = procGetPropW.Call(uintptr(tray), name)
-	}
-	have, _, _ := procGetPropW.Call(uintptr(l.hwnd), name)
-	if want == have {
-		return
-	}
-	if want == 0 {
-		procRemovePropW.Call(uintptr(l.hwnd), name)
-		return
-	}
-	if ok, _, err := procSetPropW.Call(uintptr(l.hwnd), name, want); ok == 0 {
-		l.logger.Warn(fmt.Sprintf("tray box: could not preserve the native taskbar endpoint: %v", err))
-	}
-}
-
-// heal hides icons that reached Explorer directly, for example while another
-// window was briefly on top, and drops icons whose window is gone.
+// heal hides selected icons whose native state became visible,
+// and drops icons whose window is gone.
 func (l *listener) heal() {
 	if l.recovery != nil && !l.recoveryFailed {
 		select {
@@ -748,7 +763,7 @@ func (l *listener) heal() {
 		default:
 		}
 	}
-	if l.recoveryFailed {
+	if l.recoveryFailed || l.bridgeFailed {
 		if err := l.restoreIcons(true); err != nil {
 			l.logger.Warn(fmt.Sprintf("tray box: %v", err))
 		}
@@ -778,7 +793,7 @@ func (l *listener) heal() {
 		return
 	}
 	for _, c := range checks {
-		if shownByExplorer(c.template) {
+		if l.shownByExplorer(c.template) {
 			l.logger.Info(fmt.Sprintf("tray box: icon hwnd=0x%X uid=%d appeared on the taskbar; hiding it again", c.id.hwnd, c.id.uid))
 			l.hideCurrent(c.id, 0)
 		}
@@ -787,27 +802,13 @@ func (l *listener) heal() {
 
 // sync hands icons of deselected programs back to Explorer and asks newly
 // selected programs to register their icons again.
-func (l *listener) sync() {
+func (l *listener) sync() error {
 	if err := l.restoreIcons(false); err != nil {
-		l.logger.Warn(fmt.Sprintf("tray box: %v", err))
+		return err
 	}
 	if err := l.syncRecovery(); err != nil {
 		l.failRecovery(err)
-		return
-	}
-	// A refresh timer can expire during a later taskbar gesture. Keep the
-	// pending selection until we own the native entry point again; otherwise
-	// duplicate ADDs bypass us, and clients may permanently stop registering.
-	if l.cfg.raise {
-		l.keepOnTop()
-		l.pointerMu.Lock()
-		yielded := l.pointerYielded
-		l.pointerMu.Unlock()
-		class := syscall.StringToUTF16Ptr(l.cfg.className)
-		if yielded || win.FindWindow(class, nil) != l.hwnd {
-			win.SetTimer(l.hwnd, timerRefresh, uint32(refreshDelay.Milliseconds()), 0)
-			return
-		}
+		return err
 	}
 	l.mu.Lock()
 	pending := make([]string, 0, len(l.pending))
@@ -820,12 +821,22 @@ func (l *listener) sync() {
 	l.mu.Unlock()
 	// A selection change can contain many programs. Share one process/window
 	// scan for the whole batch rather than repeating it for every path.
-	refreshed := postTaskbarCreated(pending, l.taskbarCreated)
+	var refreshed map[string]int
+	if l.cfg.native {
+		// Confirm the receiving route off this thread before refreshing only
+		// selected programs (including explicitly registered hosted owners).
+		select {
+		case l.bridgeRefresh <- struct{}{}:
+		default:
+		}
+	} else {
+		refreshed = postTaskbarCreated(pending, l.taskbarCreated)
+	}
 	for _, p := range pending {
 		n := refreshed[p]
 		// These icons live in WinTray, so the hosted executable's process
 		// enumeration cannot find them when collection is enabled later.
-		if l.cfg.hostedOwners != nil {
+		if !l.cfg.native && l.cfg.hostedOwners != nil {
 			l.cfg.hostedOwners.Range(func(_, value any) bool {
 				owner := value.(hostedIconOwner)
 				if owner.path == p && owner.refresh != nil {
@@ -835,8 +846,11 @@ func (l *listener) sync() {
 				return true
 			})
 		}
-		l.logger.Info(fmt.Sprintf("tray box: asked %d windows of %s to register their icons", n, p))
+		if !l.cfg.native || n != 0 {
+			l.logger.Info(fmt.Sprintf("tray box: asked %d windows of %s to register their icons", n, p))
+		}
 	}
+	return nil
 }
 
 // restoreIcons keeps failed restores for the next heal/stop attempt. During
@@ -873,7 +887,7 @@ func (l *listener) restoreIcons(all bool) error {
 		l.mu.Lock()
 		// A failed companion permanently releases collection for this listener.
 		// Retain failed restores for retry, but stop touching successful ones.
-		if l.recoveryFailed && l.icons[id] == t && t.revision == revision {
+		if (l.recoveryFailed || l.bridgeFailed) && l.icons[id] == t && t.revision == revision {
 			t.nativeRestored = true
 		}
 		if !all && l.icons[id] == t && t.revision == revision && !l.paths[strings.ToLower(t.ExePath)] {
@@ -894,24 +908,11 @@ func (l *listener) shutdown() error {
 		l.mu.Unlock()
 		return err
 	}
-	// Join the input thread before destroying its target window, so a late
-	// gesture cannot address a recycled HWND. Failed restores keep it alive.
-	if err := l.stopPointerHook(); err != nil {
-		l.mu.Lock()
-		l.closing = l.recoveryFailed
-		l.mu.Unlock()
-		return err
-	}
-	procRemovePropW.Call(uintptr(l.hwnd), uintptr(unsafe.Pointer(taskbandProperty)))
 	if !win.DestroyWindow(l.hwnd) {
 		l.mu.Lock()
 		l.closing = l.recoveryFailed
 		l.mu.Unlock()
-		err := errors.New("could not stop the tray icon listener")
-		if l.cfg.raise {
-			err = errors.Join(err, l.startPointerHook())
-		}
-		return err
+		return errors.New("could not stop the tray icon listener")
 	}
 	// DestroyWindow also removes its timers.
 	l.mu.Lock()
@@ -948,6 +949,36 @@ func (l *listener) forwardResult(msg uint32, wParam, lParam uintptr) (uintptr, b
 	var output runtime.Pinner
 	output.Pin(&result)
 	defer output.Unpin()
+	// The taskbar calls us synchronously. Tag the return leg so its subclass
+	// invokes Explorer directly rather than recursively entering this broker.
+	var envelope []byte
+	var wrapped copyDataStruct
+	property, _, _ := user32.NewProc("GetPropW").Call(uintptr(tray), uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr("WinTray.ShellBridge.Route.v3"))))
+	if l.cfg.native && msg == win.WM_COPYDATA && lParam != 0 && property != uintptr(l.hwnd) {
+		original := (*copyDataStruct)(foreignPointer(lParam))
+		if original.DwData == copyDataNotifyIcon && original.LpData != 0 {
+			data, ok := parseTrayData(unsafe.Slice((*byte)(foreignPointer(original.LpData)), original.CbData))
+			// A cancelled/expired route must never let a delayed broker send
+			// an old hide/notification directly after the subclass is gone.
+			// Restoration changes only the visibility of an existing icon.
+			if !ok || data.Message != nimModify || data.Flags & ^uint32(nifState|nifGUID) != 0 || data.Flags&nifState == 0 || data.State&nisHidden != 0 {
+				return 0, false
+			}
+		}
+	}
+	if l.cfg.native && property == uintptr(l.hwnd) && msg == win.WM_COPYDATA && lParam != 0 {
+		original := (*copyDataStruct)(foreignPointer(lParam))
+		envelope = make([]byte, 16+int(original.CbData))
+		binary.LittleEndian.PutUint64(envelope, uint64(original.DwData))
+		binary.LittleEndian.PutUint64(envelope[8:], uint64(wParam))
+		if original.CbData != 0 && original.LpData != 0 {
+			copy(envelope[16:], unsafe.Slice((*byte)(foreignPointer(original.LpData)), original.CbData))
+		}
+		wrapped = copyDataStruct{bridgeForwardData, uint32(len(envelope)), uintptr(unsafe.Pointer(&envelope[0]))}
+		output.Pin(&envelope[0])
+		output.Pin(&wrapped)
+		wParam, lParam = uintptr(l.hwnd), uintptr(unsafe.Pointer(&wrapped))
+	}
 	if r, _, _ := procSendMessageTimeoutW.Call(uintptr(tray), uintptr(msg), wParam, lParam,
 		smtoAbortIfHung, forwardTimeout, uintptr(unsafe.Pointer(&result))); r == 0 {
 		return 0, false
@@ -1017,10 +1048,31 @@ type notifyIconIdentifier struct {
 
 // shownByExplorer reports whether Explorer currently shows the icon a
 // request describes, on the taskbar or in the hidden-icons flyout.
-func shownByExplorer(template []byte) bool {
+func (l *listener) shownByExplorer(template []byte) bool {
 	d, ok := parseTrayData(template)
 	if !ok {
 		return false
+	}
+	if l.cfg.native {
+		// Shell32 queries would reenter the broker and receive our synthetic
+		// click anchor. Send the wire query through the broker return
+		// leg to observe Explorer's actual visibility instead.
+		query := make([]byte, rectQuerySize)
+		put(query, 0, trayDataSignature)
+		put(query, offRectPart, rectPartExtent)
+		put(query, 8, 32)
+		put(query, offRectHWnd, d.HWnd)
+		put(query, offRectUID, d.UID)
+		if d.usesGUID() {
+			copy(query[offRectGUID:], d.GUID[:])
+		}
+		cds := copyDataStruct{copyDataIconRect, uint32(len(query)), uintptr(unsafe.Pointer(&query[0]))}
+		var pinned runtime.Pinner
+		pinned.Pin(&cds)
+		pinned.Pin(&query[0])
+		defer pinned.Unpin()
+		result := l.forward(win.WM_COPYDATA, 0, uintptr(unsafe.Pointer(&cds)))
+		return int16(result) > 0 && int16(result>>16) > 0
 	}
 	id := notifyIconIdentifier{HWnd: win.HWND(uintptr(d.HWnd)), UID: d.UID}
 	if d.usesGUID() {
@@ -1057,7 +1109,10 @@ func postTaskbarCreated(paths []string, msg uint32) map[string]int {
 			wanted[path] = true
 		}
 	}
-	pids := processesByPath(wanted)
+	return postTaskbarCreatedToProcesses(processesByPath(wanted), msg)
+}
+
+func postTaskbarCreatedToProcesses(pids map[uint32]string, msg uint32) map[string]int {
 	if len(pids) == 0 {
 		return nil
 	}

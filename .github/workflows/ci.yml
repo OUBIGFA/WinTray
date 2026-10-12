@@ -27,6 +27,16 @@ jobs:
         shell: pwsh
         run: go vet ./...
 
+      - name: Build and validate native tray bridges
+        shell: pwsh
+        run: ./build/native.ps1 -OutputDir dist/native -Test
+
+      - name: Test isolated shell bridge
+        shell: pwsh
+        run: |
+          $env:WINTRAY_SHELL_BRIDGE_TEST = '1'
+          go test ./internal/traybox -run '^TestShellBridgeIsolatedReceivingEndpoint$' -count=1
+
       - name: Run tests
         shell: pwsh
         run: go test ./... -cover

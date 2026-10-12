@@ -1,16 +1,15 @@
 // Package traybox collects other programs' notification-area icons into
 // WinTray's own tray menu.
 //
-// Shell_NotifyIcon delivers every icon request to the top-most window of
-// class Shell_TrayWnd. While programs are selected, the box owns such a window
-// above Explorer's taskbar, as alternative shells and status bars do: every
-// request is passed on to Explorer unchanged, except that icons of selected
-// programs are marked hidden, so they appear neither on the taskbar nor in the
-// hidden-icons flyout. The box keeps each such icon's current image, tooltip
-// and callback message, which is what WinTray's menu shows and uses to click
-// the icon on the program's behalf.
+// A thread-specific bridge on Explorer's tray receiver forwards selected
+// owners' native Shell_NotifyIcon packets to a private broker. No Shell_TrayWnd
+// is created or application injected; unrelated packets remain in Explorer.
+// Selected requests retain native data except for the icons' hidden state.
+// The box keeps each icon's current image, tooltip and callback for its menu.
 //
-// Hidden icons are shown again when a program is deselected or WinTray exits.
+// Icons are restored before a route is cancelled. The native bridge becomes
+// dormant on cancellation or host exit; an independent recovery process also
+// restores icons when WinTray is forcibly terminated.
 package traybox
 
 import (
