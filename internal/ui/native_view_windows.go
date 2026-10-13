@@ -284,13 +284,17 @@ func (w *MainWindow) nativeEditor(c *native.Context, m i18n.Messages) {
 		native.Row(c).Gap(8).Children(func() {
 			native.Text(c, entry.Name).FontSize(18).SingleLine().Grow(1)
 			launchLabel := m.ManagedLaunchNow
-			if ok && w.launchNowBusy {
+			busy := ok && w.launchNowBusy[entry.ID]
+			if busy {
 				launchLabel = m.ManagedLaunchNowBusy
 			}
-			native.Row(c).Disabled(w.launchNowBusy).Children(func() {
+			native.Row(c).Disabled(busy).Children(func() {
 				if nativeAction(c, launchLabel, playIcon).Clicked() && w.callbacks.OnLaunchNow != nil {
 					w.commitNativeEdits()
-					w.launchNowBusy = true
+					if w.launchNowBusy == nil {
+						w.launchNowBusy = make(map[string]bool)
+					}
+					w.launchNowBusy[entry.ID] = true
 					w.callbacks.OnLaunchNow(*entry)
 				}
 			})

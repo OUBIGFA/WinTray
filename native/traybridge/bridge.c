@@ -14,6 +14,16 @@ typedef struct Owner {
     HWND hwnd;
 } Owner;
 
+// An in-flight request lives on the receiving thread's stack. Its token is
+// valid only while that exact native call is waiting; late Go work cannot
+// replay an old hide/balloon over an owner's newer native update.
+typedef struct Packet {
+    struct Packet *previous;
+    uint64_t token;
+    BOOL forwarded;
+    LRESULT result;
+} Packet;
+
 typedef struct Route {
     HANDLE host, stopped, ready;
     HWND broker;
@@ -23,12 +33,19 @@ typedef struct Route {
     BYTE *selection;
     DWORD selection_size;
     Owner *owners;
+    uint64_t serial, pause_token;
+    DWORD timeout_error;
+    Packet *packets;
+    WinTrayObserved *observed;
+    DWORD observed_count, observed_capacity, observed_sent;
+    BOOL observed_overflow;
 } Route;
 
 static void release_route(Route *route) {
     CloseHandle(route->host);
     CloseHandle(route->stopped);
     CloseHandle(route->ready);
+    if (route->observed) HeapFree(GetProcessHeap(), 0, route->observed);
     if (route->selection) HeapFree(GetProcessHeap(), 0, route->selection);
     while (route->owners) { Owner *next = route->owners->next; HeapFree(GetProcessHeap(), 0, route->owners); route->owners = next; }
     HeapFree(GetProcessHeap(), 0, route);
@@ -131,6 +148,43 @@ static BOOL update_selection(Route *route, const COPYDATASTRUCT *data) {
     return TRUE;
 }
 
+static void observe_native(Route *route, const COPYDATASTRUCT *data) {
+    if (data->dwData != 1 || data->cbData < 964) return;
+    const DWORD *words = data->lpData;
+    DWORD message = words[1];
+    if (message > 2 && message != 4) return;
+    if (message == 1 && !(words[5] & 8)) return; // image/tooltip updates need no recovery journal
+    if (route->observed_count == route->observed_capacity) {
+        DWORD capacity = route->observed_capacity ? route->observed_capacity * 2 : 16;
+        if (capacity > 4096) { route->observed_overflow = TRUE; return; }
+        void *buffer = route->observed ? HeapReAlloc(GetProcessHeap(), 0, route->observed, capacity * sizeof(WinTrayObserved)) :
+                                         HeapAlloc(GetProcessHeap(), 0, capacity * sizeof(WinTrayObserved));
+        if (!buffer) { route->observed_overflow = TRUE; return; }
+        route->observed = buffer; route->observed_capacity = capacity;
+    }
+    WinTrayObserved *item = &route->observed[route->observed_count++];
+    *item = (WinTrayObserved){message, words[3], words[4], words[5], words[72], words[73], words[202], {0}};
+    memcpy(&item->guid, (const BYTE *)data->lpData + 944, sizeof(GUID));
+}
+
+// A selected owner's rebuild ADD can meet its still-existing registration
+// while the broker is paused. Preserve the successful native registration as
+// in the normal Go path; otherwise clients cache FALSE and stop rebuilding.
+static LRESULT accept_duplicate(HWND hwnd, WPARAM wp, const COPYDATASTRUCT *data, LRESULT result) {
+    if (!result && data->dwData == 1 && data->cbData >= 964 &&
+        ((const DWORD *)data->lpData)[1] == 0) {
+        BYTE *copy = HeapAlloc(GetProcessHeap(), 0, data->cbData);
+        if (copy) {
+            memcpy(copy, data->lpData, data->cbData);
+            ((DWORD *)copy)[1] = 1;
+            COPYDATASTRUCT modify = {data->dwData, data->cbData, copy};
+            result = DefSubclassProc(hwnd, WM_COPYDATA, wp, (LPARAM)&modify);
+            HeapFree(GetProcessHeap(), 0, copy);
+        }
+    }
+    return result;
+}
+
 static LRESULT CALLBACK shell_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp,
                                    UINT_PTR id, DWORD_PTR ref) {
     Route *route = (Route *)ref;
@@ -150,21 +204,64 @@ static LRESULT CALLBACK shell_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp,
         KillTimer(hwnd, (UINT_PTR)route);
         route->detached = TRUE;
     }
-    if (msg == WM_TIMER && wp == (UINT_PTR)route) goto done;
+    if (msg == WM_TIMER && wp == (UINT_PTR)route) {
+        if (alive && route->pause_token) {
+            PostMessageW(route->broker, WINTRAY_BROKER_RESUME, (WPARAM)route->pause_token, route->timeout_error);
+        }
+        goto done;
+    }
     if (msg == WM_COPYDATA && lp) {
         const COPYDATASTRUCT *data = (COPYDATASTRUCT *)lp;
         if (data->dwData == WINTRAY_SELECT_DATA && wp == (WPARAM)route->broker && alive) {
             result = update_selection(route, data);
             goto done;
         }
+        if (data->dwData == WINTRAY_RESUME_DATA && wp == (WPARAM)route->broker && alive &&
+            data->cbData == sizeof(uint64_t) && data->lpData) {
+            uint64_t token; memcpy(&token, data->lpData, sizeof(token));
+            if (!route->pause_token || route->pause_token != token) { result = 2; goto done; }
+            if (!route->packets) {
+                if (route->observed_overflow) { SetEvent(route->stopped); goto done; }
+                // Acknowledged batches remain ordered and retryable. The Go
+                // receiver deduplicates (pause token, offset), so a timeout in
+                // this handshake cannot replay stale state after resumption.
+                DWORD count = route->observed_count - route->observed_sent;
+                if (count) {
+                    DWORD size = 8 + count * sizeof(WinTrayObserved);
+                    BYTE *wire = HeapAlloc(GetProcessHeap(), 0, size);
+                    if (!wire) goto done;
+                    ((DWORD *)wire)[0] = (DWORD)token;
+                    ((DWORD *)wire)[1] = route->observed_sent;
+                    memcpy(wire + 8, route->observed + route->observed_sent, size - 8);
+                    COPYDATASTRUCT observed = {WINTRAY_OBSERVED_DATA, size, wire};
+                    DWORD_PTR ack = 0;
+                    LRESULT delivered = SendMessageTimeoutW(route->broker, WM_COPYDATA, (WPARAM)hwnd,
+                                            (LPARAM)&observed, SMTO_ABORTIFHUNG, BROKER_TIMEOUT, &ack);
+                    HeapFree(GetProcessHeap(), 0, wire);
+                    if (!delivered || !ack) goto done;
+                    route->observed_sent += count;
+                }
+                if (route->observed_sent == route->observed_count) {
+                    route->observed_count = route->observed_sent = 0;
+                    route->pause_token = 0; result = 1;
+                }
+            }
+            goto done;
+        }
         // A broker-forwarded packet must reach the original shell procedure,
         // not reenter the broker. WM_COPYDATA marshals both headers and bytes;
         // never transmit pointers between processes.
         if (data->dwData == WINTRAY_FORWARD_DATA && wp == (WPARAM)route->broker &&
-            data->cbData >= 16 && data->cbData <= 65552 && data->lpData) {
+            data->cbData >= 24 && data->cbData <= 65560 && data->lpData) {
             const uint64_t *header = (const uint64_t *)data->lpData;
-            COPYDATASTRUCT original = {(ULONG_PTR)header[0], data->cbData - 16, (BYTE *)data->lpData + 16};
+            COPYDATASTRUCT original = {(ULONG_PTR)header[0], data->cbData - 24, (BYTE *)data->lpData + 24};
             if (!tray_packet(&original)) goto done;
+            Packet *packet = route->packets;
+            if (header[2]) {
+                while (packet && packet->token != header[2]) packet = packet->previous;
+                if (!packet || route->pause_token) { result = WINTRAY_EXPIRED_REPLY; goto done; }
+            }
+            if (route->pause_token && original.dwData == 1) { result = WINTRAY_EXPIRED_REPLY; goto done; }
             // Once cancelled, a delayed broker must not hide an icon after
             // recovery. Only state-only visibility restoration/probes remain
             // valid on the return leg; never replay a timed-out notification.
@@ -174,18 +271,40 @@ static LRESULT CALLBACK shell_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp,
                     !(words[5] & 8) || (words[72] & 1)) goto done;
             }
             result = DefSubclassProc(hwnd, msg, (WPARAM)header[1], (LPARAM)&original);
+            if (header[2] && packet) { packet->forwarded = TRUE; packet->result = result; }
             goto done;
         }
-        if (alive && WaitForSingleObject(route->ready, 0) == WAIT_OBJECT_0 && selected_packet(route, data)) {
+        if (alive && route->pause_token && selected_packet(route, data)) {
+            result = accept_duplicate(hwnd, wp, data, DefSubclassProc(hwnd, msg, wp, lp));
+            if (result) observe_native(route, data);
+            goto done;
+        }
+        if (alive && !route->pause_token && WaitForSingleObject(route->ready, 0) == WAIT_OBJECT_0 && selected_packet(route, data)) {
+            BYTE *wire = HeapAlloc(GetProcessHeap(), 0, 24 + data->cbData);
+            if (!wire) { result = DefSubclassProc(hwnd, msg, wp, lp); goto done; }
+            // Stay within a 32-bit message word for the resume notification.
+            route->serial = (route->serial % 0xffffffffu) + 1;
+            Packet packet = {route->packets, route->serial, FALSE, 0};
+            route->packets = &packet;
+            uint64_t header[3] = {data->dwData, (uint64_t)wp, packet.token};
+            memcpy(wire, header, sizeof(header)); memcpy(wire + 24, data->lpData, data->cbData);
+            COPYDATASTRUCT request = {WINTRAY_PACKET_DATA, 24 + data->cbData, wire};
             DWORD_PTR reply = 0;
-            if (SendMessageTimeoutW(route->broker, msg, wp, lp, SMTO_ABORTIFHUNG, BROKER_TIMEOUT, &reply)) {
-                result = (LRESULT)reply;
-                goto done;
-            }
-            // A hung/dead broker cannot take down Explorer. Do not replay an
-            // unknown ADD/balloon result: let the caller see failure, then pass
-            // subsequent packets natively while recovery restores old icons.
-            SetEvent(route->stopped);
+            SetLastError(ERROR_SUCCESS);
+            LRESULT sent = SendMessageTimeoutW(route->broker, msg, (WPARAM)hwnd, (LPARAM)&request,
+                                                SMTO_ABORTIFHUNG, BROKER_TIMEOUT, &reply);
+            DWORD error = GetLastError();
+            route->packets = packet.previous;
+            HeapFree(GetProcessHeap(), 0, wire);
+            if (sent) { result = (LRESULT)reply; goto done; }
+            // A single slow request pauses forwarding, not the whole lease.
+            // If Go already reached Explorer, return that exact result. If it
+            // has not, finish natively once; its token is now invalid in Go.
+            route->pause_token = packet.token;
+            route->timeout_error = error ? error : ERROR_TIMEOUT;
+            result = accept_duplicate(hwnd, wp, data, packet.forwarded ? packet.result : DefSubclassProc(hwnd, msg, wp, lp));
+            if (!packet.forwarded && result) observe_native(route, data);
+            PostMessageW(route->broker, WINTRAY_BROKER_RESUME, (WPARAM)packet.token, route->timeout_error);
             goto done;
         }
     }
@@ -248,6 +367,16 @@ static DWORD install(HWND hwnd, const WinTrayBridgeArgs *args) {
     if (!SetTimer(hwnd, (UINT_PTR)route, 250, NULL)) {
         RemoveWindowSubclass(hwnd, shell_proc, SUBCLASS_ID);
         RemovePropW(hwnd, WINTRAY_ROUTE_PROPERTY); release_route(route); return ERROR_NOT_ENOUGH_MEMORY;
+    }
+    // Sent before activation/new packets, in the same sender-thread order.
+    // Explorer recreation starts a fresh packet sequence in the same broker.
+    DWORD_PTR acknowledged = 0;
+    if (!SendMessageTimeoutW(broker, WINTRAY_BROKER_EPOCH, 0, 0, SMTO_ABORTIFHUNG, BROKER_TIMEOUT, &acknowledged)) {
+        RemoveWindowSubclass(hwnd, shell_proc, SUBCLASS_ID);
+        RemovePropW(hwnd, WINTRAY_ROUTE_PROPERTY);
+        KillTimer(hwnd, (UINT_PTR)route);
+        release_route(route);
+        return ERROR_TIMEOUT;
     }
     return ERROR_SUCCESS;
 }

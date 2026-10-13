@@ -6,10 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"syscall"
 	"testing"
 	"time"
-	"unsafe"
 
 	"github.com/lxn/win"
 )
@@ -106,23 +104,54 @@ func TestShellBridgeIsolatedReceivingEndpoint(t *testing.T) {
 			if elapsed := time.Since(started); elapsed > 200*time.Millisecond {
 				t.Fatalf("unrelated taskbar traffic waited for broker: %s", elapsed)
 			}
+			count := shell.request(t, clientStats, 5, 0)
 			started = time.Now()
-			if result := client.request(t, win.WM_APP+110, 0, 0); result != 0 {
-				t.Fatal("stalled selected request claimed success")
+			if result := client.request(t, win.WM_APP+110, 11, 0); result != 73 {
+				t.Fatalf("unhandled slow request did not reach native shell: %d", result)
 			}
-			if time.Since(started) > time.Second || lease.alive() {
-				t.Fatal("selected stall did not promptly cancel route")
+			if time.Since(started) > time.Second || !lease.alive() {
+				t.Fatal("single slow request disabled collection or blocked taskbar")
 			}
-			if result := client.request(t, win.WM_APP+110, 0, 0); result != 73 {
-				t.Fatal("cancelled route did not pass native requests")
+			if result := client.request(t, win.WM_APP+110, 22, 0); result != 73 {
+				t.Fatal("paused native update failed")
 			}
 			close(stall.release)
-			waitFor(t, "subclass removed after timeout", func() bool {
-				prop, _, _ := user32.NewProc("GetPropW").Call(uintptr(shell.hwnd), uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr("WinTray.ShellBridge.Route.v3"))))
-				return prop == 0
-			})
-			if result := l.sendRequest(0, withHidden(trayRequest{hwnd: uint32(client.hwnd), uid: 900, message: nimAdd}.bytes())); result != 0 {
-				t.Fatal("late hide reached shell after route expiry")
+			waitFor(t, "broker responsive again", func() bool { return win.SendMessage(l.hwnd, win.WM_NULL, 0, 0) == 0 })
+			time.Sleep(350 * time.Millisecond)
+			if got := shell.request(t, clientStats, 5, 0); got != count+2 {
+				t.Fatalf("slow packet replayed: count=%d want=%d", got, count+2)
+			}
+			if uid := shell.request(t, clientStats, 6, 0); uid != 22 {
+				t.Fatalf("late request overwrote newer native update: uid=%d", uid)
+			}
+			if result := client.request(t, win.WM_APP+110, 33, 0); result != 73 {
+				t.Fatal("collection did not resume after transient delay")
+			}
+			if !lease.alive() || len(l.snapshot()) == 0 {
+				t.Fatal("working route was lost")
+			}
+			found := false
+			for _, icon := range l.snapshot() {
+				if icon.uid == 33 {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatal("resumed request bypassed collection")
+			}
+			// The original shell can also be slow after Go has forwarded. It
+			// must not receive a second registration when the outer call times out.
+			count = shell.request(t, clientStats, 5, 0)
+			shell.request(t, win.WM_APP+111, 700, 0)
+			if result := client.request(t, win.WM_APP+110, 44, 0); result != 73 {
+				t.Fatalf("slow shell result=%d", result)
+			}
+			time.Sleep(350 * time.Millisecond)
+			if got := shell.request(t, clientStats, 5, 0); got != count+1 {
+				t.Fatalf("slow shell duplicate count=%d", got)
+			}
+			if !lease.alive() {
+				t.Fatal("slow native receiver destroyed lease")
 			}
 		})
 	}

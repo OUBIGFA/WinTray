@@ -7,13 +7,27 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#define WINTRAY_BRIDGE_PROTOCOL 3
+#define WINTRAY_BRIDGE_PROTOCOL 4
 #define WINTRAY_BROKER_CLASS L"WinTray.TrayIconBroker.v1"
 #define WINTRAY_BRIDGE_DLL L"WinTray-ShellBridge.dll"
 #define WINTRAY_HOOK_EXPORT "WinTrayShellHook"
 #define WINTRAY_INSTALL_DATA 0x57544249u
 #define WINTRAY_FORWARD_DATA 0x57544246u
 #define WINTRAY_SELECT_DATA 0x57544250u
+#define WINTRAY_PACKET_DATA 0x57544251u
+#define WINTRAY_RESUME_DATA 0x57544252u
+#define WINTRAY_EXPIRED_REPLY 0x57544558u
+#define WINTRAY_OBSERVED_DATA 0x5754424fu
+
+// Only state needed to invalidate stale broker/recovery records after native
+// pass-through. Never replay visual fields, notifications or sound payloads.
+typedef struct WinTrayObserved {
+    uint32_t message, hwnd, uid, flags, state, mask, version;
+    GUID guid;
+} WinTrayObserved;
+_Static_assert(sizeof(WinTrayObserved) == 44, "observation ABI");
+#define WINTRAY_BROKER_RESUME (WM_APP + 5)
+#define WINTRAY_BROKER_EPOCH (WM_APP + 6)
 #define WINTRAY_MAX_SELECTION 262144u
 #define WINTRAY_ROUTE_PROPERTY L"WinTray.ShellBridge.Route.v3"
 

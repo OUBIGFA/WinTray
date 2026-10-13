@@ -17,6 +17,8 @@
 #define TEST_PROBE     (WM_APP + 108)
 #define TEST_LAYOUT    (WM_APP + 109)
 #define TEST_WIRE      (WM_APP + 110)
+#define TEST_DELAY     (WM_APP + 111)
+#define TEST_STATE     (WM_APP + 112)
 #define ICON_CALLBACK  (WM_APP + 200)
 #define ICON_UID       71u
 
@@ -28,6 +30,7 @@ static BOOL menu_open;
 static BOOL use_ansi;
 static HWND test_shell;
 static BOOL shell_fixture;
+static DWORD wire_count, wire_uid, wire_delay;
 
 static GUID fixture_guid(DWORD pid) {
     GUID guid = {pid, 0x7921, 0x45a0, {0x9c, 0x37, 0x30, 0x11, 0x01, 0x09, 0x17, 0x24}};
@@ -87,15 +90,29 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_COPYDATA:
         if (shell_fixture) {
             COPYDATASTRUCT *data = (COPYDATASTRUCT *)lp;
-            if (data && (data->dwData == 1 || data->dwData == 3)) return 73;
+            if (data && data->dwData == 1 && data->cbData >= 20) {
+                ++wire_count; wire_uid = ((DWORD *)data->lpData)[4];
+                DWORD delay = wire_delay; wire_delay = 0; if (delay) Sleep(delay);
+                return 73;
+            }
+            if (data && data->dwData == 3) return 73;
         }
         break;
     case TEST_WIRE: {
         DWORD bytes[241] = {0x34753423, 0, 956};
         bytes[3] = (DWORD)(UINT_PTR)hwnd;
+        bytes[4] = (DWORD)wp;
         COPYDATASTRUCT data = {1, sizeof(bytes), bytes};
         return SendMessageW(test_shell, WM_COPYDATA, (WPARAM)hwnd, (LPARAM)&data);
     }
+    case TEST_DELAY:
+        wire_delay = (DWORD)wp;
+        return 1;
+    case TEST_STATE:
+        icon.uFlags = NIF_STATE | (icon.guidItem.Data1 ? NIF_GUID : 0);
+        icon.dwState = wp ? NIS_HIDDEN : 0;
+        icon.dwStateMask = NIS_HIDDEN;
+        return notify(NIM_MODIFY);
     case TEST_ADD:
         return add_icon();
     case TEST_MODIFY:
@@ -120,6 +137,8 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case 2: return refreshes;
         case 3: return installed;
         case 4: return menu_open;
+        case 5: return wire_count;
+        case 6: return wire_uid;
         }
         return 0;
     case TEST_TASKBAR:

@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"path/filepath"
+	"sync"
 	"time"
 
 	"wintray/internal/config"
@@ -66,6 +67,9 @@ type Service struct {
 	manager        WindowManager
 	logger         Logger
 	startupHistory *config.StartupHistory
+	// Shared by visibility-scoped copies so manual and automatic requests
+	// cannot both create the same process after checking that it is absent.
+	launchGates *sync.Map
 	// Instance-local probes keep tests isolated from the user's startup setup.
 	externalStartupLookup func(string) (string, error)
 	externalStartupWait   time.Duration
@@ -84,6 +88,7 @@ func NewService(enumerator WindowEnumerator, manager WindowManager, logger Logge
 	return &Service{
 		enumerator: enumerator, manager: manager, logger: logger,
 		startupHistory:        history,
+		launchGates:           &sync.Map{},
 		externalStartupLookup: startup.NewExternalStartupLookup(),
 		logonTaskLaunch:       startup.LaunchAppTaskNow,
 		logonTaskLaunchWait:   30 * time.Second,

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"wintray/internal/config"
@@ -94,6 +95,24 @@ func (s *Service) StartNow(ctx context.Context, entry config.ManagedAppEntry, re
 	})
 }
 
+// lockProcessLaunch protects the final running check through process creation.
+// A task launch holds its gate until the process is observed, not just submitted.
+// Scheduled, external-startup and window-management waits stay outside the gate;
+// unrelated executables never wait for each other's manual launch.
+func (s *Service) lockProcessLaunch(ctx context.Context, expectedPath string) (func(), bool) {
+	if ctx.Err() != nil {
+		return nil, false
+	}
+	value, _ := s.launchGates.LoadOrStore(strings.ToLower(expectedPath), make(chan struct{}, 1))
+	gate := value.(chan struct{})
+	select {
+	case gate <- struct{}{}:
+		return sync.OnceFunc(func() { <-gate }), true
+	case <-ctx.Done():
+		return nil, false
+	}
+}
+
 func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retrySeconds int, opts startOptions) (result Result) {
 	// Every validation/error path must let the next queued entry proceed.
 	defer opts.turn.finish(false)
@@ -173,6 +192,11 @@ func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retry
 	if !opts.turn.wait(ctx) {
 		return cancelledResult(entry)
 	}
+	unlockLaunch, ok := s.lockProcessLaunch(ctx, expectedPath)
+	if !ok {
+		return cancelledResult(entry)
+	}
+	defer unlockLaunch()
 	baseline := s.captureBaseline(func(w ManagedWindowInfo) bool {
 		return matchesExecutableWithIdentityFallback(w, expectedPath, expectedName)
 	})
@@ -182,6 +206,7 @@ func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retry
 		return cancelledResult(entry)
 	}
 	if s.hasExistingManagedProcess(expectedPath, expectedName) || s.hasExistingManagedWindow(expectedPath, expectedName) {
+		unlockLaunch()
 		return s.manageRunning(ctx, entry, retrySeconds, opts, consoleProgram, expectedPath, expectedName)
 	}
 	if consoleProgram {
@@ -211,6 +236,7 @@ func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retry
 			}
 			return Result{AppName: entry.Name, Code: ResultExternalStartupTimeout, Message: "original startup task did not start the process"}
 		}
+		unlockLaunch()
 		if opts.manageWindow || consoleProgram {
 			return s.manageRunning(ctx, entry, retrySeconds, opts, consoleProgram, expectedPath, expectedName)
 		}
@@ -232,6 +258,7 @@ func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retry
 	}
 	pid := uint32(cmd.Process.Pid)
 	defer cmd.Process.Release()
+	unlockLaunch()
 	s.logger.Info(fmt.Sprintf("started: %s pid=%d mode=%d", entry.Name, pid, opts.launchMode()))
 
 	if opts.hideConsoleWindow {

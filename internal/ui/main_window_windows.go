@@ -38,19 +38,20 @@ type Callbacks struct {
 // native tray icons. Only mygo renders controls; the tray owner exists even
 // before the first settings window and has no fonts, file icons or renderer.
 type MainWindow struct {
-	mw                            *walk.MainWindow
-	settings                      config.Settings
-	callbacks                     Callbacks
-	desktop                       desktopState
-	onSettingsPage                bool
-	launchNowBusy, checkingUpdate bool
-	allowClose                    bool
-	starting                      []func()
-	bounds                        mygo.Rectangle
-	queueMu                       sync.Mutex
-	queue                         []func()
-	disposed                      bool
-	iconsCancel                   context.CancelFunc
+	mw             *walk.MainWindow
+	settings       config.Settings
+	callbacks      Callbacks
+	desktop        desktopState
+	onSettingsPage bool
+	launchNowBusy  map[string]bool
+	checkingUpdate bool
+	allowClose     bool
+	starting       []func()
+	bounds         mygo.Rectangle
+	queueMu        sync.Mutex
+	queue          []func()
+	disposed       bool
+	iconsCancel    context.CancelFunc
 }
 
 const dispatchMessage = win.WM_APP + 0x51
@@ -302,7 +303,12 @@ func (w *MainWindow) SetLanguage(language string) {
 		}
 	})
 }
-func (w *MainWindow) SetLaunchNowBusy(busy bool)   { w.Synchronize(func() { w.launchNowBusy = busy }) }
+
+// FinishLaunchNow releases the initiating program even if selection or row
+// order changed while it was starting. Autorun never owns this button state.
+func (w *MainWindow) FinishLaunchNow(id string) {
+	w.Synchronize(func() { delete(w.launchNowBusy, id) })
+}
 func (w *MainWindow) SetCheckUpdateBusy(busy bool) { w.Synchronize(func() { w.checkingUpdate = busy }) }
 
 func (w *MainWindow) ShowInfo(title, body string)  { w.showMessage(title, body, mygo.MessageInfo) }

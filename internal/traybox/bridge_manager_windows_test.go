@@ -149,7 +149,7 @@ func TestBridgePausesAfterRecoveryFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-func TestBridgeTimeoutStopsCollectionWithoutRetryingEndpoint(t *testing.T) {
+func TestBridgeCancelledLeaseStopsCollectionWithoutRetryingEndpoint(t *testing.T) {
 	f := newBridgeFixture()
 	if err := f.manager.apply([]string{"a"}, func() error { return nil }); err != nil {
 		t.Fatal(err)
@@ -158,10 +158,10 @@ func TestBridgeTimeoutStopsCollectionWithoutRetryingEndpoint(t *testing.T) {
 	f.manager.fault = func() { faulted = true }
 	f.manager.lease.alive = func() bool { return false }
 	if err := f.manager.poll(false); err == nil || !faulted || f.cancelled != 1 {
-		t.Fatal("timed-out route did not release collection")
+		t.Fatal("cancelled route did not release collection")
 	}
 	if err := f.manager.poll(true); err != nil || f.attempts != 1 {
-		t.Fatal("timed-out route was injected again")
+		t.Fatal("cancelled route was injected again")
 	}
 }
 

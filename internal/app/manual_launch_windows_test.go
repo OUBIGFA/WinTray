@@ -36,8 +36,18 @@ func TestManualLaunchOnlyShowsFailures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for index, success := range []bool{true, false} {
-		t.Run(fmt.Sprintf("success=%t", success), func(t *testing.T) {
+	for index, tc := range []struct {
+		name    string
+		success bool
+		pending bool
+	}{
+		{name: "success", success: true},
+		{name: "failure"},
+		{name: "pending startup/success", success: true, pending: true},
+		{name: "pending startup/failure", pending: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			success := tc.success
 			dir := t.TempDir()
 			sessionExe := filepath.Join(dir, "manual-session.exe")
 			programExe := filepath.Join(dir, "manual-program.exe")
@@ -57,6 +67,20 @@ func TestManualLaunchOnlyShowsFailures(t *testing.T) {
 				ID: "manual", Name: "Manual launch fixture", ExePath: programExe,
 				Args: "-test.run=^TestSessionConsoleProcess$ -- " + syscall.EscapeArg(release),
 			}}
+			if tc.pending {
+				scheduledExe := filepath.Join(dir, "scheduled-program.exe")
+				if err := os.WriteFile(scheduledExe, image, 0600); err != nil {
+					t.Fatal(err)
+				}
+				// Task mode keeps the scheduled startup pending regardless of
+				// the desktop's sign-in age. The fixture registers no task, and
+				// the test only launches the separate manual entry.
+				settings.ManagedApps = append(settings.ManagedApps, config.ManagedAppEntry{
+					ID: "scheduled", Name: "Scheduled launch fixture", ExePath: scheduledExe,
+					RunOnStartup: true, LaunchViaLogonTask: true,
+					Schedule: config.Schedule{Enabled: true, StartDelayMinutes: 10},
+				})
+			}
 			if err := config.NewStore(filepath.Join(dir, "settings.json")).Save(settings); err != nil {
 				t.Fatal(err)
 			}
@@ -86,6 +110,16 @@ func TestManualLaunchOnlyShowsFailures(t *testing.T) {
 			waitSessionCondition(t, "session activation", func() bool { return ipc.TrySignalActivation(eventName) })
 			var hwnd win.HWND
 			waitSessionCondition(t, "settings window", func() bool { hwnd = visibleSessionWindow(uint32(cmd.Process.Pid)); return hwnd != 0 })
+			if tc.pending {
+				waitSessionCondition(t, "scheduled startup waiting", func() bool {
+					log, _ := os.ReadFile(filepath.Join(dir, "wintray.log"))
+					return strings.Contains(string(log), "external startup owns launch: Scheduled launch fixture")
+				})
+				if err := sessionControlAction(hwnd, settings.ManagedApps[1].Name, 10010); err != nil {
+					t.Fatal(err)
+				}
+				waitSessionCondition(t, "scheduled program launch action", func() bool { return sessionHasButton(hwnd, "立即启动") })
+			}
 			if err := sessionControlAction(hwnd, settings.ManagedApps[0].Name, 10010); err != nil { // SelectionItem.Select
 				t.Fatal(err)
 			}
@@ -132,6 +166,13 @@ func TestManualLaunchOnlyShowsFailures(t *testing.T) {
 				}
 				win.PostMessage(dialog, win.WM_CLOSE, 0, 0)
 				waitSessionCondition(t, "failure dialog dismissed", func() bool { return win.IsWindowEnabled(hwnd) })
+				waitSessionCondition(t, "launch action restored after failure", func() bool { return sessionHasButton(hwnd, "立即启动") })
+			}
+			if tc.pending {
+				log, err := os.ReadFile(filepath.Join(dir, "wintray.log"))
+				if err != nil || strings.Contains(string(log), "managed summary:") {
+					t.Fatalf("scheduled startup ended before the manual launch: %v\n%s", err, log)
+				}
 			}
 			clickSessionButton(t, hwnd, "退出 WinTray")
 			select {

@@ -58,6 +58,8 @@ const (
 	msgStop         = win.WM_APP + 2
 	msgUpdatePaths  = win.WM_APP + 3
 	msgBridgeFailed = win.WM_APP + 4
+	msgBridgeResume = win.WM_APP + 5
+	msgBridgeEpoch  = win.WM_APP + 6
 	// Explorer posts rather than sends this message; sending it can deadlock.
 	msgPostOnly = win.WM_USER + 372
 
@@ -131,6 +133,13 @@ type listener struct {
 	recovery       *recoveryClient
 	recoveryFailed bool // listener-thread only
 	bridgeFailed   bool // retry restoration, never resume hiding after a lost route
+
+	packetToken    uint64 // listener-thread only; saved across synchronous reentry
+	resumePending  uint64
+	resumedToken   uint64
+	resumeError    uintptr
+	observedToken  uint32
+	observedOffset uint32
 
 	bridgeRefresh chan struct{}
 	changes       chan selectionChange
@@ -419,6 +428,19 @@ func (l *listener) wndProc(msg uint32, wParam, lParam uintptr) uintptr {
 		// Delay only re-registration, never reposition the native taskbar.
 		win.SetTimer(l.hwnd, timerRefresh, uint32(refreshDelay.Milliseconds()), 0)
 		return 0
+	case msgBridgeEpoch:
+		l.resumePending, l.resumedToken = 0, 0
+		l.observedToken, l.observedOffset = 0, 0
+		return 0
+	case msgBridgeResume:
+		if l.resumedToken != 0 && int32(uint32(wParam)-uint32(l.resumedToken)) <= 0 {
+			return 0
+		}
+		l.resumePending, l.resumeError = uint64(wParam), lParam
+		if l.packetToken == 0 {
+			l.resumeBridge()
+		}
+		return 0
 	case msgBridgeFailed:
 		l.bridgeFailed = true
 		// Execute restoration on this thread after any in-flight packet,
@@ -459,6 +481,36 @@ type copyDataStruct struct {
 
 func (l *listener) onCopyData(wParam, lParam uintptr) uintptr {
 	cds := (*copyDataStruct)(foreignPointer(lParam))
+	if cds != nil && cds.DwData == bridgeObservedData {
+		if !l.cfg.native || cds.CbData < 52 || (cds.CbData-8)%44 != 0 || cds.CbData > 8+4096*44 || cds.LpData == 0 {
+			return 0
+		}
+		return l.observeNativeBatch(unsafe.Slice((*byte)(foreignPointer(cds.LpData)), cds.CbData))
+	}
+	if cds != nil && cds.DwData == bridgePacketData {
+		if !l.cfg.native || cds.CbData <= 24 || cds.CbData > 65560 || cds.LpData == 0 {
+			return 0
+		}
+		wire := unsafe.Slice((*byte)(foreignPointer(cds.LpData)), cds.CbData)
+		previous := l.packetToken
+		l.packetToken = bridgeWord(wire[16:])
+		started := time.Now()
+		defer func() {
+			if elapsed := time.Since(started); elapsed >= 400*time.Millisecond {
+				d, _ := parseTrayData(wire[24:])
+				l.logger.Warn(fmt.Sprintf("tray box: slow request token=%d kind=%d message=%d owner=0x%X uid=%d duration=%s", l.packetToken, bridgeWord(wire), d.Message, d.HWnd, d.UID, elapsed.Round(time.Millisecond)))
+			}
+			l.packetToken = previous
+			if previous == 0 && l.resumePending != 0 {
+				win.PostMessage(l.hwnd, msgBridgeResume, uintptr(l.resumePending), l.resumeError)
+			}
+		}()
+		original := copyDataStruct{uintptr(bridgeWord(wire)), uint32(len(wire) - 24), uintptr(unsafe.Pointer(&wire[24]))}
+		var pin runtime.Pinner
+		pin.Pin(&original)
+		defer pin.Unpin()
+		return l.onCopyData(uintptr(bridgeWord(wire[8:])), uintptr(unsafe.Pointer(&original)))
+	}
 	if cds != nil && cds.DwData == copyDataIconRect && cds.LpData != 0 {
 		return l.onIconRect(wParam, lParam, unsafe.Slice((*byte)(foreignPointer(cds.LpData)), cds.CbData))
 	}
@@ -968,11 +1020,12 @@ func (l *listener) forwardResult(msg uint32, wParam, lParam uintptr) (uintptr, b
 	}
 	if l.cfg.native && property == uintptr(l.hwnd) && msg == win.WM_COPYDATA && lParam != 0 {
 		original := (*copyDataStruct)(foreignPointer(lParam))
-		envelope = make([]byte, 16+int(original.CbData))
+		envelope = make([]byte, 24+int(original.CbData))
 		binary.LittleEndian.PutUint64(envelope, uint64(original.DwData))
 		binary.LittleEndian.PutUint64(envelope[8:], uint64(wParam))
+		binary.LittleEndian.PutUint64(envelope[16:], l.packetToken)
 		if original.CbData != 0 && original.LpData != 0 {
-			copy(envelope[16:], unsafe.Slice((*byte)(foreignPointer(original.LpData)), original.CbData))
+			copy(envelope[24:], unsafe.Slice((*byte)(foreignPointer(original.LpData)), original.CbData))
 		}
 		wrapped = copyDataStruct{bridgeForwardData, uint32(len(envelope)), uintptr(unsafe.Pointer(&envelope[0]))}
 		output.Pin(&envelope[0])
@@ -981,6 +1034,9 @@ func (l *listener) forwardResult(msg uint32, wParam, lParam uintptr) (uintptr, b
 	}
 	if r, _, _ := procSendMessageTimeoutW.Call(uintptr(tray), uintptr(msg), wParam, lParam,
 		smtoAbortIfHung, forwardTimeout, uintptr(unsafe.Pointer(&result))); r == 0 {
+		return 0, false
+	}
+	if l.cfg.native && msg == win.WM_COPYDATA && result == 0x57544558 {
 		return 0, false
 	}
 	return result, true

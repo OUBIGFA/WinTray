@@ -24,11 +24,14 @@ import (
 )
 
 const (
-	brokerWindowClass = "WinTray.TrayIconBroker.v1"
-	bridgeExecutable  = "WinTray-Bridge.exe"
-	bridgeDLL         = "WinTray-ShellBridge.dll"
-	bridgeForwardData = 0x57544246
-	bridgeSelectData  = 0x57544250
+	brokerWindowClass  = "WinTray.TrayIconBroker.v1"
+	bridgeExecutable   = "WinTray-Bridge.exe"
+	bridgeDLL          = "WinTray-ShellBridge.dll"
+	bridgeForwardData  = 0x57544246
+	bridgeSelectData   = 0x57544250
+	bridgePacketData   = 0x57544251
+	bridgeResumeData   = 0x57544252
+	bridgeObservedData = 0x5754424f
 )
 
 // bridgeArgs is the fixed-width ABI in native/traybridge/bridge.h. Both native
@@ -198,7 +201,7 @@ func (n *nativeBridge) attach(target shellEndpoint) (*bridgeLease, error) {
 			return errors.Join(windows.SetEvent(event), windows.CloseHandle(event), windows.CloseHandle(ready))
 		},
 	}
-	args := bridgeArgs{Protocol: 3, HostPID: n.host.pid, TargetPID: target.pid,
+	args := bridgeArgs{Protocol: 4, HostPID: n.host.pid, TargetPID: target.pid,
 		HostCreated: n.host.created, TargetCreated: target.created, Broker: uint64(n.broker)}
 	args.Taskbar = uint64(target.hwnd)
 	args.Size = uint32(unsafe.Sizeof(args))

@@ -437,7 +437,8 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 			// Collect or release the icons first; a failed save hands the
 			// previous selection back to the box.
 			if err := box.SetPaths(config.CollectedTrayIconPaths(next)); err != nil {
-				return fmt.Errorf(i18n.For(next.Language).TrayBoxFailedBody, err)
+				logger.Warn(fmt.Sprintf("change tray collection failed: %v", err))
+				return errors.New(i18n.For(next.Language).TrayBoxFailedBody)
 			}
 			if err := store.Save(next); err != nil {
 				if restoreErr := box.SetPaths(config.CollectedTrayIconPaths(before)); restoreErr != nil {
@@ -459,7 +460,8 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 		OnCleanupRestore: cleanupAndRestore,
 		OnRemoveLogon:    removeLogon,
 		OnLaunchNow: func(entry config.ManagedAppEntry) {
-			if quitting || state.startupPending {
+			if quitting {
+				mainWindow.FinishLaunchNow(entry.ID)
 				return
 			}
 			state.manualLaunches++
@@ -480,7 +482,7 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 				if launchCtx.Err() != nil {
 					return
 				}
-				mainWindow.SetLaunchNowBusy(false)
+				mainWindow.FinishLaunchNow(entry.ID)
 				if result.Managed {
 					// A successful manual launch (including an already-running
 					// program) only restores the button; dialogs are for errors.
@@ -543,16 +545,17 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 		return 1
 	}
 	box.SetErrorHandler(func(err error) {
+		logger.Warn(fmt.Sprintf("tray collection error: %v", err))
 		mainWindow.Synchronize(func() {
 			if !quitting {
 				m := i18n.For(safeLanguage(mainWindow))
-				mainWindow.ShowError(m.TrayBoxFailedTitle, fmt.Sprintf(m.TrayBoxFailedBody, err))
+				mainWindow.ShowError(m.TrayBoxFailedTitle, m.TrayBoxFailedBody)
 			}
 		})
 	})
 	if boxErr != nil {
 		m := i18n.For(settings.Language)
-		mainWindow.ShowError(m.TrayBoxFailedTitle, fmt.Sprintf(m.TrayBoxFailedBody, boxErr))
+		mainWindow.ShowError(m.TrayBoxFailedTitle, m.TrayBoxFailedBody)
 	}
 	if activation != nil {
 		activation.Start(func() {
@@ -611,7 +614,7 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 
 	if state.autorun {
 		// The message loop must exist before tasks can hand it hidden windows.
-		mainWindow.SetLaunchNowBusy(true)
+		// Pending schedules keep the session alive, not manual actions busy.
 		mainWindow.OnStarting(func() {
 			logger.Info(fmt.Sprintf("autorun mode: run managed apps (exitAfterCompleted=%t, collectedTrayIcons=%d)", exitsAfterStartup(settings), len(config.CollectedTrayIconPaths(settings))))
 			launchWG.Add(1)
@@ -627,7 +630,6 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 				runManagedApps(launchCtx, orch, settings, logger, handOffToHost)
 				mainWindow.Synchronize(func() {
 					state.startupPending = false
-					mainWindow.SetLaunchNowBusy(false)
 					// Programs just started may have a run time to wait for.
 					refreshRunLimits()
 				})
