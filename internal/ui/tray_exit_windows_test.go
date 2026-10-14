@@ -16,12 +16,11 @@ import (
 	"wintray/internal/traybox"
 )
 
-// Tray menu order: open settings, run silently, exit.
+// Tray menu order: run silently, exit, then collected icons when present.
 const (
-	trayMenuOpenSettings = 0
-	trayMenuRunSilently  = 1
-	trayMenuExit         = 2
-	mnSelectItem         = 0x1E5
+	trayMenuRunSilently = 0
+	trayMenuExit        = 1
+	mnSelectItem        = 0x1E5
 )
 
 // Exercise all NotifyIcon popup actions through one real message loop. The
@@ -78,10 +77,21 @@ func testTrayMenuActions(t *testing.T) {
 		w.HideMainWindow()
 		hwnd := w.mw.Handle()
 		go func() {
+			// Opening the main window remains a left-click action, not a menu row.
+			win.PostMessage(hwnd, win.WM_APP, 0, win.WM_LBUTTONDOWN)
+			win.PostMessage(hwnd, win.WM_APP, 0, win.WM_LBUTTONUP)
+			if !waitForCount(&shown, 1, 2*time.Second) {
+				reportTrayMenuFailure(failure, "left-click did not show the main window", w)
+				return
+			}
+			if findPopupMenuForProcess(uint32(os.Getpid())) != 0 {
+				reportTrayMenuFailure(failure, "left-click opened a popup menu", w)
+				return
+			}
 			// The exit callback deliberately does not dispose the controller:
 			// a declined exit (for example a failed icon restore) must be retryable.
-			items := []uintptr{trayMenuOpenSettings, trayMenuRunSilently, trayMenuExit, trayMenuExit}
-			counts := []*atomic.Int32{&opened, &silent, &exited, &exited}
+			items := []uintptr{trayMenuRunSilently, trayMenuExit, trayMenuExit}
+			counts := []*atomic.Int32{&silent, &exited, &exited}
 			for i, item := range items {
 				win.PostMessage(hwnd, win.WM_APP, 0, win.WM_RBUTTONUP)
 				menu := waitForPopupMenu(uint32(os.Getpid()), 2*time.Second)
@@ -89,13 +99,13 @@ func testTrayMenuActions(t *testing.T) {
 					reportTrayMenuFailure(failure, "tray popup did not open", w)
 					return
 				}
-				if hMenu := win.HMENU(win.SendMessage(menu, 0x1e1, 0, 0)); win.GetMenuItemCount(hMenu) != 3 {
-					reportTrayMenuFailure(failure, "unselected programs added entries to the tray menu", w)
+				if hMenu := win.HMENU(win.SendMessage(menu, 0x1e1, 0, 0)); win.GetMenuItemCount(hMenu) != 2 {
+					reportTrayMenuFailure(failure, "tray menu without collected icons must contain only run silently and exit", w)
 					return
 				}
 				selectTrayMenuItem(menu, item)
 				want := int32(1)
-				if i == 3 {
+				if i == 2 {
 					want = 2
 				}
 				if !waitForCount(counts[i], want, 2*time.Second) {
@@ -105,9 +115,6 @@ func testTrayMenuActions(t *testing.T) {
 				time.Sleep(100 * time.Millisecond)
 				if findPopupMenuForProcess(uint32(os.Getpid())) != 0 {
 					popupCount.Add(1)
-				}
-				if item == trayMenuOpenSettings {
-					w.Synchronize(w.HideMainWindow)
 				}
 			}
 			w.RequestExplicitClose()
@@ -126,7 +133,7 @@ func testTrayMenuActions(t *testing.T) {
 		t.Errorf("tray callbacks open=%d silent=%d exit=%d, want 1/1/2", opened.Load(), silent.Load(), exited.Load())
 	}
 	if shown.Load() == 0 {
-		t.Error("tray open settings did not show the settings window")
+		t.Error("left-click did not show the main window")
 	}
 	if popupCount.Load() != 0 {
 		t.Errorf("tray action left/reopened %d popup menus", popupCount.Load())
@@ -134,7 +141,7 @@ func testTrayMenuActions(t *testing.T) {
 }
 
 func selectTrayMenuItem(menu win.HWND, item uintptr) {
-	if item == trayMenuOpenSettings {
+	if item == 0 {
 		// MN_SELECTITEM treats zero as no selection unless the position flag
 		// is supplied through lParam.
 		win.SendMessage(menu, mnSelectItem, 0, 1)
@@ -170,6 +177,10 @@ func reportTrayMenuFailure(failure chan<- string, message string, w *MainWindow)
 	select {
 	case failure <- message:
 	default:
+	}
+	// Let the modal menu loop end before the queued window close can run.
+	if menu := findPopupMenuForProcess(uint32(os.Getpid())); menu != 0 {
+		win.PostMessage(menu, win.WM_KEYDOWN, win.VK_ESCAPE, 0)
 	}
 	w.RequestExplicitClose()
 }

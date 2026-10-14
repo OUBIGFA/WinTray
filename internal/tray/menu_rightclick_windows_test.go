@@ -10,6 +10,7 @@ import (
 	"unsafe"
 
 	"github.com/lxn/win"
+	"wintray/internal/i18n"
 )
 
 // Exercise Windows' real modal menu loop, not a fabricated WM_MENURBUTTONUP.
@@ -40,7 +41,11 @@ func testBoxMouseThroughNativeMenuLoop(t *testing.T, down, up uintptr, wantRight
 		t.Fatal("create menu")
 	}
 	defer win.DestroyMenu(menu)
-	if !appendTrayMenuItem(menu, menuItem{id: trayBoxedBase, text: "Collected test icon"}) {
+	if _, ok := appendContextMenu(menu, i18n.For("en-US"), nil); !ok {
+		t.Fatal("append WinTray actions")
+	}
+	if !appendTrayMenuItem(menu, menuItem{separator: true}) ||
+		!appendTrayMenuItem(menu, menuItem{id: trayBoxedBase, text: "Collected test icon"}) {
 		t.Fatal("append menu item")
 	}
 	var cursor win.POINT
@@ -63,7 +68,7 @@ func testBoxMouseThroughNativeMenuLoop(t *testing.T, down, up uintptr, wantRight
 			return
 		}
 		var rect win.RECT
-		if ok, _, _ := menuUser32.NewProc("GetMenuItemRect").Call(uintptr(hwnd), uintptr(menu), 0, uintptr(unsafe.Pointer(&rect))); ok == 0 {
+		if ok, _, _ := menuUser32.NewProc("GetMenuItemRect").Call(uintptr(hwnd), uintptr(menu), 3, uintptr(unsafe.Pointer(&rect))); ok == 0 {
 			return
 		}
 		pt := win.POINT{X: (rect.Left + rect.Right) / 2, Y: (rect.Top + rect.Bottom) / 2}
@@ -110,16 +115,17 @@ func TestBoxRightClicksOnlySelectEnabledCollectedItems(t *testing.T) {
 	}
 	defer win.DestroyMenu(menu)
 	for _, item := range []menuItem{
+		{id: trayActionRunSilently, text: "run silently"},
+		{id: trayActionExit, text: "exit"},
+		{separator: true},
 		{id: trayBoxedBase, text: "clickable"},
 		{id: trayBoxedBase + 1, text: "not clickable", disabled: true},
-		{id: trayActionOpenSettings, text: "settings"},
-		{separator: true},
 	} {
 		if !appendTrayMenuItem(menu, item) {
 			t.Fatal("append test menu item failed")
 		}
 	}
-	for position, want := range []uint32{trayBoxedBase, 0, 0, 0} {
+	for position, want := range []uint32{0, 0, 0, trayBoxedBase, 0} {
 		got := trackBoxRightClicks(hwnd, nil, func() {
 			win.SendMessage(hwnd, wmMenuRButtonUp, uintptr(position), uintptr(menu))
 		})
@@ -131,7 +137,7 @@ func TestBoxRightClicksOnlySelectEnabledCollectedItems(t *testing.T) {
 	if got := trackBoxRightClicks(hwnd, nil, func() {}); got != 0 {
 		t.Errorf("new menu inherited right-click %d", got)
 	}
-	win.SendMessage(hwnd, wmMenuRButtonUp, 0, uintptr(menu))
+	win.SendMessage(hwnd, wmMenuRButtonUp, 3, uintptr(menu))
 	if menuRightClick != 0 {
 		t.Error("right-click hook survived after the menu ended")
 	}

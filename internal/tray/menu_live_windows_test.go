@@ -10,6 +10,7 @@ import (
 	"unsafe"
 
 	"github.com/lxn/win"
+	"wintray/internal/i18n"
 	"wintray/internal/traybox"
 )
 
@@ -32,7 +33,8 @@ func TestOpenMenuFollowsOriginalIconFramesAndTooltip(t *testing.T) {
 	}
 	first := traybox.Icon{ExePath: `C:\test\original.exe`, Tooltip: "original", Image: frame(color.NRGBA{R: 255, A: 255})}
 	icons := []traybox.Icon{first}
-	bitmaps := appendBox(menu, icons)
+	msg := i18n.For("en-US")
+	bitmaps, ok := appendContextMenu(menu, msg, icons)
 	defer func() {
 		for _, b := range bitmaps {
 			if b != 0 {
@@ -40,6 +42,9 @@ func TestOpenMenuFollowsOriginalIconFramesAndTooltip(t *testing.T) {
 			}
 		}
 	}()
+	if !ok {
+		t.Fatal("appendContextMenu")
+	}
 	read := func() win.MENUITEMINFO {
 		info := win.MENUITEMINFO{CbSize: uint32(unsafe.Sizeof(win.MENUITEMINFO{})), FMask: win.MIIM_BITMAP | win.MIIM_STATE}
 		if !win.GetMenuItemInfo(menu, trayBoxedBase, 0, &info) {
@@ -67,4 +72,5 @@ func TestOpenMenuFollowsOriginalIconFramesAndTooltip(t *testing.T) {
 	if icons[0].ExePath != first.ExePath || read().FState&win.MFS_DISABLED == 0 {
 		t.Fatal("removed icon was retargeted to another menu item")
 	}
+	assertTrayMenuActions(t, menu, msg)
 }

@@ -206,7 +206,7 @@ If the original startup cannot be restored, follow the error message and try aga
 
 ### How do I open settings when there is no main window?
 
-Right-click the WinTray tray icon and select **Open WinTray**. If the icon is not visible, run `WinTray.exe` again.
+Left-click the WinTray tray icon. If the icon is not visible, run `WinTray.exe` again.
 
 Select **More Features** in the main window to open **Settings**.
 

@@ -17,11 +17,10 @@ import (
 )
 
 const (
-	trayActionOpenSettings = 1
-	trayActionRunSilently  = 2
-	trayActionExit         = 3
-	trayBoxedBase          = 100
-	trayIDLimit            = 9000
+	trayActionRunSilently = 2
+	trayActionExit        = 3
+	trayBoxedBase         = 100
+	trayIDLimit           = 9000
 	// TPM_RIGHTBUTTON executes a normal command on right-click and suppresses
 	// WM_MENURBUTTONUP. Leave it unset so the owner can open the icon's menu
 	// (the same owner notification used by Explorer++'s MenuController).
@@ -36,6 +35,7 @@ type Controller struct {
 	exitApp       func()
 	language      string
 	exitRequested bool
+	menuOpen      bool
 	box           *traybox.Box
 	logger        Logger
 	dispatch      func(func())
@@ -101,6 +101,16 @@ func (c *Controller) showContextMenu() {
 	if c == nil || c.window == nil || c.exitRequested {
 		return
 	}
+	// TrackPopupMenuEx pumps shell notifications. Reentering it would make
+	// the rejected inner menu remove the right-click hook of the outer one.
+	if c.menuOpen {
+		if c.logger != nil {
+			c.logger.Info("tray menu: ignored repeated open while a menu is active")
+		}
+		return
+	}
+	c.menuOpen = true
+	defer func() { c.menuOpen = false }()
 
 	hMenu := win.CreatePopupMenu()
 	if hMenu == 0 {
@@ -108,21 +118,17 @@ func (c *Controller) showContextMenu() {
 	}
 	defer win.DestroyMenu(hMenu)
 
-	msg := i18n.For(c.language)
 	var icons []traybox.Icon
-	var bitmaps []win.HBITMAP
 	if c.box != nil && c.box.HasSelection() {
 		icons = c.box.Icons()
-		bitmaps = appendBox(hMenu, icons)
-		defer func() {
-			for _, b := range bitmaps {
-				win.DeleteObject(win.HGDIOBJ(b))
-			}
-		}()
 	}
-	if !appendTrayMenuItem(hMenu, menuItem{id: trayActionOpenSettings, text: msg.TrayOpenSettings}) ||
-		!appendTrayMenuItem(hMenu, menuItem{id: trayActionRunSilently, text: msg.RunSilently}) ||
-		!appendTrayMenuItem(hMenu, menuItem{id: trayActionExit, text: msg.TrayExit}) {
+	bitmaps, ok := appendContextMenu(hMenu, i18n.For(c.language), icons)
+	defer func() {
+		for _, b := range bitmaps {
+			win.DeleteObject(win.HGDIOBJ(b))
+		}
+	}()
+	if !ok {
 		return
 	}
 
@@ -158,10 +164,6 @@ func (c *Controller) showContextMenu() {
 		return
 	}
 	switch uint32(actionID) {
-	case trayActionOpenSettings:
-		if c.showMain != nil && !c.exitRequested {
-			c.showMain()
-		}
 	case trayActionRunSilently:
 		if c.runSilently != nil && !c.exitRequested {
 			c.runSilently()
@@ -175,9 +177,18 @@ func (c *Controller) showContextMenu() {
 	}
 }
 
-// appendBox lists the collected icons with their current images. The
-// bitmaps must outlive the menu.
-func appendBox(hMenu win.HMENU, icons []traybox.Icon) []win.HBITMAP {
+// appendContextMenu keeps WinTray actions above the collected icons. Only
+// nonempty collections get a separator. The caller must release the returned
+// bitmaps after the menu closes, including when an insertion fails.
+func appendContextMenu(hMenu win.HMENU, msg i18n.Messages, icons []traybox.Icon) ([]win.HBITMAP, bool) {
+	if !appendTrayMenuItem(hMenu, menuItem{id: trayActionRunSilently, text: msg.RunSilently}) ||
+		!appendTrayMenuItem(hMenu, menuItem{id: trayActionExit, text: msg.TrayExit}) {
+		return nil, false
+	}
+	if len(icons) > 0 && !appendTrayMenuItem(hMenu, menuItem{separator: true}) {
+		return nil, false
+	}
+
 	var bitmaps []win.HBITMAP
 	iconSize := int(win.GetSystemMetrics(win.SM_CXSMICON))
 	for i, icon := range icons {
@@ -189,12 +200,11 @@ func appendBox(hMenu win.HMENU, icons []traybox.Icon) []win.HBITMAP {
 		b, _ := traybox.MenuBitmap(icon.Image, iconSize)
 		bitmaps = append(bitmaps, b) // one slot per row, including blank frames
 		item.bitmap = b
-		appendTrayMenuItem(hMenu, item)
+		if !appendTrayMenuItem(hMenu, item) {
+			return bitmaps, false
+		}
 	}
-	if len(icons) > 0 {
-		appendTrayMenuItem(hMenu, menuItem{separator: true})
-	}
-	return bitmaps
+	return bitmaps, true
 }
 
 // runBoxAction clicks a collected icon on the user's behalf.

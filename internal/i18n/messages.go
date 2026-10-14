@@ -113,7 +113,6 @@ type Messages struct {
 	ExitApp                        string
 	RunSilently                    string
 	RunSilentlyHint                string
-	TrayOpenSettings               string
 	TrayExit                       string
 	TrayToolTip                    string
 	TrayBoxHomeTitle               string
@@ -166,7 +165,7 @@ type Messages struct {
 var zhCN = Messages{
 	WindowTitle:                    "WinTray",
 	OpenSettings:                   "更多功能",
-	OpenSettingsFailed:             "无法打开设置：%s\n请再次从托盘打开 WinTray",
+	OpenSettingsFailed:             "无法打开设置：%s\n请左键单击 WinTray 托盘图标重试",
 	BackToPrograms:                 "← 返回",
 	SettingsTitle:                  "设置",
 	LogonOffNotice:                 "WinTray 未开启开机启动；不再安排列表任务，程序自身的自启仍会保留或恢复",
@@ -259,7 +258,6 @@ var zhCN = Messages{
 	ExitApp:                        "退出 WinTray",
 	RunSilently:                    "后台静默运行",
 	RunSilentlyHint:                "隐藏此窗口；有程序勾选托盘图标收纳时保留 WinTray 菜单入口，否则隐藏自身图标；保留命令行程序的托盘图标，再次打开 WinTray 可恢复",
-	TrayOpenSettings:               "打开 WinTray",
 	TrayExit:                       "退出 WinTray",
 	TrayToolTip:                    "WinTray",
 	TrayBoxHomeTitle:               "托盘收纳",
@@ -316,7 +314,7 @@ var zhCN = Messages{
 var enUS = Messages{
 	WindowTitle:                    "WinTray",
 	OpenSettings:                   "More Features",
-	OpenSettingsFailed:             "Could not open settings: %s\nOpen WinTray from the tray again",
+	OpenSettingsFailed:             "Could not open settings: %s\nLeft-click the WinTray tray icon to try again",
 	BackToPrograms:                 "← Back",
 	SettingsTitle:                  "Settings",
 	LogonOffNotice:                 "WinTray startup is off; list tasks are not scheduled, and apps' own startup remains or is restored",
@@ -409,7 +407,6 @@ var enUS = Messages{
 	ExitApp:                        "Exit WinTray",
 	RunSilently:                    "Run silently",
 	RunSilentlyHint:                "Hides this window; keeps WinTray's menu icon if a program collects its tray icon, otherwise hides it; hosted console icons remain",
-	TrayOpenSettings:               "Open WinTray",
 	TrayExit:                       "Exit WinTray",
 	TrayToolTip:                    "WinTray",
 	TrayBoxHomeTitle:               "Tray icon",

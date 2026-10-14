@@ -59,21 +59,23 @@ func (l *Logger) Info(msg string)  { l.write("INFO", msg) }
 func (l *Logger) Warn(msg string)  { l.write("WARN", msg) }
 func (l *Logger) Error(msg string) { l.write("ERROR", msg) }
 
-func (l *Logger) write(level, msg string) {
+func (l *Logger) write(level, msg string) error {
 	if l == nil {
-		return
+		return os.ErrClosed
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.lock == nil {
-		return
+		return os.ErrClosed
 	}
 	if err := l.lock.withLock(func() error { return l.appendAndRotate(level, msg) }); err != nil {
 		// Keep the last failure observable through Close without recursive
 		// logging or an unbounded collection of errors on an unavailable disk.
 		l.lastErr = err
 		_, _ = fmt.Fprintf(os.Stderr, "WinTray log write failed: %v\n", err)
+		return err
 	}
+	return nil
 }
 
 // No process holds the file open between writes: detached hosts must not block

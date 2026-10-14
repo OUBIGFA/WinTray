@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"runtime"
 	"sync"
 	"syscall"
 
@@ -159,6 +160,10 @@ func (w *MainWindow) Run() int {
 			return 1
 		}
 	}
+	// Keep the exact OS build and renderer choice beside library diagnostics;
+	// a title-bar-only screenshot cannot identify either compatibility path.
+	osVersion := windows.RtlGetVersion()
+	log.Printf("desktop: Windows=%d.%d.%d arch=%s MYGO_GPU=%q", osVersion.MajorVersion, osVersion.MinorVersion, osVersion.BuildNumber, runtime.GOARCH, os.Getenv("MYGO_GPU"))
 	mygo.App.SetName("WinTray")
 	mygo.App.OnWindowAllClosed(func() {})
 	var initErr error

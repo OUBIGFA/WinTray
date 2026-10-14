@@ -166,6 +166,8 @@ type sessionServices struct {
 func runMainSession(args []string, settings config.Settings, services sessionServices) int {
 	started := time.Now()
 	store, logger := services.store, services.logger
+	defer logger.CaptureStandardLog()()
+	logger.Info(fmt.Sprintf("startup: WinTray %s", version.Number))
 	enumerator := orchestrator.NewWin32WindowEnumerator()
 	manager := orchestrator.NewWin32WindowManager()
 	orch := orchestrator.NewService(enumerator, manager, logger)
