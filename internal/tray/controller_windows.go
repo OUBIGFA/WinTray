@@ -21,9 +21,9 @@ const (
 	trayActionExit        = 3
 	trayBoxedBase         = 100
 	trayIDLimit           = 9000
-	// TPM_RIGHTBUTTON executes a normal command on right-click and suppresses
-	// WM_MENURBUTTONUP. Leave it unset so the owner can open the icon's menu
-	// (the same owner notification used by Explorer++'s MenuController).
+	// Right-clicks on collected icons are consumed in the modal loop.
+	// Leave TPM_RIGHTBUTTON unset so right-clicks cannot execute WinTray's
+	// own commands or turn into a collected icon's left-click action.
 	trayMenuFlags = win.TPM_NOANIMATION | win.TPM_RETURNCMD
 )
 
@@ -101,8 +101,8 @@ func (c *Controller) showContextMenu() {
 	if c == nil || c.window == nil || c.exitRequested {
 		return
 	}
-	// TrackPopupMenuEx pumps shell notifications. Reentering it would make
-	// the rejected inner menu remove the right-click hook of the outer one.
+	// TrackPopupMenuEx pumps shell notifications. Keep repeated open
+	// requests from starting another lifecycle while this menu is active.
 	if c.menuOpen {
 		if c.logger != nil {
 			c.logger.Info("tray menu: ignored repeated open while a menu is active")
@@ -141,7 +141,7 @@ func (c *Controller) showContextMenu() {
 
 	flags := uint32(trayMenuFlags)
 	var actionID win.BOOL
-	rightClicked := trackBoxRightClicks(hwnd, func() {
+	rightClicked, err := trackBoxRightClicks(hwnd, hMenu, func() {
 		if c.box != nil && refreshBoxMenu(hMenu, icons, bitmaps, c.box.Icons()) {
 			redrawOpenBoxMenu()
 		}
@@ -150,6 +150,14 @@ func (c *Controller) showContextMenu() {
 	})
 	// Required by the Windows tray-menu contract after TrackPopupMenuEx.
 	win.PostMessage(hwnd, win.WM_NULL, 0, 0)
+	if err != nil {
+		if c.logger != nil {
+			c.logger.Warn(fmt.Sprintf("tray menu failed: %v", err))
+		}
+		msg := i18n.For(c.language)
+		walk.MsgBox(c.window, msg.WindowTitle, msg.TrayMenuFailedBody, walk.MsgBoxIconWarning)
+		return
+	}
 
 	if rightClicked != 0 {
 		c.runBoxAction(icons, rightClicked, traybox.ActionRightClick)

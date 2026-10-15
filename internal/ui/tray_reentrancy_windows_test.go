@@ -9,6 +9,7 @@ import (
 	"unsafe"
 
 	"github.com/lxn/win"
+	"golang.org/x/sys/windows"
 	"wintray/internal/config"
 	"wintray/internal/tray"
 )
@@ -71,7 +72,19 @@ func TestTrayMenuRepeatedOpenKeepsRightClick(t *testing.T) {
 					reportTrayMenuFailure(failure, "repeated tray notification blocked the menu loop", w)
 					return
 				}
-				win.SendMessage(hwnd, 0x0122, 1, uintptr(menu)) // WM_MENURBUTTONUP
+				w.Synchronize(func() {
+					// Feed a raw release through the thread's real menu filter.
+					// This tests handler lifetime without moving the desktop mouse.
+					user32 := windows.NewLazySystemDLL("user32.dll")
+					var rect win.RECT
+					if ok, _, _ := user32.NewProc("GetMenuItemRect").Call(uintptr(hwnd), uintptr(menu), 1, uintptr(unsafe.Pointer(&rect))); ok == 0 {
+						reportTrayMenuFailure(failure, "could not locate collected command", w)
+						return
+					}
+					message := win.MSG{HWnd: hwnd, Message: win.WM_RBUTTONUP,
+						Pt: win.POINT{X: (rect.Left + rect.Right) / 2, Y: (rect.Top + rect.Bottom) / 2}}
+					user32.NewProc("CallMsgFilterW").Call(uintptr(unsafe.Pointer(&message)), 2) // MSGF_MENU
+				})
 				deadline := time.Now().Add(2 * time.Second)
 				for time.Now().Before(deadline) {
 					if findPopupMenuForProcess(uint32(os.Getpid())) == 0 {

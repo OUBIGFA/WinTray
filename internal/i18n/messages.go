@@ -115,6 +115,7 @@ type Messages struct {
 	RunSilentlyHint                string
 	TrayExit                       string
 	TrayToolTip                    string
+	TrayMenuFailedBody             string
 	TrayBoxHomeTitle               string
 	TrayBoxHomeHint                string
 	TrayBoxFailedTitle             string
@@ -262,6 +263,7 @@ var zhCN = Messages{
 	TrayToolTip:                    "WinTray",
 	TrayBoxHomeTitle:               "托盘收纳",
 	TrayBoxHomeHint:                "将此程序的托盘图标从任务栏收进 WinTray 菜单；在菜单中左键单击等同单击原图标，右键打开程序自己的托盘菜单",
+	TrayMenuFailedBody:             "无法打开托盘菜单\n请重启 WinTray 后重试",
 	TrayBoxFailedTitle:             "托盘图标收纳",
 	TrayBoxFailedBody:              "托盘收纳未能完成\n请重新启用收纳；若仍失败，请打开日志",
 	TrayBoxIconGoneBody:            "%s 的托盘图标已不存在，程序可能已经退出",
@@ -411,6 +413,7 @@ var enUS = Messages{
 	TrayToolTip:                    "WinTray",
 	TrayBoxHomeTitle:               "Tray icon",
 	TrayBoxHomeHint:                "Move this program's tray icon off the taskbar into WinTray's menu; left-click its entry to click the icon, right-click it for the program's own tray menu",
+	TrayMenuFailedBody:             "Could not open the tray menu\nRestart WinTray and try again",
 	TrayBoxFailedTitle:             "Collected tray icons",
 	TrayBoxFailedBody:              "Tray collection could not complete\nEnable it again; if it fails again, open the log",
 	TrayBoxIconGoneBody:            "The tray icon of %s is gone; the program may have exited",
