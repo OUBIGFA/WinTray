@@ -151,19 +151,19 @@ func (w *MainWindow) Run() int {
 			w.mw.Dispose()
 		}
 	}()
-	// This mostly-static utility is faster and smaller with mygo's dirty-rect
-	// CPU renderer; avoid loading a D3D driver for a settings window. Keep an
-	// explicit MYGO_GPU override available for diagnostics.
-	if _, set := os.LookupEnv("MYGO_GPU"); !set {
-		if err := os.Setenv("MYGO_GPU", "0"); err != nil {
-			log.Printf("configure native renderer: %v", err)
-			return 1
-		}
-	}
 	// Keep the exact OS build and renderer choice beside library diagnostics;
 	// a title-bar-only screenshot cannot identify either compatibility path.
 	osVersion := windows.RtlGetVersion()
-	log.Printf("desktop: Windows=%d.%d.%d arch=%s MYGO_GPU=%q", osVersion.MajorVersion, osVersion.MinorVersion, osVersion.BuildNumber, runtime.GOARCH, os.Getenv("MYGO_GPU"))
+	// This mostly-static utility is faster and smaller with mygo's dirty-rect
+	// CPU renderer, but that path draws a blank client area on Windows 10
+	// (issues #5 and #6), so only Windows 11 asks for it. An explicit MYGO_GPU
+	// from the environment still wins on every build.
+	renderer, err := configureRenderer(osVersion.BuildNumber, os.LookupEnv, os.Setenv)
+	if err != nil {
+		log.Printf("configure native renderer: %v", err)
+		return 1
+	}
+	log.Printf("desktop: Windows=%d.%d.%d arch=%s MYGO_GPU=%q", osVersion.MajorVersion, osVersion.MinorVersion, osVersion.BuildNumber, runtime.GOARCH, renderer)
 	mygo.App.SetName("WinTray")
 	mygo.App.OnWindowAllClosed(func() {})
 	var initErr error
