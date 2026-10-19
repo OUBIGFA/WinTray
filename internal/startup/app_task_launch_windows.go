@@ -64,7 +64,7 @@ func (t *AppTasks) launchNow(entry config.ManagedAppEntry) error {
 		}
 	}
 	if name == "" {
-		return errors.New("no enabled logon task is registered; enable sign-in startup and wait for settings to finish saving before testing")
+		return errors.New("no enabled logon task is registered; enable custom timing or sign-in startup, then wait for settings to finish saving before testing")
 	}
 	if _, err := t.run("/Run", "/TN", name); err != nil {
 		return fmt.Errorf("run original startup task %s: %w", name, err)

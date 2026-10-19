@@ -77,14 +77,14 @@ func TestStoreLoadWithError_ReadFailureDoesNotLookLikeMissingFile(t *testing.T) 
 	}
 }
 
-func TestShouldLaunchViaWinTray_RunOnStartupIsMasterSwitch(t *testing.T) {
+func TestShouldLaunchViaWinTray_StartupOrCustomScheduleEnablesLaunch(t *testing.T) {
 	tests := []struct {
 		name  string
 		entry ManagedAppEntry
 		want  bool
 	}{
 		{
-			name: "paused hidden task does not launch",
+			name: "paused without schedule does not launch",
 			entry: ManagedAppEntry{
 				RunOnStartup:             false,
 				LaunchHiddenInBackground: true,
@@ -92,12 +92,12 @@ func TestShouldLaunchViaWinTray_RunOnStartupIsMasterSwitch(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "paused auto hide task does not launch",
+			name: "custom schedule launches while startup switch is off",
 			entry: ManagedAppEntry{
 				RunOnStartup: false,
-				TrayBehavior: TrayBehavior{AutoMinimizeAndHideOnLaunch: true},
+				Schedule:     Schedule{Enabled: true, StartDelayMinutes: 30},
 			},
-			want: false,
+			want: true,
 		},
 		{
 			name: "enabled launch only task launches",
@@ -322,7 +322,7 @@ func TestLogonTaskAppsOrderAndDelays(t *testing.T) {
 			{ID: "2", Name: "WinTray launched", ExePath: `C:\Apps\Other.exe`, RunOnStartup: true},
 			{ID: "3", Name: "Paused", ExePath: `C:\Apps\Paused.exe`, RunOnStartup: false, LaunchViaLogonTask: true},
 			{ID: "4", Name: "Second", ExePath: `C:\Apps\Two.exe`, RunOnStartup: true, LaunchViaLogonTask: true},
-			{ID: "5", Name: "Scheduled", ExePath: `C:\Apps\Three.exe`, RunOnStartup: true, LaunchViaLogonTask: true,
+			{ID: "5", Name: "Scheduled", ExePath: `C:\Apps\Three.exe`, RunOnStartup: false, LaunchViaLogonTask: true,
 				Schedule: Schedule{Enabled: true, StartDelayMinutes: 2}},
 		},
 	}

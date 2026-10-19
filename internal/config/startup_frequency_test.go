@@ -161,7 +161,7 @@ func TestStartupFrequencyRefundsFailedLaunchAndSerializesRequests(t *testing.T) 
 	}
 }
 
-func TestFrequencySettingsPreserveIndependentAutoExit(t *testing.T) {
+func TestFrequencySettingsRemainIndependentOfStartupSwitch(t *testing.T) {
 	var entry ManagedAppEntry
 	if err := json.Unmarshal([]byte(`{"runOnStartup":true,"schedule":{"enabled":true,"autoExitMinutes":5,"frequencyEnabled":true,"frequencyDays":1,"frequencyRuns":1}}`), &entry); err != nil {
 		t.Fatal(err)
@@ -170,7 +170,7 @@ func TestFrequencySettingsPreserveIndependentAutoExit(t *testing.T) {
 		t.Fatal("frequency must apply to startup")
 	}
 	entry.RunOnStartup = false
-	if StartupFrequencyEnabled(entry) || ScheduledRunLimit(entry) != 5 {
-		t.Fatal("disabling startup must retain auto-exit only")
+	if !StartupFrequencyEnabled(entry) || ScheduledRunLimit(entry) != 5 {
+		t.Fatal("custom frequency must remain active when startup switch is off")
 	}
 }

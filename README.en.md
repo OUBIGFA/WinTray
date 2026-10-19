@@ -79,7 +79,7 @@ Select **Start this program at sign-in** to edit the launch mode and arguments.
 
 **Arguments** are optional. WinTray uses these arguments when it starts the program directly. When it uses an original startup entry, that entry supplies the arguments.
 
-Clear **Start this program at sign-in** to stop WinTray from scheduling the program. The program's original startup is kept or restored. **Launch Now** then uses normal launch behavior. You can still edit **Custom timing**.
+Clear **Start this program at sign-in** to stop normal startup scheduling. The program's original startup is kept or restored. **Launch Now** then uses normal launch behavior. An enabled **Custom timing** schedule still starts the program.
 
 ### Show or hide a window
 
@@ -129,7 +129,7 @@ Windows requests confirmation when a new task requires administrator privileges.
 
 If setup fails, follow the error message and save the settings again, or use **Start normally**.
 
-When this mode and the launch limit are both off, WinTray removes the replacement task and restores the original entry's state. This also happens when you disable the program's startup, remove it from the list, or disable WinTray startup.
+When this mode and the launch limit are both off, WinTray removes the replacement task and restores the original entry's state. This also happens when you disable the program's startup while **Custom timing** is off, remove it from the list, or disable WinTray startup.
 
 ### Custom timing
 
@@ -137,13 +137,13 @@ Select **Custom timing** to use these settings.
 
 | Setting | Range | Default | When it applies |
 | --- | --- | --- | --- |
-| Start delay (**Start…min after sign-in**) | 0–1440 minutes | 0 minutes | Requires **Run WinTray at sign-in** and **Start this program at sign-in**. 0 adds no delay |
-| Automatic exit (**Quit after…min**) | 0–1440 minutes | 30 minutes | Applies while WinTray is running. 0 disables automatic exit |
-| Limit automatic launches | 1–1000 launches in the last 1–365 calendar days, including today | Off; 1 launch in 1 day when enabled | Requires **Run WinTray at sign-in** and **Start this program at sign-in** |
+| Start delay (**Start…min after sign-in**) | 0–1440 minutes | 0 minutes | Requires **Run WinTray at sign-in** and **Custom timing**. 0 starts at sign-in |
+| Automatic exit (**Quit after…min**) | 0–1440 minutes | 30 minutes | Applies when **Custom timing** is on. 0 disables automatic exit |
+| Limit automatic launches | 1–1000 launches in the last 1–365 calendar days, including today | Off; 1 launch in 1 day when enabled | Requires **Run WinTray at sign-in** and **Custom timing** |
 
 The start delay begins at Windows sign-in. Original startup entries that WinTray has not taken over keep their own schedule. Tasks that WinTray reuses directly keep their original delay.
 
-The run time for automatic exit starts when the target process is created. At the configured time limit, WinTray ends the program and its child processes. This also applies to manually started programs, even when **Start this program at sign-in** is off.
+The run time for automatic exit starts when the target process is created. At the configured time limit, WinTray ends the program and its child processes. This also applies to manually started programs. Clearing **Start this program at sign-in** does not disable an enabled **Custom timing** schedule.
 
 The launch limit applies only to automatic launches at sign-in. Manual launches and **Launch Now** are not limited. Days follow the computer's system time zone and include today: 1 day starts at today's local midnight, 2 days at yesterday's local midnight, and so on.
 
@@ -163,7 +163,7 @@ Select a number in each program's **Order** list to change the start order. This
 
 ## Common use cases
 
-For these examples, enable **Run WinTray at sign-in** and **Start this program at sign-in**.
+These examples require **Run WinTray at sign-in**. **Custom timing** can start a program without selecting **Start this program at sign-in**.
 
 | Scenario | Configuration |
 | --- | --- |

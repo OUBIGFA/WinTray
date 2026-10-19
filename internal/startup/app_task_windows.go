@@ -119,7 +119,7 @@ func (t *AppTasks) Sync(settings config.Settings, allowElevated bool) error {
 		// An unlimited duplicate could otherwise launch the same executable
 		// around a limited entry's decision. Include every enabled entry.
 		for _, entry := range settings.ManagedApps {
-			if entry.RunOnStartup {
+			if config.ShouldLaunchViaWinTray(entry) {
 				pathCounts[strings.ToLower(filepath.Clean(entry.ExePath))]++
 				idCounts[strings.ToLower(entry.ID)]++
 			}

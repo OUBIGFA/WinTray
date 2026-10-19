@@ -216,7 +216,7 @@ var zhCN = Messages{
 	ManagedArgsHint:                "适用于 .exe 程序及 .bat、.cmd、.ps1、.py 等脚本",
 	ManagedArgsPlaceholder:         "例如 --minimized",
 	ManagedEnabled:                 "开机启动此程序",
-	ManagedEnabledHint:             "取消后仅停止 WinTray 的启动安排，程序自身的自启会保留或恢复",
+	ManagedEnabledHint:             "取消后停止普通启动安排；启用“自定义时间”时仍按计划启动，程序自身的自启会保留或恢复",
 	ManagedModeLabel:               "启动方式",
 	ManagedLaunchOnly:              "正常启动",
 	ManagedLaunchOnlyHint:          "优先沿用程序原有自启，没有自启时由 WinTray 启动；不收起或关闭窗口",
@@ -242,7 +242,7 @@ var zhCN = Messages{
 	ManagedScheduleStartUnit:       "分钟启动",
 	ManagedScheduleExit:            "运行",
 	ManagedScheduleExitUnit:        "分钟后退出",
-	ManagedScheduleHint:            "时间范围 0–1440 分钟，退出时间为 0 表示不退出；取消开机启动后，自动退出仍生效",
+	ManagedScheduleHint:            "时间范围 0–1440 分钟，退出时间为 0 表示不退出；启用“自定义时间”即可按计划启动，取消“开机启动此程序”不影响该计划",
 	ManagedFrequency:               "限制自动运行次数",
 	ManagedFrequencyDays:           "天内最多自动运行",
 	ManagedFrequencyRuns:           "次",
@@ -379,7 +379,7 @@ var enUS = Messages{
 	ManagedArgsHint:                "For .exe programs and scripts such as .bat, .cmd, .ps1 and .py",
 	ManagedArgsPlaceholder:         "Example: --minimized",
 	ManagedEnabled:                 "Start this program at sign-in",
-	ManagedEnabledHint:             "Stops only WinTray's launch scheduling; the app's own startup remains or is restored",
+	ManagedEnabledHint:             "Stops normal startup scheduling; enabled Custom timing still starts the program by its schedule, while the app's own startup remains or is restored",
 	ManagedModeLabel:               "How it starts",
 	ManagedLaunchOnly:              "Start normally",
 	ManagedLaunchOnlyHint:          "Uses the app's own startup when available, or starts it through WinTray; leaves the window as is",
@@ -405,7 +405,7 @@ var enUS = Messages{
 	ManagedScheduleStartUnit:       "min after sign-in",
 	ManagedScheduleExit:            "Quit after",
 	ManagedScheduleExitUnit:        "min",
-	ManagedScheduleHint:            "Times: 0–1440 min; 0 means never quit; auto-quit still applies when start at sign-in is off",
+	ManagedScheduleHint:            "Times: 0–1440 min; 0 means never quit; Custom timing starts the program by its schedule even when start at sign-in is off",
 	ManagedFrequency:               "Limit automatic launches",
 	ManagedFrequencyDays:           "days: at most",
 	ManagedFrequencyRuns:           "launches",
@@ -526,7 +526,7 @@ func FormatManagedListItem(language string, app config.ManagedAppEntry) string {
 
 func FormatManagedParam(language string, app config.ManagedAppEntry) string {
 	param := formatManagedMode(language, app)
-	if app.RunOnStartup && app.Schedule.Enabled {
+	if app.Schedule.Enabled {
 		return fmt.Sprintf(For(language).ManagedScheduleTag, param)
 	}
 	return param

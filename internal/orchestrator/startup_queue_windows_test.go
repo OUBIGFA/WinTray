@@ -196,6 +196,7 @@ func TestScheduledStartsShareStartupInterval(t *testing.T) {
 	first := queueTestEntry(t, "scheduled first")
 	second := queueTestEntry(t, "scheduled second")
 	for _, entry := range []*config.ManagedAppEntry{&first, &second} {
+		entry.RunOnStartup = false
 		entry.Schedule = config.Schedule{Enabled: true, StartDelayMinutes: 1}
 	}
 	old := logonTimeLookup
