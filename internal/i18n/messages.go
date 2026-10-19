@@ -49,6 +49,7 @@ type Messages struct {
 	ManagedColumnName              string
 	ManagedColumnOrder             string
 	ManagedColumnRule              string
+	ManagedColumnDelete            string
 	BrowseProgram                  string
 	BrowseProgramHint              string
 	ManagedAppArgs                 string
@@ -94,10 +95,20 @@ type Messages struct {
 	ManagedLaunchNow               string
 	ManagedLaunchNowHint           string
 	ManagedLaunchNowBusy           string
+	ManagedStopProgram             string
+	ManagedStopProgramBusy         string
+	ManagedStopProgramHint         string
+	ManagedStopProgramFailed       string
+	ManagedWindowBusy              string
+	ManagedWindowHint              string
+	ManagedWindowNotRunning        string
+	ManagedWindowUnavailable       string
+	ManagedWindowFailed            string
+	ManagedWindowActivation        string
 	AddProgram                     string
 	AddProgramHint                 string
-	RemoveSelected                 string
-	RemoveSelectedHint             string
+	RemoveConfirmPrompt            string
+	RemoveConfirmLabel             string
 	OpenLogs                       string
 	OpenLogsHint                   string
 	CleanupRestore                 string
@@ -116,6 +127,7 @@ type Messages struct {
 	TrayExit                       string
 	TrayToolTip                    string
 	TrayMenuFailedBody             string
+	TrayMenuCloseFailedBody        string
 	TrayBoxHomeTitle               string
 	TrayBoxHomeHint                string
 	TrayBoxFailedTitle             string
@@ -161,6 +173,7 @@ type Messages struct {
 	RemoveLogonTaskFailedBody      string
 	LanguageZhLabel                string
 	LanguageEnLabel                string
+	SwitchLanguageHint             string
 }
 
 var zhCN = Messages{
@@ -176,7 +189,7 @@ var zhCN = Messages{
 	RunAtLogonHint:                 "关闭后不再由 WinTray 安排启动；程序自身的自启会保留或恢复",
 	StartHidden:                    "开机时不弹出 WinTray 窗口",
 	ExitOnDone:                     "开机任务完成后自动退出 WinTray",
-	ExitOnDoneHint:                 "有程序启用托盘收纳时不会自动退出；还有命令行程序在用 WinTray 提供的托盘图标时，会等它们都退出后再退出",
+	ExitOnDoneHint:                 "有托盘收纳、后台窗口或命令行程序托盘图标时，WinTray 会继续运行",
 	SettingsTimingTitle:            "启动节奏",
 	RetrySeconds:                   "最长等待程序窗口",
 	RetrySecondsHint:               "程序启动较慢、窗口没被收进托盘时，可以调大；可填 0–120",
@@ -186,6 +199,7 @@ var zhCN = Messages{
 	StartupIntervalHint:            "错开启动，减轻开机卡顿；可填 0–120，0 表示不等待",
 	SecondsUnit:                    "秒",
 	LanguageLabel:                  "语言 / Language",
+	SwitchLanguageHint:             "Switch to English",
 	ManagedListTitle:               "开机启动项",
 	ManagedListHint:                "拖入文件可添加；序号调整顺序；勾选开机启动或托盘收纳",
 	ManagedDropRejected:            "以下项目不存在、是文件夹或类型不受支持，未添加：\r\n%s\r\n\r\n请拖入 .exe、.bat、.cmd、.ps1、.py 或 .pyw 文件",
@@ -195,6 +209,7 @@ var zhCN = Messages{
 	ManagedColumnName:              "程序名称",
 	ManagedColumnOrder:             "序号",
 	ManagedColumnRule:              "启动动作",
+	ManagedColumnDelete:            "删除",
 	BrowseProgram:                  "更换…",
 	BrowseProgramHint:              "换成另一个程序文件",
 	ManagedAppArgs:                 "启动参数（可选）",
@@ -236,14 +251,24 @@ var zhCN = Messages{
 	ManagedScheduleInvalid:         "时间必须是 0 到 1440 之间的整数（分钟）",
 	ManagedScheduleTag:             "%s · 定时",
 	ManagedLaunchHidden:            "后台启动",
-	ManagedLaunchHiddenHint:        "不弹出任何窗口，直接在后台运行；适合 .bat、.ps1、.py 等脚本和命令行工具",
+	ManagedLaunchHiddenHint:        "启动时隐藏控制台；选择上方“显示窗口”可查看原有输出并操作",
 	ManagedLaunchNow:               "立即启动",
 	ManagedLaunchNowHint:           "立即启动一次；未勾选开机启动时按正常方式启动",
 	ManagedLaunchNowBusy:           "启动中…",
+	ManagedStopProgram:             "停止程序",
+	ManagedStopProgramBusy:         "停止中…",
+	ManagedStopProgramHint:         "关闭或退出正在运行的程序",
+	ManagedStopProgramFailed:       "无法停止程序，请确认程序仍在运行后重试",
+	ManagedWindowBusy:              "切换中…",
+	ManagedWindowHint:              "显示或隐藏正在运行程序的原有窗口，不改变启动方式",
+	ManagedWindowNotRunning:        "程序未运行，请先选择“立即启动”",
+	ManagedWindowUnavailable:       "程序没有可显示的原生窗口；旧版后台启动的程序需退出后重新启动",
+	ManagedWindowFailed:            "无法切换窗口，请确认程序仍在响应后重试",
+	ManagedWindowActivation:        "窗口已显示，请在任务栏选中它",
 	AddProgram:                     "添加程序",
 	AddProgramHint:                 "选择要开机启动的程序或脚本，可以一次选多个",
-	RemoveSelected:                 "移除此程序",
-	RemoveSelectedHint:             "只从列表中移除，不会卸载或删除程序本身",
+	RemoveConfirmPrompt:            "从列表删除“%s”？",
+	RemoveConfirmLabel:             "确定",
 	OpenLogs:                       "打开日志",
 	OpenLogsHint:                   "查看 WinTray 的运行记录，排查问题时使用",
 	CleanupRestore:                 "重置…",
@@ -262,8 +287,9 @@ var zhCN = Messages{
 	TrayExit:                       "退出 WinTray",
 	TrayToolTip:                    "WinTray",
 	TrayBoxHomeTitle:               "托盘收纳",
-	TrayBoxHomeHint:                "将此程序的托盘图标从任务栏收进 WinTray 菜单；在菜单中左键单击等同单击原图标，右键打开程序自己的托盘菜单",
+	TrayBoxHomeHint:                "将程序的托盘图标收进 WinTray 菜单；单击打开窗口，悬停或点击右侧箭头打开原生菜单",
 	TrayMenuFailedBody:             "无法打开托盘菜单\n请重启 WinTray 后重试",
+	TrayMenuCloseFailedBody:        "无法自动关闭程序菜单\n请先手动关闭该菜单，再展开其他程序",
 	TrayBoxFailedTitle:             "托盘图标收纳",
 	TrayBoxFailedBody:              "托盘收纳未能完成\n请重新启用收纳；若仍失败，请打开日志",
 	TrayBoxIconGoneBody:            "%s 的托盘图标已不存在，程序可能已经退出",
@@ -326,7 +352,7 @@ var enUS = Messages{
 	RunAtLogonHint:                 "Stops WinTray's launch scheduling; apps' own startup remains or is restored",
 	StartHidden:                    "Don't show the WinTray window at sign-in",
 	ExitOnDone:                     "Exit WinTray when sign-in tasks finish",
-	ExitOnDoneHint:                 "Never exits while any program uses tray collection; if console programs still use tray icons from WinTray, it waits until they all exit",
+	ExitOnDoneHint:                 "WinTray stays running while tray collection, background windows or hosted console icons are in use",
 	SettingsTimingTitle:            "Timing",
 	RetrySeconds:                   "Wait for a window up to",
 	RetrySecondsHint:               "Increase it if slow programs aren't closed to the tray; 0–120",
@@ -336,6 +362,7 @@ var enUS = Messages{
 	StartupIntervalHint:            "Staggers launches to ease sign-in load; 0–120; 0 means no wait",
 	SecondsUnit:                    "seconds",
 	LanguageLabel:                  "Language / 语言",
+	SwitchLanguageHint:             "切换为中文",
 	ManagedListTitle:               "Startup programs",
 	ManagedListHint:                "Drop files to add; choose numbers for start order; check sign-in or tray collection",
 	ManagedDropRejected:            "These items were not added because they are missing, folders, or unsupported file types:\r\n%s\r\n\r\nDrop .exe, .bat, .cmd, .ps1, .py or .pyw files",
@@ -345,6 +372,7 @@ var enUS = Messages{
 	ManagedColumnName:              "Program name",
 	ManagedColumnOrder:             "Order",
 	ManagedColumnRule:              "Start action",
+	ManagedColumnDelete:            "Delete",
 	BrowseProgram:                  "Change…",
 	BrowseProgramHint:              "Use a different program file",
 	ManagedAppArgs:                 "Arguments (optional)",
@@ -386,14 +414,24 @@ var enUS = Messages{
 	ManagedScheduleInvalid:         "Times must be whole minutes from 0 to 1440",
 	ManagedScheduleTag:             "%s · timed",
 	ManagedLaunchHidden:            "Run in background",
-	ManagedLaunchHiddenHint:        "Runs in the background without showing any window; best for scripts (.bat, .ps1, .py) and command-line tools",
+	ManagedLaunchHiddenHint:        "Console starts hidden; use Show Window for output and input",
 	ManagedLaunchNow:               "Launch Now",
 	ManagedLaunchNowHint:           "Starts it now; uses normal mode when start at sign-in is off",
 	ManagedLaunchNowBusy:           "Starting…",
+	ManagedStopProgram:             "Stop Program",
+	ManagedStopProgramBusy:         "Stopping…",
+	ManagedStopProgramHint:         "Close or quit the running program",
+	ManagedStopProgramFailed:       "Could not stop the program; check that it is still running and try again",
+	ManagedWindowBusy:              "Switching…",
+	ManagedWindowHint:              "Show or hide the running program's original window without changing its startup mode",
+	ManagedWindowNotRunning:        "The program is not running; select Launch Now first",
+	ManagedWindowUnavailable:       "This process has no native window; exit and relaunch programs started in the background by an older WinTray",
+	ManagedWindowFailed:            "Could not change window visibility; check that the program is responding and try again",
+	ManagedWindowActivation:        "The window is visible; select it on the taskbar",
 	AddProgram:                     "Add Program",
 	AddProgramHint:                 "Pick programs or scripts to start at sign-in; you can select several at once",
-	RemoveSelected:                 "Remove",
-	RemoveSelectedHint:             "Only removes it from this list; the program itself isn't uninstalled or deleted",
+	RemoveConfirmPrompt:            "Remove \"%s\" from the list?",
+	RemoveConfirmLabel:             "Confirm",
 	OpenLogs:                       "Open Logs",
 	OpenLogsHint:                   "WinTray's activity record, for troubleshooting",
 	CleanupRestore:                 "Reset…",
@@ -412,8 +450,9 @@ var enUS = Messages{
 	TrayExit:                       "Exit WinTray",
 	TrayToolTip:                    "WinTray",
 	TrayBoxHomeTitle:               "Tray icon",
-	TrayBoxHomeHint:                "Move this program's tray icon off the taskbar into WinTray's menu; left-click its entry to click the icon, right-click it for the program's own tray menu",
+	TrayBoxHomeHint:                "Move this program's tray icon into WinTray's menu; click to open its window, or hover over or click its right arrow for the original menu",
 	TrayMenuFailedBody:             "Could not open the tray menu\nRestart WinTray and try again",
+	TrayMenuCloseFailedBody:        "Could not close the program menu automatically\nClose that menu before expanding another program",
 	TrayBoxFailedTitle:             "Collected tray icons",
 	TrayBoxFailedBody:              "Tray collection could not complete\nEnable it again; if it fails again, open the log",
 	TrayBoxIconGoneBody:            "The tray icon of %s is gone; the program may have exited",

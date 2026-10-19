@@ -16,7 +16,11 @@ type residencyState struct {
 	startupPending bool
 	settingsOpen   bool
 	manualLaunches int
+	windowActions  int
 	boxActive      bool
+	// Background windows use the main icon to reach Show Window rather than
+	// adding an individual icon for each script.
+	backgroundWindows bool
 	// silent is set when the user chooses background mode explicitly. It
 	// keeps hosted icons alive like the logon exit option, in any launch mode.
 	silent bool
@@ -26,9 +30,9 @@ type residencyState struct {
 }
 
 func (s residencyState) hideMainIcon(exitAfterCompleted bool) bool {
-	return !s.boxActive && (s.silent || s.autorun && exitAfterCompleted) && !s.settingsOpen
+	return !s.boxActive && !s.backgroundWindows && (s.silent || s.autorun && exitAfterCompleted) && !s.settingsOpen
 }
 
 func (s residencyState) shouldExit(exitAfterCompleted bool, hostedCount int) bool {
-	return s.hideMainIcon(exitAfterCompleted) && !s.startupPending && !s.runLimitsPending && s.manualLaunches == 0 && hostedCount == 0
+	return s.hideMainIcon(exitAfterCompleted) && !s.startupPending && !s.runLimitsPending && s.manualLaunches == 0 && s.windowActions == 0 && hostedCount == 0
 }

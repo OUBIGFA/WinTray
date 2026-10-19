@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -41,7 +40,7 @@ func TestFrequencyCountsSuccessfulAutomaticTaskLaunch(t *testing.T) {
 	entry.Schedule = config.Schedule{Enabled: true, FrequencyEnabled: true, FrequencyDays: 1, FrequencyRuns: 1}
 	svc := NewService(&testEnumerator{}, &testManager{}, &testLogger{})
 	svc.startupHistory = config.NewStartupHistory(filepath.Join(t.TempDir(), "history.json"))
-	var command *exec.Cmd
+	var command *startedProcess
 	svc.logonTaskLaunch = func(e config.ManagedAppEntry) error {
 		var err error
 		command, err = startProcess(e.ExePath, e.Args, launchNoWindow)

@@ -176,6 +176,9 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 	var trayController *tray.Controller
 	var mainWindow *ui.MainWindow
 	host := tray.NewHost(settings.Language, logger, orchestrator.FindConsoleWindow)
+	// Cache handles only for cheap live button labels. Every user action
+	// resolves the program again, so stale handles never authorize changes.
+	programWindows := make(map[string]orchestrator.HiddenWindow)
 	selfPath, _ := os.Executable()
 	box := traybox.NewBox(selfPath, logger)
 	host.SetTrayBox(box)
@@ -237,6 +240,7 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 		}
 		current := mainWindow.Settings()
 		state.boxActive = len(config.CollectedTrayIconPaths(current)) > 0
+		state.backgroundWindows = host.HasBackgroundWindows()
 		exitAfter := exitsAfterStartup(current)
 		if trayController != nil {
 			if err := trayController.SetVisible(!state.hideMainIcon(exitAfter)); err != nil {
@@ -247,7 +251,15 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 			requestExit()
 		}
 	}
-	host.SetOnEmpty(applyResidency)
+	host.SetOnChange(applyResidency)
+	releaseUnlistedBackground := func() {
+		current := mainWindow.Settings()
+		paths := make([]string, 0, len(current.ManagedApps))
+		for _, entry := range current.ManagedApps {
+			paths = append(paths, entry.ExePath)
+		}
+		host.ReleaseUnlistedBackground(paths)
+	}
 	// refreshRunLimits ends programs past their scheduled run time and keeps
 	// WinTray while others still have to be ended. It returns when to look
 	// again.
@@ -291,8 +303,9 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 
 	// Called by launch workers. Host icons belong to this process and are
 	// created on its UI thread, not in additional WinTray processes.
-	handOffToHost := func(hw tray.HostedWindow) {
+	handOffToHost := func(hw tray.HostedWindow) error {
 		restore := func() { tray.RestoreWindow(hw, orchestrator.FindConsoleWindow, logger) }
+		var lastErr error
 		for attempt := 1; attempt <= hostAddAttempts; attempt++ {
 			done := make(chan struct{})
 			var handled sync.Once
@@ -302,20 +315,25 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 				handled.Do(func() {
 					if hostErr = launchCtx.Err(); hostErr == nil {
 						hostErr = host.TryAdd(hw)
+						if hostErr == nil {
+							programWindows[strings.ToLower(hw.ExePath)] = orchestrator.HiddenWindow{Handle: hw.Handle, ProcessID: hw.ProcessID}
+							releaseUnlistedBackground()
+						}
 					}
 				})
 			})
 			select {
 			case <-done:
 				if hostErr == nil {
-					return
+					return nil
 				}
 			case <-launchCtx.Done():
 				// Prevent a late callback from adopting a restored window.
 				handled.Do(func() {})
 				restore()
-				return
+				return launchCtx.Err()
 			}
+			lastErr = hostErr
 			logger.Warn(fmt.Sprintf("tray hosting attempt %d failed: %s pid=%d %v", attempt, hw.Name, hw.ProcessID, hostErr))
 			if errors.Is(hostErr, tray.ErrHostedProcessUnavailable) || attempt == hostAddAttempts {
 				break
@@ -328,10 +346,11 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 			case <-launchCtx.Done():
 				timer.Stop()
 				restore()
-				return
+				return launchCtx.Err()
 			}
 		}
 		restore()
+		return lastErr
 	}
 
 	activation, activationErr := ipc.NewActivationListener(services.activationName)
@@ -428,6 +447,7 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 				trayController.SetLanguage(s.Language)
 			}
 			host.SetLanguage(s.Language)
+			releaseUnlistedBackground()
 			applyResidency()
 		},
 		OnToggleTrayBox: func(id string, on bool) error {
@@ -500,6 +520,77 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 				}
 				logger.Warn(fmt.Sprintf("launch now failed: %s %s", result.AppName, result.Message))
 				mainWindow.ShowError(m.WindowTitle, fmt.Sprintf(m.StatusLaunchFailTemplate, result.AppName, detail))
+			}()
+		},
+		OnStopNow: func(entry config.ManagedAppEntry) {
+			if quitting {
+				mainWindow.FinishStopNow(entry.ID)
+				return
+			}
+			state.manualLaunches++
+			language := safeLanguage(mainWindow)
+			launchWG.Add(1)
+			go func() {
+				defer launchWG.Done()
+				stopErr := orch.StopNow(launchCtx, entry)
+				mainWindow.Synchronize(func() {
+					state.manualLaunches--
+					if stopErr == nil {
+						delete(programWindows, strings.ToLower(entry.ExePath))
+					}
+					mainWindow.FinishStopNow(entry.ID)
+					applyResidency()
+				})
+				if launchCtx.Err() != nil || stopErr == nil {
+					return
+				}
+				logger.Warn(fmt.Sprintf("stop program failed: %s: %v", entry.Name, stopErr))
+				mainWindow.ShowError(entry.Name, i18n.For(language).ManagedStopProgramFailed)
+			}()
+		},
+		OnProgramRunning: func(entry config.ManagedAppEntry) bool {
+			return orch.IsProgramRunning(entry)
+		},
+		OnProgramWindowVisible: func(entry config.ManagedAppEntry) bool {
+			return programWindows[strings.ToLower(entry.ExePath)].IsVisible()
+		},
+		OnSetProgramWindowVisible: func(entry config.ManagedAppEntry, visible bool) {
+			if quitting {
+				mainWindow.FinishProgramWindow(entry.ID)
+				return
+			}
+			state.windowActions++
+			language := safeLanguage(mainWindow)
+			launchWG.Add(1)
+			go func() {
+				defer launchWG.Done()
+				window, windowErr := orch.SetProgramWindowVisible(launchCtx, entry, visible)
+				if windowErr == nil && !visible {
+					// A manually hidden, previously unhosted window also needs a
+					// recovery entry and must be restored when WinTray exits.
+					windowErr = handOffToHost(tray.HostedWindow{Name: entry.Name, ExePath: entry.ExePath, Handle: window.Handle, ProcessID: window.ProcessID, Background: true})
+				}
+				mainWindow.Synchronize(func() {
+					programWindows[strings.ToLower(entry.ExePath)] = window
+					state.windowActions--
+					mainWindow.FinishProgramWindow(entry.ID)
+					applyResidency()
+				})
+				if launchCtx.Err() != nil || windowErr == nil {
+					return
+				}
+				logger.Warn(fmt.Sprintf("program window: %s visible=%t: %v", entry.Name, visible, windowErr))
+				m := i18n.For(language)
+				detail := m.ManagedWindowFailed
+				switch {
+				case errors.Is(windowErr, orchestrator.ErrProgramNotRunning):
+					detail = m.ManagedWindowNotRunning
+				case errors.Is(windowErr, orchestrator.ErrProgramNoWindow):
+					detail = m.ManagedWindowUnavailable
+				case errors.Is(windowErr, orchestrator.ErrWindowActivation):
+					detail = m.ManagedWindowActivation
+				}
+				mainWindow.ShowError(entry.Name, detail)
 			}()
 		},
 		OnCheckUpdate: func() {
@@ -629,7 +720,7 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 						break
 					}
 				}
-				runManagedApps(launchCtx, orch, settings, logger, handOffToHost)
+				runManagedApps(launchCtx, orch, settings, logger, func(hw tray.HostedWindow) { _ = handOffToHost(hw) })
 				mainWindow.Synchronize(func() {
 					state.startupPending = false
 					// Programs just started may have a run time to wait for.
@@ -711,10 +802,11 @@ func hostedFromResult(entry config.ManagedAppEntry, result orchestrator.Result) 
 		return tray.HostedWindow{}, false
 	}
 	return tray.HostedWindow{
-		Name:      entry.Name,
-		ExePath:   entry.ExePath,
-		Handle:    result.Hidden.Handle,
-		ProcessID: result.Hidden.ProcessID,
+		Name:       entry.Name,
+		ExePath:    entry.ExePath,
+		Handle:     result.Hidden.Handle,
+		ProcessID:  result.Hidden.ProcessID,
+		Background: entry.LaunchHiddenInBackground,
 	}, true
 }
 

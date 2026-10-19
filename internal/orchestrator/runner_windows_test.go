@@ -5,7 +5,6 @@ package orchestrator
 import (
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -126,6 +125,8 @@ func TestRunnerHelperProcess(t *testing.T) {
 		if err := os.WriteFile(os.Args[5], data, 0o600); err != nil {
 			t.Fatal(err)
 		}
+	case "console":
+		runNativeConsoleProbe(t, os.Args[5])
 	case "wait":
 		// The parent opens a process handle before releasing this short-lived
 		// helper, so it can always Wait and clean up even on assertion failure.
@@ -150,7 +151,7 @@ func runnerHelperArgs(mode, output string, args ...string) string {
 	return strings.Join(all, " ")
 }
 
-func waitRunnerCommand(t *testing.T, cmd *exec.Cmd) {
+func waitRunnerCommand(t *testing.T, cmd *startedProcess) {
 	t.Helper()
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()

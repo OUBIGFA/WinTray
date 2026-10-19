@@ -4,7 +4,6 @@ package orchestrator
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -48,7 +47,7 @@ func TestRunningProcessStartsByPathPreservesUnicodeCaseMatching(t *testing.T) {
 // multiple instances and fresh observations after an instance exits.
 func TestRunningProcessStartsByPathTracksOldestInstancePerExecutable(t *testing.T) {
 	first, other := startupTestEntry(t), startupTestEntry(t)
-	start := func(entry config.ManagedAppEntry) (*exec.Cmd, time.Time) {
+	start := func(entry config.ManagedAppEntry) (*startedProcess, time.Time) {
 		t.Helper()
 		cmd, err := startProcess(entry.ExePath, entry.Args, launchNoWindow)
 		if err != nil {

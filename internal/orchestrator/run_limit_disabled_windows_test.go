@@ -4,7 +4,6 @@ package orchestrator
 
 import (
 	"fmt"
-	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -26,7 +25,7 @@ func TestEndOverdueProgramsCancelsChangedRunLimit(t *testing.T) {
 				}
 				other := startupTestEntry(t)
 				other.Schedule = entry.Schedule
-				commands := make(map[uint32]*exec.Cmd)
+				commands := make(map[uint32]*startedProcess)
 				for _, app := range []config.ManagedAppEntry{entry, other} {
 					cmd, err := startProcess(app.ExePath, app.Args, launchNoWindow)
 					if err != nil {

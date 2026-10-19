@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -67,7 +66,7 @@ func TestExternalStartupLateProcessIsAdoptedWithoutDuplicate(t *testing.T) {
 		return `HKCU\Run\QQNT`, nil
 	}
 	// Simulate Windows starting the app after WinTray has found no process.
-	started := make(chan *exec.Cmd, 1)
+	started := make(chan *startedProcess, 1)
 	failed := make(chan error, 1)
 	go func() {
 		<-checked
@@ -80,7 +79,7 @@ func TestExternalStartupLateProcessIsAdoptedWithoutDuplicate(t *testing.T) {
 		started <- cmd
 	}()
 	got := svc.StartAndManage(context.Background(), entry, 2)
-	var cmd *exec.Cmd
+	var cmd *startedProcess
 	select {
 	case cmd = <-started:
 	case err := <-failed:
@@ -255,7 +254,7 @@ func TestLogonTaskEntryWaitsForTaskLaunchAndNeverLaunchesItself(t *testing.T) {
 		return "", nil
 	}
 	checked := make(chan struct{})
-	started := make(chan *exec.Cmd, 1)
+	started := make(chan *startedProcess, 1)
 	failed := make(chan error, 1)
 	go func() {
 		close(checked)
@@ -269,7 +268,7 @@ func TestLogonTaskEntryWaitsForTaskLaunchAndNeverLaunchesItself(t *testing.T) {
 	}()
 	<-checked
 	got := svc.StartAndManage(context.Background(), entry, 2)
-	var cmd *exec.Cmd
+	var cmd *startedProcess
 	select {
 	case cmd = <-started:
 	case err := <-failed:

@@ -103,6 +103,7 @@ if (Test-Path $manifestTarget) {
 $dependencyRows = & $goCommand list -deps -f '{{if .Module}}{{.Module.Path}}|{{.Module.Version}}|{{.Module.Dir}}{{end}}' ./cmd/wintray
 if ($LASTEXITCODE -ne 0) { throw "Could not list executable dependencies" }
 $noticeParts = [System.Collections.Generic.List[string]]::new()
+$noticeParts.Add([IO.File]::ReadAllText((Join-Path $root 'internal/ui/icons/LICENSE.lucide')))
 $goRoot = & $goCommand env GOROOT
 if ($LASTEXITCODE -ne 0) { throw "Could not resolve Go license" }
 $noticeParts.Add("Go" + [Environment]::NewLine + [IO.File]::ReadAllText((Join-Path $goRoot 'LICENSE')))

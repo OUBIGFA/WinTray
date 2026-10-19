@@ -4,7 +4,6 @@ package orchestrator
 
 import (
 	"fmt"
-	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -68,7 +67,7 @@ func TestEndOverdueProgramsKeepsSurvivingInstancesPending(t *testing.T) {
 		t.Run(fmt.Sprintf("terminate_%d_of_2", killCount), func(t *testing.T) {
 			entry := startupTestEntry(t)
 			entry.Schedule = config.Schedule{Enabled: true, AutoExitMinutes: 1}
-			commands := make(map[uint32]*exec.Cmd)
+			commands := make(map[uint32]*startedProcess)
 			for range 2 {
 				cmd, err := startProcess(entry.ExePath, entry.Args, launchNoWindow)
 				if err != nil {

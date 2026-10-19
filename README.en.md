@@ -19,7 +19,7 @@ English | [简体中文](README.md)
 WinTray starts selected programs when you sign in to Windows. It can close their windows or run scripts in the background. In this guide, startup means startup after Windows sign-in.
 
 - **Close to tray**: Closes program windows. Programs that support closing to the tray keep running. WinTray provides tray icons for console programs.
-- **Run in background**: Starts scripts or command-line tools without a console window.
+- **Run in background**: Starts with the console hidden. Use **Show Window** to view output and enter commands.
 - **Tray icon**: Moves selected programs' tray icons into the WinTray menu. This feature requires Windows 11.
 - **Tray icon recovery**: If WinTray is force-closed, restores the original icons of programs that are still running.
 - **Launch at boot**: Uses a scheduled task at sign-in, with the original startup arguments and privileges when available.
@@ -44,6 +44,8 @@ WinTray is available as a portable package. It does not need installation.
 8. Make sure **Run WinTray at sign-in** is enabled.
 
 After the settings are saved, use **Launch Now** to check the launch behavior. WinTray does not start another instance if the program is already running. Check automatic startup at the next Windows sign-in.
+
+Click the delete icon at the end of a program's row, then select **Confirm** to remove it from the list. The program file is kept.
 
 Settings and logs are stored in your user data directory. Before deleting WinTray, follow [Stop using WinTray](#stop-using-wintray) to restore the original startup entries.
 
@@ -71,13 +73,25 @@ Select **Start this program at sign-in** to edit the launch mode and arguments.
 | Mode | Behavior and use |
 | --- | --- |
 | Close to tray | Closes the window after launch. Use for programs that support closing to the tray, or console programs that need a tray icon |
-| Run in background | Starts without a console window. Use for scripts and command-line tools. Graphical windows created by the program can still appear |
+| Run in background | Starts with the console hidden. Use **Show Window** to open it. For scripts and command-line tools. Graphical windows created by the program can still appear |
 | Launch at boot | Uses a scheduled task at sign-in and preserves supported original startup settings. For `.exe` files only |
 | Start normally | Uses the program's original startup when available. Otherwise, WinTray starts the program. The window stays unchanged |
 
 **Arguments** are optional. WinTray uses these arguments when it starts the program directly. When it uses an original startup entry, that entry supplies the arguments.
 
 Clear **Start this program at sign-in** to stop WinTray from scheduling the program. The program's original startup is kept or restored. **Launch Now** then uses normal launch behavior. You can still edit **Custom timing**.
+
+### Show or hide a window
+
+1. Select a running program in the list on the left.
+2. Select **Show Window** beside the program name on the right.
+3. Select **Hide Window** in the same position to hide it again.
+
+Use the native console to view output, scroll through its history, and enter commands. Showing or hiding the window does not change the startup mode. Closing the console window can end the program.
+
+The program must still be running and have a native window. For `.pyw`, only a graphical window created by the script can be shown. Console output is not retained after the program exits.
+
+Exit programs started in the background by an older WinTray, then launch them with the new version. Previously discarded output cannot be recovered.
 
 ### Close to tray and wait before closing
 
@@ -96,7 +110,7 @@ Select **Tray icon** in the program list to move the program's existing tray ico
 
 - Collected icons no longer appear in the system tray or its `^` panel.
 - Click a program icon in the WinTray menu to open the program window.
-- Right-click the program icon to open its own tray menu.
+- Hover over or click the expand icon at the right of that program to open its own tray menu.
 - Clear **Tray icon**, or exit WinTray normally, to restore the original icons.
 
 ### Launch at boot
@@ -166,10 +180,13 @@ When **Exit WinTray when sign-in tasks finish** is off, WinTray keeps its own tr
 When automatic exit is enabled, WinTray continues running while any of these conditions apply:
 
 - A program has tray collection enabled.
+- A program still uses a background window.
 - A console program still uses a tray icon provided by WinTray.
 - A running program is waiting for its automatic exit time.
 
-Select **Run silently** at the bottom of **Settings** or in the tray menu to hide the main window. WinTray keeps its own tray icon when tray collection is enabled. Otherwise, it hides that icon. Hosted console icons remain available. Run `WinTray.exe` again to open the main window.
+Select **Run silently** at the bottom of **Settings** or in the tray menu to hide the main window. WinTray keeps its own tray icon while tray collection or background windows are in use. Otherwise, it hides that icon. Hosted console icons remain available. Run `WinTray.exe` again to open the main window.
+
+Selecting **Exit WinTray** restores the hidden windows of programs that are still running.
 
 ## System requirements
 

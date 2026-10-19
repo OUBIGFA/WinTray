@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"wintray/internal/config"
 	"wintray/internal/i18n"
@@ -30,7 +31,7 @@ func TestNativeListScrollKeepsPageFixed(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := i18n.For("zh-CN")
-	labels := []string{m.AddProgram, m.OpenSettings, m.ManagedLaunchNow, m.RemoveSelected, m.ExitApp}
+	labels := []string{m.AddProgram, m.OpenSettings, m.ManagedLaunchNow, m.ExitApp}
 	before := make(map[string]native.Rect)
 	for _, label := range labels {
 		r, ok := tt.Find(label)
@@ -179,7 +180,7 @@ func TestNativeBlankListClickClearsSelection(t *testing.T) {
 // launch the illustrative entry, including after the last program is removed.
 func TestNativeUnselectedEditorShowsDisabledDefaults(t *testing.T) {
 	for _, lang := range []string{"zh-CN", "en-US"} {
-		for _, scenario := range []string{"empty", "unselected", "deselected", "removed"} {
+		for _, scenario := range []string{"empty", "unselected", "deselected"} {
 			t.Run(lang+"/"+scenario, func(t *testing.T) {
 				count := 1
 				if scenario == "empty" {
@@ -196,22 +197,16 @@ func TestNativeUnselectedEditorShowsDisabledDefaults(t *testing.T) {
 				w.callbacks.OnLaunchNow = func(config.ManagedAppEntry) { launches++ }
 				tt := native.NewTester(w.nativeView, 1200, 850)
 				m := i18n.For(lang)
-				if scenario == "deselected" || scenario == "removed" {
+				if scenario == "deselected" {
 					if err := tt.Click("Program 000"); err != nil {
 						t.Fatal(err)
 					}
-					if scenario == "removed" {
-						if err := tt.Click(m.RemoveSelected); err != nil {
-							t.Fatal(err)
-						}
-					} else {
-						tt.ClickAt(180, 650)
-					}
+					tt.ClickAt(180, 650)
 				}
 				before := slices.Clone(w.settings.ManagedApps)
 				saves = 0
 				captureNativeTest(t, tt, lang+"-editor-"+scenario)
-				for _, label := range []string{m.ManagedExampleName, `C:\Apps\Example\Example.exe`, m.ManagedLaunchNow, m.BrowseProgram, m.ManagedEnabled, m.ManagedModeLabel, m.ManagedAppArgs, m.ManagedCloseDelay, m.ManagedSchedule, m.ManagedScheduleStart, m.ManagedScheduleExit, m.ManagedFrequency, m.ManagedFrequencyDays, m.ManagedFrequencyRuns, m.RemoveSelected} {
+				for _, label := range []string{m.ManagedExampleName, `C:\Apps\Example\Example.exe`, m.ManagedLaunchNow, m.BrowseProgram, m.ManagedEnabled, m.ManagedModeLabel, m.ManagedAppArgs, m.ManagedCloseDelay, m.ManagedSchedule, m.ManagedScheduleStart, m.ManagedScheduleExit, m.ManagedFrequency, m.ManagedFrequencyDays, m.ManagedFrequencyRuns} {
 					if !tt.HasText(label) {
 						t.Fatalf("unselected editor missing %q", label)
 					}
@@ -219,7 +214,7 @@ func TestNativeUnselectedEditorShowsDisabledDefaults(t *testing.T) {
 				if tt.HasText(`C:\WinTray-test\app0.exe`) {
 					t.Fatal("unselected editor retained the real program path")
 				}
-				for _, label := range []string{m.ManagedLaunchNow, m.ManagedEnabled, m.ManagedLaunchHidden, m.ManagedSchedule, m.ManagedFrequency, m.RemoveSelected} {
+				for _, label := range []string{m.ManagedLaunchNow, m.ManagedEnabled, m.ManagedLaunchHidden, m.ManagedSchedule, m.ManagedFrequency} {
 					if err := tt.Click(label); err != nil {
 						t.Fatal(err)
 					}
@@ -276,6 +271,107 @@ func TestNativeOrderDropdownSavesFinalPosition(t *testing.T) {
 	tt.Key(0, native.KeyEnter)
 	if w.settings.ManagedApps[0].ID != "0" || saved != 2 {
 		t.Fatal("choosing first position did not move and save")
+	}
+}
+
+func TestNativeDeleteColumnRemovesAfterConfirmation(t *testing.T) {
+	for _, language := range []string{"zh-CN", "en-US"} {
+		for _, confirmed := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/confirmed=%t", language, confirmed), func(t *testing.T) {
+				w := nativeProgramsFixture(2)
+				w.settings.Language = language
+				saved := 0
+				w.callbacks.OnSave = func(config.Settings) { saved++ }
+				tt := native.NewTester(w.nativeView, 1200, 850)
+				m := i18n.For(language)
+				if err := tt.Click(m.ManagedColumnDelete + " Program 000"); err != nil {
+					t.Fatal(err)
+				}
+				menu := tt.Menu()
+				if len(menu) != 3 || !strings.Contains(menu[0], "Program 000") || menu[2] != m.RemoveConfirmLabel {
+					t.Fatalf("delete did not open its confirmation menu: %v", menu)
+				}
+				if len(w.settings.ManagedApps) != 2 || saved != 0 {
+					t.Fatal("opening the menu deleted a program or saved settings")
+				}
+				if confirmed {
+					if err := tt.ChooseMenuItem(m.RemoveConfirmLabel); err != nil {
+						t.Fatal(err)
+					}
+					if len(w.settings.ManagedApps) != 1 || w.settings.ManagedApps[0].ID != "1" || saved != 1 {
+						t.Fatalf("confirmed delete kept the wrong entry: %+v saves=%d", w.settings.ManagedApps, saved)
+					}
+				} else {
+					tt.CloseMenu()
+					tt.Frame()
+					if len(w.settings.ManagedApps) != 2 || saved != 0 {
+						t.Fatalf("dismissed menu changed settings: %+v saves=%d", w.settings.ManagedApps, saved)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestNativeProgramColumnsAndControlsFit(t *testing.T) {
+	for _, language := range []string{"zh-CN", "en-US"} {
+		for _, width := range []int{1124, 1184, 1200, 1600} {
+			t.Run(fmt.Sprintf("%s/%d", language, width), func(t *testing.T) {
+				w := nativeProgramsFixture(12)
+				w.settings.Language = language
+				m := i18n.For(language)
+				tt := native.NewTester(w.nativeView, width, 720)
+				if err := tt.Click("Program 001"); err != nil {
+					t.Fatal(err)
+				}
+				if w.desktop.selected != 1 {
+					t.Fatalf("row is not reachable: selected=%d", w.desktop.selected)
+				}
+				// Check actual horizontal geometry, not text traversal order.
+				editor, _ := tt.Find(m.ManagedEnabled)
+				lastRight := float32(0)
+				for _, title := range []string{m.ManagedColumnName, m.TrayBoxHomeTitle, m.ManagedColumnRule, m.ManagedColumnOrder, m.ManagedColumnDelete} {
+					header, ok := tt.Find(title)
+					if !ok || header.X < lastRight || header.W < 16 || header.X+header.W >= editor.X {
+						t.Fatalf("column %q overlaps or is out of order: %+v, previous right=%v editor=%+v", title, header, lastRight, editor)
+					}
+					lastRight = header.X + header.W
+				}
+				orderLabel := m.ManagedColumnOrder + " Program 001"
+				order, ok := tt.Find(orderLabel)
+				if !ok || order.W < 64 || order.H < 30 || order.X+order.W >= editor.X {
+					t.Fatalf("order select was replaced with a cramped control: %+v", order)
+				}
+				if err := tt.Click(orderLabel); err != nil {
+					t.Fatal(err)
+				}
+				if len(tt.Menu()) != 0 || !tt.Focused(orderLabel) {
+					t.Fatal("order is not the toolkit's focusable select")
+				}
+				tt.Key(0, native.KeyEscape)
+				deleteLabel := m.ManagedColumnDelete + " Program 001"
+				remove, ok := tt.Find(deleteLabel)
+				if !ok || remove.W < 32 || remove.X+remove.W >= editor.X {
+					t.Fatalf("delete action is clipped: %+v", remove)
+				}
+				if err := tt.Click(deleteLabel); err != nil {
+					t.Fatal(err)
+				}
+				if len(tt.Menu()) == 0 {
+					t.Fatal("delete action did not open its confirmation menu")
+				}
+				tt.CloseMenu()
+				for _, number := range []string{"1", "10"} {
+					digit, ok := tt.Find(number)
+					header, _ := tt.Find(m.ManagedColumnOrder)
+					if !ok || absFloat(digit.X+digit.W/2-header.X-header.W/2) > 1 {
+						t.Fatalf("number %s is not centered under its header: digit=%+v header=%+v", number, digit, header)
+					}
+				}
+				tt.Move(-1, -1)
+				captureNativeTest(t, tt, fmt.Sprintf("list-%s-%d", language, width))
+			})
+		}
 	}
 }
 
@@ -338,12 +434,12 @@ func TestNativeFullPagesFitWithoutPageScroll(t *testing.T) {
 				}
 			}
 			captureNativeTest(t, tt, lang+"-full-programs")
-			check(m.OpenSettings, m.ManagedFrequencyHint, m.RemoveSelected, m.ExitApp, m.RunSilently)
+			check(m.OpenSettings, m.ManagedFrequencyHint, m.ExitApp, m.RunSilently)
 			tt.SetSize(1184, 811)
-			remove, ok := tt.Find(m.RemoveSelected)
+			remove, ok := tt.Find(m.ManagedColumnDelete + " Program 000")
 			footer, _ := tt.Find(m.ExitApp)
 			if !ok || remove.W <= 0 || remove.Y+remove.H > footer.Y {
-				t.Errorf("editor overlaps footer with window chrome: remove=%+v footer=%+v", remove, footer)
+				t.Errorf("list row overlaps footer with window chrome: delete=%+v footer=%+v", remove, footer)
 			}
 			if err := tt.Click(m.OpenSettings); err != nil {
 				t.Fatal(err)
@@ -360,7 +456,7 @@ func TestNativeFullPagesFitWithoutPageScroll(t *testing.T) {
 			if err := tt.Click(m.BackToPrograms); err != nil {
 				t.Fatal(err)
 			}
-			for _, label := range []string{m.ManagedFrequencyHint, m.RemoveSelected, m.ExitApp} {
+			for _, label := range []string{m.ManagedFrequencyHint, m.ExitApp} {
 				r, ok := tt.Find(label)
 				if !ok || r.Y+r.H > 680 {
 					t.Errorf("small programs clips %s: %+v", label, r)

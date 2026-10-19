@@ -16,8 +16,8 @@ type launchMode int
 const (
 	// launchVisible starts the program normally.
 	launchVisible launchMode = iota
-	// launchNoWindow starts the program without any console window
-	// (CREATE_NO_WINDOW); used for scripts and "launch hidden" entries.
+	// launchNoWindow is for processes that have no native console, and for
+	// internal noninteractive helpers. Recoverable consoles use the mode below.
 	launchNoWindow
 	// launchHiddenConsole starts a console program with its console window
 	// created hidden (SW_HIDE). The window still exists, so it can be shown
@@ -25,24 +25,36 @@ const (
 	launchHiddenConsole
 )
 
-func startProcess(exePath, args string, mode launchMode) (*exec.Cmd, error) {
-	hidden := mode == launchNoWindow
-	dir := filepath.Dir(exePath)
-	cmd := buildLaunchCommand(exePath, args, hidden)
-	if mode == launchHiddenConsole {
-		// A fresh console is requested explicitly so the program never shares
-		// (and never inherits) another console; SW_HIDE then applies to that
-		// new console window, which stays hosted by conhost.
-		cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNewConsole, HideWindow: true}
+// startedProcess gives both launch paths the same process ownership and exit
+// handling without pretending a native CreateProcess call used exec.Cmd.Start.
+type startedProcess struct{ Process *os.Process }
+
+func (p *startedProcess) Wait() error {
+	state, err := p.Process.Wait()
+	if err == nil && !state.Success() {
+		return &exec.ExitError{ProcessState: state}
 	}
+	return err
+}
+
+func startProcess(exePath, args string, mode launchMode) (*startedProcess, error) {
+	dir := filepath.Dir(exePath)
+	cmd := buildLaunchCommand(exePath, args, mode == launchNoWindow)
 	if _, err := os.Stat(dir); err == nil {
 		cmd.Dir = dir
 	}
 
+	if mode == launchHiddenConsole || mode == launchVisible && hasNativeConsole(exePath) {
+		process, err := startNativeConsole(cmd, mode == launchHiddenConsole)
+		if err != nil {
+			return nil, err
+		}
+		return &startedProcess{Process: process}, nil
+	}
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	return cmd, nil
+	return &startedProcess{Process: cmd.Process}, nil
 }
 
 const (

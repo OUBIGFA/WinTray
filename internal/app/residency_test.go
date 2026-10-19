@@ -64,6 +64,23 @@ func TestResidencySilentModeKeepsHostedIconsInAnyLaunchMode(t *testing.T) {
 	}
 }
 
+func TestBackgroundWindowsKeepMainRecoveryEntry(t *testing.T) {
+	for _, silent := range []bool{false, true} {
+		state := residencyState{autorun: true, silent: silent, backgroundWindows: true}
+		if state.hideMainIcon(true) || state.shouldExit(true, 1) {
+			t.Fatal("background windows lost the main recovery entry")
+		}
+		state.backgroundWindows = false
+		if !state.hideMainIcon(true) || !state.shouldExit(true, 0) {
+			t.Fatal("ending the last background program did not restore auto-exit")
+		}
+		state.windowActions = 1
+		if state.shouldExit(true, 0) {
+			t.Fatal("auto-exit raced an in-progress native window action")
+		}
+	}
+}
+
 func TestTrayBoxInUseKeepsAutorunSessionResident(t *testing.T) {
 	s := config.DefaultSettings()
 	if !exitsAfterStartup(s) {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -16,10 +15,9 @@ import (
 )
 
 // startOptions describes how a managed entry should be brought up.
-// hideProcessWindow creates the process without a console window;
-// hideConsoleWindow creates a console program with its console hidden so the
-// window can later be shown from a tray icon; manageWindow closes/hides the
-// top-level window it opens afterwards.
+// hideProcessWindow requests background launch; recoverable console programs
+// additionally use hideConsoleWindow to retain their native input and output.
+// manageWindow closes/hides the top-level window opened afterwards.
 // windowOptional treats window handling as best effort: a program that never
 // opens a window (background scripts) still counts as a successful launch.
 // externalOwned marks an entry whose launch belongs to the logon task WinTray
@@ -40,10 +38,10 @@ type startOptions struct {
 
 func (o startOptions) launchMode() launchMode {
 	switch {
-	case o.hideProcessWindow:
-		return launchNoWindow
 	case o.hideConsoleWindow:
 		return launchHiddenConsole
+	case o.hideProcessWindow:
+		return launchNoWindow
 	default:
 		return launchVisible
 	}
@@ -135,11 +133,10 @@ func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retry
 
 	expectedName := stringutil.TrimExt(filepath.Base(entry.ExePath))
 	expectedPath := normalizePath(entry.ExePath)
-	// A console-subsystem program (syncthing.exe, frpc.exe, ...) owns no GUI
-	// window: its only window is the console host, and closing that terminates
-	// the process. "Close window after launch" therefore means "keep the
-	// window hidden and reachable from a tray icon" for these programs.
-	consoleProgram := opts.manageWindow && consoleExecutableCheck(entry.ExePath)
+	// Keep the native console for both background launch and tray hosting.
+	// A console close would terminate the program; a console-free launch
+	// would make both its output and the requested Show Window unavailable.
+	consoleProgram := (opts.manageWindow || opts.hideProcessWindow) && hasNativeConsole(entry.ExePath)
 	if opts.manageWindow && !consoleProgram {
 		var err error
 		s, err = s.withStartupVisibility(entry.ExePath)
@@ -242,7 +239,7 @@ func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retry
 		}
 		return startedResult(entry, opts)
 	}
-	var cmd *exec.Cmd
+	var cmd *startedProcess
 	admitted, err := s.launchWithFrequency(entry, opts, func() error {
 		var err error
 		cmd, err = startProcess(entry.ExePath, entry.Args, opts.launchMode())
@@ -262,7 +259,11 @@ func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retry
 	s.logger.Info(fmt.Sprintf("started: %s pid=%d mode=%d", entry.Name, pid, opts.launchMode()))
 
 	if opts.hideConsoleWindow {
-		return s.hostLaunchedConsole(ctx, entry, pid)
+		result := s.hostLaunchedConsole(ctx, entry, pid)
+		if opts.hideProcessWindow {
+			result.Code, result.Message = ResultStartedHidden, "started hidden"
+		}
+		return result
 	}
 
 	if !opts.manageWindow {
@@ -333,7 +334,11 @@ func (s *Service) manageRunning(ctx context.Context, entry config.ManagedAppEntr
 	s.logger.Info(fmt.Sprintf("skip start: already running %s", entry.Name))
 	if consoleProgram {
 		if hidden, ok := s.adoptRunningConsole(ctx, entry, expectedPath, expectedName); ok {
-			return hiddenToTrayResult(entry, hidden)
+			result := hiddenToTrayResult(entry, hidden)
+			if opts.hideProcessWindow {
+				result.Code, result.Message = ResultAlreadyRunningSkipped, "already running skipped"
+			}
+			return result
 		}
 	}
 	if opts.manageWindow {

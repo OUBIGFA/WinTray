@@ -22,38 +22,47 @@ import (
 )
 
 type Callbacks struct {
-	OnSave           func(config.Settings)
-	OnToggleTrayBox  func(string, bool) error
-	OnOpenLogs       func()
-	OnCleanupRestore func()
-	OnRemoveLogon    func()
-	OnLaunchNow      func(config.ManagedAppEntry)
-	OnCheckUpdate    func()
-	OnOpenRepository func()
-	OnExit           func()
-	OnRunSilently    func()
-	OnHideToTray     func()
+	OnSave                    func(config.Settings)
+	OnToggleTrayBox           func(string, bool) error
+	OnOpenLogs                func()
+	OnCleanupRestore          func()
+	OnRemoveLogon             func()
+	OnLaunchNow               func(config.ManagedAppEntry)
+	OnStopNow                 func(config.ManagedAppEntry)
+	OnProgramRunning          func(config.ManagedAppEntry) bool
+	OnProgramWindowVisible    func(config.ManagedAppEntry) bool
+	OnSetProgramWindowVisible func(config.ManagedAppEntry, bool)
+	OnCheckUpdate             func()
+	OnOpenRepository          func()
+	OnExit                    func()
+	OnRunSilently             func()
+	OnHideToTray              func()
 }
 
 // MainWindow owns the mygo desktop and an invisible owner for the existing
 // native tray icons. Only mygo renders controls; the tray owner exists even
 // before the first settings window and has no fonts, file icons or renderer.
 type MainWindow struct {
-	mw             *walk.MainWindow
-	settings       config.Settings
-	callbacks      Callbacks
-	desktop        desktopState
-	onSettingsPage bool
-	launchNowBusy  map[string]bool
-	checkingUpdate bool
-	allowClose     bool
-	starting       []func()
-	bounds         mygo.Rectangle
-	queueMu        sync.Mutex
-	queue          []func()
-	disposed       bool
-	iconsCancel    context.CancelFunc
+	mw                *walk.MainWindow
+	settings          config.Settings
+	callbacks         Callbacks
+	desktop           desktopState
+	onSettingsPage    bool
+	launchNowBusy     map[string]bool
+	programWindowBusy map[string]bool
+	checkingUpdate    bool
+	allowClose        bool
+	starting          []func()
+	bounds            mygo.Rectangle
+	queueMu           sync.Mutex
+	queue             []func()
+	disposed          bool
+	iconsCancel       context.CancelFunc
 }
+
+// Preserve the original-sized order selects and editor after adding a delete
+// column. A narrower minimum would force row controls to shrink or disappear.
+const mainWindowMinWidth = 1140
 
 const dispatchMessage = win.WM_APP + 0x51
 
@@ -122,6 +131,7 @@ func (w *MainWindow) Synchronize(f func()) {
 		win.PostMessage(hwnd, dispatchMessage, 0, 0)
 	}
 }
+
 func (w *MainWindow) synchronize(f func()) { w.Synchronize(f) }
 func (w *MainWindow) drain() {
 	w.queueMu.Lock()
@@ -200,10 +210,12 @@ func (w *MainWindow) ShowMainWindow() {
 			w.onSettingsPage = false
 			width, height := 1200, 850
 			if w.bounds.Width > 0 {
+				w.bounds.Width = max(mainWindowMinWidth, w.bounds.Width)
+				w.bounds.Height = max(720, w.bounds.Height)
 				width, height = w.bounds.Width, w.bounds.Height
 			}
 			w.desktop.window = mygo.NewWindow(mygo.WindowOptions{
-				Title: i18n.For(w.settings.Language).WindowTitle, Width: width, Height: height, MinWidth: 1040, MinHeight: 720, Hidden: true, Content: native.View(w.nativeView),
+				Title: i18n.For(w.settings.Language).WindowTitle, Width: width, Height: height, MinWidth: mainWindowMinWidth, MinHeight: 720, Hidden: true, Content: native.View(w.nativeView),
 			})
 			window := w.desktop.window
 			if w.bounds.Width > 0 {
@@ -314,6 +326,16 @@ func (w *MainWindow) SetLanguage(language string) {
 func (w *MainWindow) FinishLaunchNow(id string) {
 	w.Synchronize(func() { delete(w.launchNowBusy, id) })
 }
+
+func (w *MainWindow) FinishStopNow(id string) {
+	w.Synchronize(func() { delete(w.launchNowBusy, id) })
+}
+
+// FinishProgramWindow restores only the initiating program's window action.
+func (w *MainWindow) FinishProgramWindow(id string) {
+	w.Synchronize(func() { delete(w.programWindowBusy, id) })
+}
+
 func (w *MainWindow) SetCheckUpdateBusy(busy bool) { w.Synchronize(func() { w.checkingUpdate = busy }) }
 
 func (w *MainWindow) ShowInfo(title, body string)  { w.showMessage(title, body, mygo.MessageInfo) }

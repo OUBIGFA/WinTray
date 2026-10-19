@@ -43,7 +43,7 @@ func TestContextMenuWithoutCollectedIconsContainsOnlyActions(t *testing.T) {
 	}
 }
 
-func TestCollectedIconsAreDirectMenuCommandsWithOwnBitmaps(t *testing.T) {
+func TestCollectedIconsHaveNativeExpansionArrowsAndOwnBitmaps(t *testing.T) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	solid := func(c color.NRGBA) *image.NRGBA {
@@ -80,7 +80,7 @@ func TestCollectedIconsAreDirectMenuCommandsWithOwnBitmaps(t *testing.T) {
 		t.Fatalf("program-specific icon bitmaps = %v", bitmaps)
 	}
 	if got := win.GetMenuItemCount(menu); got != 6 {
-		t.Fatalf("menu items = %d, want two actions, a separator and three direct commands", got)
+		t.Fatalf("root menu items = %d, want two actions, a separator and three individual program rows", got)
 	}
 	assertTrayMenuActions(t, menu, msg)
 	separator := win.MENUITEMINFO{CbSize: uint32(unsafe.Sizeof(win.MENUITEMINFO{})), FMask: win.MIIM_FTYPE}
@@ -88,11 +88,19 @@ func TestCollectedIconsAreDirectMenuCommandsWithOwnBitmaps(t *testing.T) {
 		t.Fatal("missing separator between WinTray actions and collected icons")
 	}
 	want := []win.HBITMAP{bitmaps[0], bitmaps[1], 0}
+	submenus := make(map[win.HMENU]bool)
 	for i := range icons {
 		info := win.MENUITEMINFO{CbSize: uint32(unsafe.Sizeof(win.MENUITEMINFO{})), FMask: win.MIIM_ID | win.MIIM_SUBMENU | win.MIIM_BITMAP | win.MIIM_STATE}
-		if !win.GetMenuItemInfo(menu, uint32(i+3), win.BOOL(1), &info) || info.WID != uint32(trayBoxedBase+i) || info.HSubMenu != 0 || info.HbmpItem != want[i] {
-			t.Errorf("entry %d is not a direct command with its own icon: %+v", i, info)
+		if !win.GetMenuItemInfo(menu, uint32(i+3), win.BOOL(1), &info) || info.WID != uint32(trayBoxedBase+i) || info.HSubMenu == 0 || info.HbmpItem != want[i] {
+			t.Errorf("entry %d is missing its native arrow or icon: %+v", i, info)
 		}
+		if info.HSubMenu != 0 && win.GetMenuItemCount(info.HSubMenu) != 0 {
+			t.Errorf("entry %d copies program-owned menu items", i)
+		}
+		if submenus[info.HSubMenu] {
+			t.Errorf("entry %d shares an aggregate submenu with another program", i)
+		}
+		submenus[info.HSubMenu] = true
 		// None of these test icons registered a callback message.
 		if info.FState&win.MFS_DISABLED == 0 {
 			t.Errorf("entry %d without a callback message is enabled", i)
@@ -104,18 +112,21 @@ func TestCollectedIconsAreDirectMenuCommandsWithOwnBitmaps(t *testing.T) {
 func assertTrayMenuActions(t *testing.T, menu win.HMENU, msg i18n.Messages) {
 	t.Helper()
 	for position, want := range []menuItem{
-		{id: trayActionRunSilently, text: msg.RunSilently},
-		{id: trayActionExit, text: msg.TrayExit},
+		{id: trayActionRunSilently, text: msg.RunSilently, bitmap: win.HBMMENU_POPUP_MINIMIZE},
+		{id: trayActionExit, text: msg.TrayExit, bitmap: win.HBMMENU_POPUP_CLOSE},
 	} {
 		var label [128]uint16
 		info := win.MENUITEMINFO{
 			CbSize:     uint32(unsafe.Sizeof(win.MENUITEMINFO{})),
-			FMask:      win.MIIM_ID | win.MIIM_STRING | win.MIIM_FTYPE | win.MIIM_STATE,
+			FMask:      win.MIIM_ID | win.MIIM_STRING | win.MIIM_FTYPE | win.MIIM_STATE | win.MIIM_BITMAP,
 			DwTypeData: &label[0],
 			Cch:        uint32(len(label)),
 		}
 		if !win.GetMenuItemInfo(menu, uint32(position), 1, &info) {
 			t.Fatalf("read action at position %d", position)
+		}
+		if info.HbmpItem != want.bitmap {
+			t.Errorf("action %q has bitmap %d, want native glyph %d", want.text, info.HbmpItem, want.bitmap)
 		}
 		if info.WID != want.id || syscall.UTF16ToString(label[:]) != want.text ||
 			info.FType&win.MFT_SEPARATOR != 0 || info.FState&win.MFS_DISABLED != 0 {

@@ -119,12 +119,28 @@ func checkNativeClientPixels(hwnd win.HWND) error {
 	if ok, _, err := windows.NewLazySystemDLL("user32.dll").NewProc("PrintWindow").Call(uintptr(hwnd), uintptr(memory), 3); ok == 0 {
 		return fmt.Errorf("PrintWindow: %w", err)
 	}
-	colors := make(map[uint32]bool)
-	for _, pixel := range unsafe.Slice((*uint32)(bits), int(rect.Right)*int(rect.Bottom)) {
-		colors[pixel&0xFFFFFF] = true
-		if len(colors) >= 8 {
+	return checkClientPixelCoverage(unsafe.Slice((*uint32)(bits), int(rect.Right)*int(rect.Bottom)), int(rect.Right))
+}
+
+func checkClientPixelCoverage(pixels []uint32, width int) error {
+	if width < 2 || len(pixels) == 0 || len(pixels)%width != 0 {
+		return errors.New("invalid native client pixel dimensions")
+	}
+	// Both halves must contain painted UI. A text strip at the left edge can
+	// exceed eight colors while the rest of the window is still blank.
+	const minColors = 8
+	colors := [2]map[uint32]bool{make(map[uint32]bool), make(map[uint32]bool)}
+	for i, pixel := range pixels {
+		side := 0
+		if i%width >= width/2 {
+			side = 1
+		}
+		if len(colors[side]) < minColors {
+			colors[side][pixel&0xFFFFFF] = true
+		}
+		if len(colors[0]) >= minColors && len(colors[1]) >= minColors {
 			return nil
 		}
 	}
-	return fmt.Errorf("native client area is blank (%d colors)", len(colors))
+	return fmt.Errorf("native client area is not painted across its width (left=%d right=%d colors)", len(colors[0]), len(colors[1]))
 }

@@ -31,17 +31,23 @@ type desktopState struct {
 	orderOptions       []string
 }
 
-// The gallery's 24-DIP stroked SVG convention follows the toolkit's current
-// text color and theme. Parse once, never during a frame.
+// The 24-DIP SVG set uses one restrained stroke so toolbar and row icons
+// share the same visual weight. Individual actions can still use the theme's
+// muted text color when they are secondary controls.
 func nativeIcon(shapes string) *native.SVG {
-	return native.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">` + shapes + `</svg>`))
+	return native.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">` + shapes + `</svg>`))
 }
 
 var (
-	addIcon        = nativeIcon(`<path d="M12 5v14M5 12h14"/>`)
-	settingsIcon   = nativeIcon(`<path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/>`)
-	backIcon       = nativeIcon(`<path d="m12 5-7 7 7 7M5 12h14"/>`)
-	playIcon       = nativeIcon(`<path d="m8 5 11 7-11 7z"/>`)
+	addIcon      = nativeIcon(`<path d="M12 5v14M5 12h14"/>`)
+	settingsIcon = nativeIcon(`<path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/>`)
+	backIcon     = nativeIcon(`<path d="m12 5-7 7 7 7M5 12h14"/>`)
+	playIcon     = nativeIcon(`<path d="m8 5 11 7-11 7z"/>`)
+	stopIcon     = nativeIcon(`<rect x="6" y="6" width="12" height="12" rx="1"/>`)
+	deleteIcon   = nativeIcon(`<path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13M10 11v5M14 11v5"/>`)
+	chevronIcon  = nativeIcon(`<path d="m4 8 8 8 8-8"/>`)
+	// Lucide Languages (ISC); the notice is kept in icons/LICENSE.lucide.
+	translateIcon  = nativeIcon(`<path d="m5 8 6 6M4 14l6-6 2-3M2 5h12M7 2h1m14 20-5-10-5 10M14 18h6"/>`)
 	programIconSVG = nativeIcon(`<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M7 6.5h.01M10 6.5h.01"/>`)
 )
 
@@ -121,25 +127,15 @@ func (w *MainWindow) resetNativeList(first int) {
 func (w *MainWindow) nativePrograms(c *native.Context, m i18n.Messages) []string {
 	var dropped []string
 	native.Row(c).Gap(12).Children(func() {
-		native.Text(c, m.WindowTitle).FontSize(22)
-		native.Spacer(c)
-		lang := m.LanguageZhLabel
-		if w.settings.Language == "en-US" {
-			lang = m.LanguageEnLabel
-		}
-		if native.Select(c, &lang, []string{m.LanguageZhLabel, m.LanguageEnLabel}).Width(112).Label(m.LanguageLabel).Changed() {
-			w.settings.Language = "zh-CN"
-			if lang == m.LanguageEnLabel {
-				w.settings.Language = "en-US"
-			}
-			if w.desktop.window != nil {
-				w.desktop.window.SetTitle(i18n.For(w.settings.Language).WindowTitle)
-			}
-			w.save()
-		}
 		if nativeAction(c, m.OpenSettings, settingsIcon).Clicked() {
 			w.commitNativeEdits()
 			w.onSettingsPage = true
+		}
+		native.Spacer(c)
+		if native.Button(c, "").Padding(6, 10).Label(m.LanguageLabel).Tooltip(m.SwitchLanguageHint).Children(func() {
+			native.Icon(c, translateIcon).Size(20, 20)
+		}).Clicked() {
+			w.nativeSwitchLanguage()
 		}
 	})
 	if !w.settings.RunAtLogon {
@@ -153,8 +149,6 @@ func (w *MainWindow) nativePrograms(c *native.Context, m i18n.Messages) []string
 	}
 	native.Row(c).Grow(1).MinHeight(0).AlignItems(native.Stretch).Gap(14).Children(func() {
 		list := native.Column(c).Grow(1).Basis(0).MinWidth(0).Gap(8)
-		// The list, including its empty state and row controls, is the only
-		// drop target. The editor and settings page never accept file drops.
 		dropped = list.DroppedFiles()
 		if list.FileDragOver() {
 			list.Background(c.Theme().SurfaceHover)
@@ -164,7 +158,7 @@ func (w *MainWindow) nativePrograms(c *native.Context, m i18n.Messages) []string
 				native.Column(c).Grow(1).Center().Gap(14).Children(func() {
 					native.Icon(c, programIconSVG).Size(36, 36).TextColor(c.Theme().TextMuted)
 					native.Text(c, m.ManagedListEmpty).FontSize(18)
-					native.Text(c, m.ManagedListEmptyHint).FillWidth().TextColor(c.Theme().TextMuted)
+					native.Text(c, m.ManagedListEmptyHint).FillWidth().TextAlign(native.Center).TextColor(c.Theme().TextMuted)
 					if nativeAction(c, m.AddProgram, addIcon).Clicked() {
 						w.nativeChooseProgram(false)
 					}
@@ -179,71 +173,7 @@ func (w *MainWindow) nativePrograms(c *native.Context, m i18n.Messages) []string
 				}
 			})
 			nativeHint(c, m.ManagedListHint)
-			cols := []native.TableColumn{
-				{ID: "name", Title: m.ManagedColumnName, Fixed: true},
-				{ID: "tray", Title: m.TrayBoxHomeTitle, Width: 96, Fixed: true, Align: native.Center},
-				{ID: "mode", Title: m.ManagedColumnRule, Width: 150, Fixed: true, Align: native.Center},
-				{ID: "order", Title: m.ManagedColumnOrder, Width: 88, Fixed: true, Align: native.Center},
-			}
-			orderFrom, orderTo := -1, -1
-			// Table rows use Accent for selection. Scope the neutral palette to
-			// the table itself so its checkboxes and dropdowns keep their theme.
-			theme := c.Theme()
-			listTheme := *theme
-			listTheme.Accent, listTheme.AccentText = theme.SurfacePressed, theme.Text
-			c.SetTheme(&listTheme)
-			table := native.Table(c, &w.desktop.list, cols, len(w.settings.ManagedApps), func(row, col int) {
-				c.SetTheme(theme)
-				defer c.SetTheme(&listTheme)
-				entry := &w.settings.ManagedApps[row]
-				switch col {
-				case 3:
-					order := strconv.Itoa(row + 1)
-					if native.Select(c, &order, w.desktop.orderOptions).MinWidth(0).FillWidth().Padding(6, 8).Gap(6).Label(m.ManagedColumnOrder + " " + entry.Name).Changed() {
-						if position, err := strconv.Atoi(order); err == nil {
-							orderFrom, orderTo = row, position-1
-						}
-					}
-				case 0:
-					native.Row(c).Gap(6).Children(func() {
-						if native.Checkbox(c, &entry.RunOnStartup, "").Label(m.ManagedEnabled + " " + entry.Name).Changed() {
-							w.save()
-						}
-						if img := w.desktop.icons[entry.ExePath]; img != nil {
-							native.Image(c, img).Size(18, 18)
-						} else {
-							native.Icon(c, programIconSVG).Size(18, 18)
-						}
-						name := native.Text(c, entry.Name).SingleLine().Grow(1)
-						if !entry.RunOnStartup {
-							name.TextColor(c.Theme().TextMuted)
-						}
-					})
-				case 1:
-					collected := entry.CollectTrayIcon
-					// Disabled on the parent: widget input is handled at creation.
-					native.Row(c).Center().Disabled(shouldDefaultLaunchHidden(entry.ExePath)).Children(func() {
-						if native.Checkbox(c, &collected, "").Label(m.TrayBoxHomeTitle + " " + entry.Name).Changed() {
-							w.nativeCollect(row, collected)
-						}
-					})
-				case 2:
-					native.Text(c, i18n.FormatManagedParam(w.settings.Language, *entry)).SingleLine()
-				}
-			}).Grow(1).MinHeight(0).Label(m.ManagedListTitle)
-			c.SetTheme(theme)
-			if table.Changed() {
-				w.commitNativeEdits()
-			}
-			if table.Clicked() {
-				w.commitNativeEdits()
-				w.desktop.selected = -1
-			}
-			// Finish the keyed rows before changing their order. A mutation from
-			// inside a cell would build the moved identity twice in one frame.
-			if orderFrom >= 0 {
-				w.nativeSetOrder(orderFrom, orderTo)
-			}
+			w.nativeProgramTable(c, m)
 		})
 		native.Divider(c)
 		native.Column(c).Width(523).Shrink(0).Gap(12).Children(func() { w.nativeEditor(c, m) })
@@ -282,20 +212,58 @@ func (w *MainWindow) nativeEditor(c *native.Context, m i18n.Messages) {
 	}
 	native.Column(c).Key(editorKey).Grow(1).Gap(gap).Disabled(!ok).Children(func() {
 		native.Row(c).Gap(8).Children(func() {
-			native.Text(c, entry.Name).FontSize(18).SingleLine().Grow(1)
-			launchLabel := m.ManagedLaunchNow
+			native.Text(c, entry.Name).FontSize(18).SingleLine().Grow(1).MinWidth(0).Tooltip(entry.Name)
+			visible := ok && w.callbacks.OnProgramWindowVisible != nil && w.callbacks.OnProgramWindowVisible(*entry)
+			windowLabel := m.HostedShowWindow
+			if visible {
+				windowLabel = m.HostedHideWindow
+			}
+			windowBusy := ok && w.programWindowBusy[entry.ID]
+			if windowBusy {
+				windowLabel = m.ManagedWindowBusy
+			}
+			// This is a live action, not a startup setting. Keep it beside Launch
+			// Now and usable even when start-at-sign-in has been switched off.
+			native.Row(c).Shrink(0).Disabled(windowBusy || w.launchNowBusy[entry.ID]).Children(func() {
+				if nativeAction(c, windowLabel, programIconSVG).Tooltip(m.ManagedWindowHint).Clicked() && w.callbacks.OnSetProgramWindowVisible != nil {
+					if w.programWindowBusy == nil {
+						w.programWindowBusy = make(map[string]bool)
+					}
+					w.programWindowBusy[entry.ID] = true
+					w.callbacks.OnSetProgramWindowVisible(*entry, !visible)
+				}
+			})
+			running := ok && w.callbacks.OnProgramRunning != nil && w.callbacks.OnProgramRunning(*entry)
+			actionLabel := m.ManagedLaunchNow
+			actionIcon := playIcon
+			actionHint := m.ManagedLaunchNowHint
+			if running {
+				actionLabel = m.ManagedStopProgram
+				actionIcon = stopIcon
+				actionHint = m.ManagedStopProgramHint
+			}
 			busy := ok && w.launchNowBusy[entry.ID]
 			if busy {
-				launchLabel = m.ManagedLaunchNowBusy
+				if running {
+					actionLabel = m.ManagedStopProgramBusy
+				} else {
+					actionLabel = m.ManagedLaunchNowBusy
+				}
 			}
-			native.Row(c).Disabled(busy).Children(func() {
-				if nativeAction(c, launchLabel, playIcon).Clicked() && w.callbacks.OnLaunchNow != nil {
+			native.Row(c).Shrink(0).Disabled(busy || windowBusy).Children(func() {
+				if nativeAction(c, actionLabel, actionIcon).Tooltip(actionHint).Clicked() {
 					w.commitNativeEdits()
 					if w.launchNowBusy == nil {
 						w.launchNowBusy = make(map[string]bool)
 					}
 					w.launchNowBusy[entry.ID] = true
-					w.callbacks.OnLaunchNow(*entry)
+					if running {
+						if w.callbacks.OnStopNow != nil {
+							w.callbacks.OnStopNow(*entry)
+						}
+					} else if w.callbacks.OnLaunchNow != nil {
+						w.callbacks.OnLaunchNow(*entry)
+					}
 				}
 			})
 		})
@@ -398,13 +366,6 @@ func (w *MainWindow) nativeEditor(c *native.Context, m i18n.Messages) {
 						}
 					})
 				})
-			}
-		})
-		native.Spacer(c)
-		native.Row(c).Children(func() {
-			native.Spacer(c)
-			if native.Button(c, m.RemoveSelected).Clicked() {
-				w.nativeRemoveSelected()
 			}
 		})
 	})
@@ -591,21 +552,45 @@ func (w *MainWindow) nativeCollect(row int, on bool) bool {
 	return true
 }
 
-func (w *MainWindow) nativeRemoveSelected() {
-	entry, ok := w.nativeSelected()
-	if !ok {
+// nativeRemove runs only after the confirmation menu has selected an ID and
+// the table has finished building. Selection or reordering cannot retarget it.
+func (w *MainWindow) nativeRemove(id string) {
+	i := slices.IndexFunc(w.settings.ManagedApps, func(entry config.ManagedAppEntry) bool { return entry.ID == id })
+	if i < 0 {
 		return
 	}
-	i := w.desktop.selected
-	removedPath := entry.ExePath
+	entry := w.settings.ManagedApps[i]
 	if entry.CollectTrayIcon && !w.nativeCollect(i, false) {
 		return
 	}
 	w.commitNativeEdits()
 	w.settings.ManagedApps = slices.Delete(w.settings.ManagedApps, i, i+1)
-	w.desktop.selected = -1
+	switch {
+	case w.desktop.selected == i:
+		w.desktop.selected = -1
+	case w.desktop.selected > i:
+		w.desktop.selected--
+	}
+	w.desktop.orderOptions = nil
+	// Two entries may use the same executable. Keep their shared icon until
+	// the last one is removed.
+	if !slices.ContainsFunc(w.settings.ManagedApps, func(other config.ManagedAppEntry) bool { return other.ExePath == entry.ExePath }) {
+		delete(w.desktop.icons, entry.ExePath)
+	}
 	w.save()
-	delete(w.desktop.icons, removedPath)
+}
+
+func (w *MainWindow) nativeSwitchLanguage() {
+	w.commitNativeEdits()
+	if i18n.Resolve(w.settings.Language) == i18n.LangEnUS {
+		w.settings.Language = string(i18n.LangZhCN)
+	} else {
+		w.settings.Language = string(i18n.LangEnUS)
+	}
+	if w.desktop.window != nil {
+		w.desktop.window.SetTitle(i18n.For(w.settings.Language).WindowTitle)
+	}
+	w.save()
 }
 
 // The selected number denotes the final position in the saved start order.

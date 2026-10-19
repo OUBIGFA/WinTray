@@ -36,9 +36,10 @@ var gwlExStyle = int32(-20)
 type Win32WindowEnumerator struct{}
 
 type enumState struct {
-	result     *[]ManagedWindowInfo
-	foreground uintptr
-	processes  map[uint32][2]string
+	result        *[]ManagedWindowInfo
+	foreground    uintptr
+	processes     map[uint32][2]string
+	includeHidden bool
 }
 
 var enumStateMu sync.Mutex
@@ -47,12 +48,18 @@ var activeEnum enumState
 func NewWin32WindowEnumerator() *Win32WindowEnumerator { return &Win32WindowEnumerator{} }
 
 func (e *Win32WindowEnumerator) EnumerateTopLevelWindows() []ManagedWindowInfo {
+	return enumerateTopLevelWindows(false)
+}
+
+// Explicit Show Window also needs hidden windows; startup matching retains its
+// visible-only enumeration so this action does not change automatic closing.
+func enumerateTopLevelWindows(includeHidden bool) []ManagedWindowInfo {
 	enumStateMu.Lock()
 	defer enumStateMu.Unlock()
 
 	result := make([]ManagedWindowInfo, 0)
 	foreground, _, _ := procGetForegroundWindow.Call()
-	activeEnum = enumState{result: &result, foreground: foreground, processes: make(map[uint32][2]string)}
+	activeEnum = enumState{result: &result, foreground: foreground, processes: make(map[uint32][2]string), includeHidden: includeHidden}
 	defer func() { activeEnum = enumState{} }()
 	_, _, _ = procEnumWindows.Call(enumWindowsCallback, 0)
 	return result
@@ -60,7 +67,7 @@ func (e *Win32WindowEnumerator) EnumerateTopLevelWindows() []ManagedWindowInfo {
 
 func enumWindowsProc(hwnd uintptr, _ uintptr) uintptr {
 	v, _, _ := procIsWindowVisible.Call(hwnd)
-	if v == 0 {
+	if v == 0 && !activeEnum.includeHidden {
 		return 1
 	}
 

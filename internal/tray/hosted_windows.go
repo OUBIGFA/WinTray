@@ -5,6 +5,8 @@ package tray
 import (
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -25,6 +27,9 @@ type HostedWindow struct {
 	ExePath   string
 	Handle    uintptr
 	ProcessID uint32
+	// Background uses WinTray's main-window action instead of adding a
+	// per-program tray icon. It still needs shutdown recovery and a watcher.
+	Background bool
 }
 
 // Logger is the subset of the application logger the host needs.
@@ -33,14 +38,15 @@ type Logger interface {
 	Warn(msg string)
 }
 
-// Host owns one tray icon per hidden program so the user can show, hide or
-// quit a program that has no tray icon of its own (console programs such as
-// syncthing.exe). All methods must be called on the UI thread unless noted.
+// Host owns recoverable program windows and their process watchers. Tray mode
+// adds an individual icon; background mode uses WinTray's main-window action.
+// All methods must be called on the UI thread unless noted.
 type Host struct {
 	language     string
 	logger       Logger
 	lookupWindow func(pid uint32) uintptr
 	onEmpty      func()
+	onChange     func()
 	box          *traybox.Box
 	dispatch     func(func())
 
@@ -90,11 +96,28 @@ func (h *Host) SetOnEmpty(fn func()) {
 	h.onEmpty = fn
 }
 
+// SetOnChange refreshes the main recovery entry when a hosted program starts
+// or exits, even if other individually hosted tray icons remain.
+func (h *Host) SetOnChange(fn func()) { h.onChange = fn }
+
 // Count reports how many programs are currently hosted. Safe from any goroutine.
 func (h *Host) Count() int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return len(h.items)
+}
+
+// HasBackgroundWindows reports whether WinTray's own icon is needed as the
+// recovery entry for programs that have no individual tray icon.
+func (h *Host) HasBackgroundWindows() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, item := range h.items {
+		if item.info.Background {
+			return true
+		}
+	}
+	return false
 }
 
 // ErrHostedProcessUnavailable reports that the program to host is not running
@@ -146,6 +169,9 @@ func (h *Host) TryAdd(w HostedWindow) error {
 	h.mu.Unlock()
 	h.logger.Info(fmt.Sprintf("tray host: added %s pid=%d hwnd=0x%X", w.Name, w.ProcessID, w.Handle))
 	go item.watchProcess(process, item.form.Handle())
+	if h.onChange != nil {
+		h.onChange()
+	}
 	return nil
 }
 
@@ -181,6 +207,20 @@ func (h *Host) SetLanguage(language string) {
 	}
 }
 
+// ReleaseUnlistedBackground restores windows whose only per-program control
+// disappeared from the list. Individually hosted tray icons remain usable and
+// retain the existing hosting behavior. Failed restores keep their recovery owner.
+func (h *Host) ReleaseUnlistedBackground(paths []string) {
+	h.mu.Lock()
+	items := h.snapshotLocked()
+	h.mu.Unlock()
+	for _, item := range items {
+		if item.info.Background && !slices.ContainsFunc(paths, func(path string) bool { return strings.EqualFold(path, item.info.ExePath) }) {
+			item.releaseHosting()
+		}
+	}
+}
+
 // RestoreAll shows every hidden window again and removes the icons. It is
 // meant for WinTray shutdown so no program is left running invisibly.
 func (h *Host) RestoreAll() {
@@ -202,13 +242,16 @@ func (h *Host) snapshotLocked() []*hostedItem {
 }
 
 func (h *Host) newItem(w HostedWindow) (*hostedItem, error) {
-	// walk binds one NotifyIcon per window, so each hosted icon gets its own
-	// never-shown owner window.
+	// Each program gets a never-shown owner for its optional icon and process
+	// watcher. Walk binds at most one NotifyIcon to an owner window.
 	form, err := walk.NewMainWindow()
 	if err != nil {
 		return nil, err
 	}
 	item := &hostedItem{host: h, info: w, form: form, stop: make(chan struct{})}
+	if w.Background {
+		return item, nil
+	}
 	if h.box != nil {
 		item.unregisterIcon = h.box.RegisterHostedIcon(uintptr(form.Handle()), w.ExePath, func() {
 			deferOnUIThread(item, item.refreshCollection)
@@ -311,6 +354,9 @@ func (item *hostedItem) refreshCollection() {
 }
 
 func (item *hostedItem) applyLanguage(language string) {
+	if item.icon == nil {
+		return // background-only windows have no tray menu
+	}
 	msg := i18n.For(language)
 	_ = item.icon.SetToolTip(item.info.Name)
 	item.show.SetText(msg.HostedShowWindow)
@@ -527,6 +573,9 @@ func (h *Host) remove(item *hostedItem, notifyEmpty bool) {
 	empty := len(h.items) == 0
 	onEmpty := h.onEmpty
 	h.mu.Unlock()
+	if notifyEmpty && h.onChange != nil {
+		h.onChange()
+	}
 	if notifyEmpty && empty && onEmpty != nil {
 		onEmpty()
 	}

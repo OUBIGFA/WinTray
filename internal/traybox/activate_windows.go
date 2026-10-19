@@ -16,6 +16,10 @@ var (
 	ErrNotClickable = errors.New("the program's tray icon does not accept clicks")
 )
 
+// CallbackWindow identifies the registered receiver. Menu tracking uses its
+// process identity before dispatch, rather than guessing from desktop popups.
+func (i Icon) CallbackWindow() win.HWND { return win.HWND(uintptr(i.owner)) }
+
 // Activate delivers a click to the program as Explorer would: through the
 // callback message the program registered with its icon. It returns at once.
 func Activate(icon Icon, action Action) error {
@@ -26,8 +30,8 @@ func Activate(icon Icon, action Action) error {
 	if !icon.Clickable() {
 		return ErrNotClickable
 	}
-	// The program usually brings a window or its menu to the front; WinTray
-	// just closed its own menu and may hand the foreground on.
+	// The program usually brings a window or its menu to the front. Allow
+	// that handoff even when WinTray keeps its own tray menu displayed.
 	var pid uint32
 	win.GetWindowThreadProcessId(owner, &pid)
 	procAllowSetForegroundWindow.Call(uintptr(pid))

@@ -86,3 +86,43 @@ func TestNativeLaunchNowBusyIsPerProgram(t *testing.T) {
 		})
 	}
 }
+
+// A running program must expose the stop action without affecting another row.
+func TestNativeRunningProgramUsesStopAction(t *testing.T) {
+	for _, language := range []string{"zh-CN", "en-US"} {
+		t.Run(language, func(t *testing.T) {
+			w := nativeProgramsFixture(1)
+			w.settings.Language = language
+			running := true
+			stops := 0
+			launches := 0
+			w.callbacks.OnProgramRunning = func(config.ManagedAppEntry) bool { return running }
+			w.callbacks.OnStopNow = func(config.ManagedAppEntry) { stops++ }
+			w.callbacks.OnLaunchNow = func(config.ManagedAppEntry) { launches++ }
+			tt := native.NewTester(w.nativeView, 1200, 850)
+			m := i18n.For(language)
+			if err := tt.Click("Program 000"); err != nil {
+				t.Fatal(err)
+			}
+			if err := tt.Click(m.ManagedStopProgram); err != nil {
+				t.Fatal(err)
+			}
+			if stops != 1 || !tt.HasText(m.ManagedStopProgramBusy) || tt.HasText(m.ManagedLaunchNow) {
+				t.Fatalf("running program did not switch to the stop action: stops=%d texts=%v", stops, tt.Texts())
+			}
+			running = false
+			w.FinishStopNow("0")
+			w.drain()
+			tt.Frame()
+			if !tt.HasText(m.ManagedLaunchNow) || tt.HasText(m.ManagedStopProgram) {
+				t.Fatalf("stopped program did not restore launch action: texts=%v", tt.Texts())
+			}
+			if err := tt.Click(m.ManagedLaunchNow); err != nil {
+				t.Fatal(err)
+			}
+			if launches != 1 {
+				t.Fatalf("restored launch action did not launch: launches=%d", launches)
+			}
+		})
+	}
+}
