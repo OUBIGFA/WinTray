@@ -25,7 +25,7 @@ var (
 	user32                          = windows.NewLazySystemDLL("user32.dll")
 	shell32                         = windows.NewLazySystemDLL("shell32.dll")
 	procSendMessageTimeoutW         = user32.NewProc("SendMessageTimeoutW")
-	procSendNotifyMessageW          = user32.NewProc("SendNotifyMessageW")
+	procPostIconMessageW            = user32.NewProc("PostMessageW")
 	procFindWindowExW               = user32.NewProc("FindWindowExW")
 	procGetShellWindow              = user32.NewProc("GetShellWindow")
 	procInSendMessage               = user32.NewProc("InSendMessage")

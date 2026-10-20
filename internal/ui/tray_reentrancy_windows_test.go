@@ -54,8 +54,8 @@ func TestTrayMenuRepeatedOpenKeepsRightClick(t *testing.T) {
 					return
 				}
 				menu := win.HMENU(win.SendMessage(popup, 0x1e1, 0, 0))
-				// Give an existing enabled row a collected-icon command ID. The
-				// controller has no real icons, so closing it activates nothing.
+				// Give an enabled row a collected-icon ID to probe the active
+				// handler. This test has no actual program registration.
 				item := win.MENUITEMINFO{CbSize: uint32(unsafe.Sizeof(win.MENUITEMINFO{})), FMask: win.MIIM_ID, WID: 100}
 				if !win.SetMenuItemInfo(menu, 1, true, &item) {
 					reportTrayMenuFailure(failure, "could not prepare collected command", w)
@@ -83,7 +83,12 @@ func TestTrayMenuRepeatedOpenKeepsRightClick(t *testing.T) {
 					}
 					message := win.MSG{HWnd: hwnd, Message: win.WM_RBUTTONUP,
 						Pt: win.POINT{X: (rect.Left + rect.Right) / 2, Y: (rect.Top + rect.Bottom) / 2}}
-					user32.NewProc("CallMsgFilterW").Call(uintptr(unsafe.Pointer(&message)), 2) // MSGF_MENU
+					if handled, _, _ := user32.NewProc("CallMsgFilterW").Call(uintptr(unsafe.Pointer(&message)), 2); handled == 0 { // MSGF_MENU
+						reportTrayMenuFailure(failure, "repeated tray notification removed the right-click handler", w)
+					}
+					// The hook has handled the release. Dispose before the loop
+					// returns so the synthetic row cannot show an icon-gone dialog.
+					controller.Dispose()
 				})
 				deadline := time.Now().Add(2 * time.Second)
 				for time.Now().Before(deadline) {

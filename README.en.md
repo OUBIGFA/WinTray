@@ -110,7 +110,7 @@ Select **Tray icon** in the program list to move the program's existing tray ico
 
 - Collected icons no longer appear in the system tray or its `^` panel.
 - Click a program icon in the WinTray menu to open the program window.
-- Hover over or click the expand icon at the right of that program to open its own tray menu.
+- Right-click a program row to open the program's own tray menu.
 - Clear **Tray icon**, or exit WinTray normally, to restore the original icons.
 
 ### Launch at boot

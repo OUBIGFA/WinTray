@@ -127,7 +127,6 @@ type Messages struct {
 	TrayExit                       string
 	TrayToolTip                    string
 	TrayMenuFailedBody             string
-	TrayMenuCloseFailedBody        string
 	TrayBoxHomeTitle               string
 	TrayBoxHomeHint                string
 	TrayBoxFailedTitle             string
@@ -287,9 +286,8 @@ var zhCN = Messages{
 	TrayExit:                       "退出 WinTray",
 	TrayToolTip:                    "WinTray",
 	TrayBoxHomeTitle:               "托盘收纳",
-	TrayBoxHomeHint:                "将程序的托盘图标收进 WinTray 菜单；单击打开窗口，悬停或点击右侧箭头打开原生菜单",
+	TrayBoxHomeHint:                "将程序的托盘图标收进 WinTray 菜单；左键单击打开窗口，右键单击打开程序菜单",
 	TrayMenuFailedBody:             "无法打开托盘菜单\n请重启 WinTray 后重试",
-	TrayMenuCloseFailedBody:        "无法自动关闭程序菜单\n请先手动关闭该菜单，再展开其他程序",
 	TrayBoxFailedTitle:             "托盘图标收纳",
 	TrayBoxFailedBody:              "托盘收纳未能完成\n请重新启用收纳；若仍失败，请打开日志",
 	TrayBoxIconGoneBody:            "%s 的托盘图标已不存在，程序可能已经退出",
@@ -450,9 +448,8 @@ var enUS = Messages{
 	TrayExit:                       "Exit WinTray",
 	TrayToolTip:                    "WinTray",
 	TrayBoxHomeTitle:               "Tray icon",
-	TrayBoxHomeHint:                "Move this program's tray icon into WinTray's menu; click to open its window, or hover over or click its right arrow for the original menu",
+	TrayBoxHomeHint:                "Move this program's tray icon into WinTray's menu; left-click to open its window, or right-click to open its menu",
 	TrayMenuFailedBody:             "Could not open the tray menu\nRestart WinTray and try again",
-	TrayMenuCloseFailedBody:        "Could not close the program menu automatically\nClose that menu before expanding another program",
 	TrayBoxFailedTitle:             "Collected tray icons",
 	TrayBoxFailedBody:              "Tray collection could not complete\nEnable it again; if it fails again, open the log",
 	TrayBoxIconGoneBody:            "The tray icon of %s is gone; the program may have exited",

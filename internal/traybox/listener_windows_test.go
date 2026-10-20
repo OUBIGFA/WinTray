@@ -32,6 +32,7 @@ type fakeShell struct {
 	raw       [][]byte
 	events    []callbackEvent
 	onEvent   func(win.HWND, uintptr, uintptr)
+	onPaint   func()
 	refreshed int
 	onRefresh func()
 	onRequest func(trayData)
@@ -73,6 +74,18 @@ var (
 				}
 			}
 			return result
+		}
+		if hwnd == f.program && msg == win.WM_PAINT {
+			f.mu.Lock()
+			hook := f.onPaint
+			f.mu.Unlock()
+			if hook != nil {
+				var paint win.PAINTSTRUCT
+				win.BeginPaint(hwnd, &paint)
+				hook()
+				win.EndPaint(hwnd, &paint)
+				return 0
+			}
 		}
 		if hwnd == f.program && msg == testCallback {
 			f.mu.Lock()

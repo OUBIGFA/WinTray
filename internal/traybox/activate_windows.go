@@ -16,10 +16,6 @@ var (
 	ErrNotClickable = errors.New("the program's tray icon does not accept clicks")
 )
 
-// CallbackWindow identifies the registered receiver. Menu tracking uses its
-// process identity before dispatch, rather than guessing from desktop popups.
-func (i Icon) CallbackWindow() win.HWND { return win.HWND(uintptr(i.owner)) }
-
 // Activate delivers a click to the program as Explorer would: through the
 // callback message the program registered with its icon. It returns at once.
 func Activate(icon Icon, action Action) error {
@@ -30,8 +26,7 @@ func Activate(icon Icon, action Action) error {
 	if !icon.Clickable() {
 		return ErrNotClickable
 	}
-	// The program usually brings a window or its menu to the front. Allow
-	// that handoff even when WinTray keeps its own tray menu displayed.
+	// Allow the program to bring its own window or menu to the foreground.
 	var pid uint32
 	win.GetWindowThreadProcessId(owner, &pid)
 	procAllowSetForegroundWindow.Call(uintptr(pid))
@@ -39,7 +34,11 @@ func Activate(icon Icon, action Action) error {
 	win.GetCursorPos(&cursor)
 	for _, event := range clickEvents(action, icon.version) {
 		wParam, lParam := callbackParams(icon, event, cursor)
-		if r, _, err := procSendNotifyMessageW.Call(uintptr(owner), uintptr(icon.callback), wParam, lParam); r == 0 {
+		// Tray gestures belong in the owner's normal message queue. A sent
+		// notification can reenter a paint/layout handler at PeekMessage, or
+		// nest a menu immediately when the receiver is on this same thread.
+		// Posting preserves gesture order without interrupting that work.
+		if r, _, err := procPostIconMessageW.Call(uintptr(owner), uintptr(icon.callback), wParam, lParam); r == 0 {
 			return fmt.Errorf("notify %s: %w", icon.DisplayName(), err)
 		}
 	}
@@ -72,8 +71,10 @@ func clickEvents(action Action, version uint32) []uint32 {
 	return events
 }
 
-// callbackParams follows the notification format of the icon's version:
-// version 4 passes the anchor point and the uID alongside the event.
+// callbackParams follows the notification format of the icon's version.
+// From version 4 the anchor point travels with every event in wParam; earlier
+// versions report only the uID and the event, and their programs place the
+// menu from the pointer themselves.
 func callbackParams(icon Icon, event uint32, at win.POINT) (wParam, lParam uintptr) {
 	if icon.version >= 4 {
 		return makeLong(uint32(at.X), uint32(at.Y)), makeLong(event, icon.uid)

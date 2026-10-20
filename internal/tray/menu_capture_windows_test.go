@@ -9,6 +9,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"runtime"
 	"syscall"
 	"testing"
 	"unsafe"
@@ -17,7 +18,7 @@ import (
 	"wintray/internal/traybox"
 )
 
-// Capture a real native menu with two independently expandable program rows.
+// Capture a real native menu with two separate program rows.
 // The disposable images stand in for program-provided icon frames; no user
 // tray registrations or saved collection settings are touched.
 func TestNativeTrayMenuAppearance(t *testing.T) {
@@ -26,6 +27,8 @@ func TestNativeTrayMenuAppearance(t *testing.T) {
 	}
 	for _, language := range []string{"zh-CN", "en-US"} {
 		t.Run(language, func(t *testing.T) {
+			runtime.LockOSThread()
+			defer runtime.UnlockOSThread()
 			hwnd, menu := newBoxMenuLoopFixture(t, language)
 			for i, ink := range []color.NRGBA{{R: 37, G: 99, B: 235, A: 255}, {R: 36, G: 138, B: 84, A: 255}} {
 				img := image.NewNRGBA(image.Rect(0, 0, 16, 16))
@@ -48,14 +51,8 @@ func TestNativeTrayMenuAppearance(t *testing.T) {
 					if !win.SetMenuItemInfo(menu, trayBoxedBase, false, &info) {
 						t.Fatal("set first program's icon and label")
 					}
-				} else {
-					sub := win.CreatePopupMenu()
-					if sub == 0 || !appendTrayMenuItem(menu, menuItem{id: trayBoxedBase + 1, text: label, bitmap: bitmap, submenu: sub}) {
-						if sub != 0 {
-							win.DestroyMenu(sub)
-						}
-						t.Fatal("append second program's expansion row")
-					}
+				} else if !appendTrayMenuItem(menu, menuItem{id: trayBoxedBase + 1, text: label, bitmap: bitmap}) {
+					t.Fatal("append second program row")
 				}
 			}
 			var cursor win.POINT
@@ -65,7 +62,7 @@ func TestNativeTrayMenuAppearance(t *testing.T) {
 			win.SetForegroundWindow(hwnd)
 			captured := false
 			var captureErr error
-			_, err := trackBoxMenu(hwnd, menu, func() {
+			_, err := trackBoxRightClicks(hwnd, menu, func() {
 				popup := win.FindWindow(syscall.StringToUTF16Ptr("#32768"), nil)
 				if popup != 0 && win.GetWindowThreadProcessId(popup, nil) == win.GetCurrentThreadId() {
 					captureErr = captureNativeMenu(popup, "tray-menu-"+language)

@@ -21,8 +21,8 @@ const (
 	trayActionExit        = 3
 	trayBoxedBase         = 100
 	trayIDLimit           = 9000
-	// Only left-clicks execute commands. Collected rows split their normal
-	// action from the native submenu arrow; right-clicks do neither.
+	// Handle collected rows' right-clicks separately. TPM_RIGHTBUTTON stays
+	// unset so right-clicking WinTray's own commands cannot execute them.
 	trayMenuFlags = win.TPM_NOANIMATION | win.TPM_RETURNCMD
 )
 
@@ -140,30 +140,12 @@ func (c *Controller) showContextMenu() {
 
 	flags := uint32(trayMenuFlags)
 	var actionID win.BOOL
-	choice, err := trackBoxMenu(hwnd, hMenu, func() {
+	rightClicked, err := trackBoxRightClicks(hwnd, hMenu, func() {
 		if c.box != nil && refreshBoxMenu(hMenu, icons, bitmaps, c.box.Icons()) {
 			redrawOpenBoxMenu()
 		}
 	}, func() {
 		actionID = win.TrackPopupMenuEx(hMenu, flags, point.X, point.Y, hwnd, nil)
-	}, func(id uint32) (boxMenuExpansion, error) {
-		icon, err := c.currentBoxIcon(icons, id)
-		if err != nil {
-			return boxMenuExpansion{}, err
-		}
-		if c.openCancel != nil {
-			c.openCancel()
-			c.openCancel = nil
-		}
-		return boxMenuExpansion{
-			owner: icon.CallbackWindow(),
-			open:  func() error { return traybox.Activate(icon, traybox.ActionRightClick) },
-			report: func(err error) {
-				if c.logger != nil {
-					c.logger.Warn(fmt.Sprintf("tray menu close failed: %s: %v", icon.ExePath, err))
-				}
-			},
-		}, nil
 	})
 	// Required by the Windows tray-menu contract after TrackPopupMenuEx.
 	win.PostMessage(hwnd, win.WM_NULL, 0, 0)
@@ -172,20 +154,14 @@ func (c *Controller) showContextMenu() {
 			c.logger.Warn(fmt.Sprintf("tray menu failed: %v", err))
 		}
 		msg := i18n.For(c.language)
-		body := msg.TrayMenuFailedBody
-		if errors.Is(err, errProgramMenuClose) {
-			body = msg.TrayMenuCloseFailedBody
-		}
-		walk.MsgBox(c.window, msg.WindowTitle, body, walk.MsgBoxIconWarning)
+		walk.MsgBox(c.window, msg.WindowTitle, msg.TrayMenuFailedBody, walk.MsgBoxIconWarning)
 		return
 	}
 
-	if choice.id != 0 {
-		if choice.expand {
-			c.runBoxAction(icons, choice.id, traybox.ActionRightClick)
-			return
-		}
-		actionID = win.BOOL(choice.id)
+	if rightClicked != 0 {
+		// Release WinTray's menu capture before the program opens its own.
+		c.runBoxAction(icons, rightClicked, traybox.ActionRightClick)
+		return
 	}
 	if id := uint32(actionID); id >= trayBoxedBase && id < trayIDLimit {
 		action := traybox.ActionClick
@@ -233,19 +209,11 @@ func appendContextMenu(hMenu win.HMENU, msg i18n.Messages, icons []traybox.Icon)
 		if id >= trayIDLimit {
 			break
 		}
-		// Its contents are opened by the active menu tracker. Keeping the
-		// submenu empty prevents Windows from replacing this row with a copied
-		// menu and preserves the program's own native menu behavior.
-		submenu := win.CreatePopupMenu()
-		if submenu == 0 {
-			return bitmaps, false
-		}
-		item := menuItem{id: id, text: icon.DisplayName(), disabled: !icon.Clickable(), submenu: submenu}
+		item := menuItem{id: id, text: icon.DisplayName(), disabled: !icon.Clickable()}
 		b, _ := traybox.MenuBitmap(icon.Image, iconSize)
 		bitmaps = append(bitmaps, b) // one slot per row, including blank frames
 		item.bitmap = b
 		if !appendTrayMenuItem(hMenu, item) {
-			win.DestroyMenu(submenu)
 			return bitmaps, false
 		}
 	}
@@ -253,7 +221,7 @@ func appendContextMenu(hMenu win.HMENU, msg i18n.Messages, icons []traybox.Icon)
 }
 
 // currentBoxIcon resolves a stable row identity against the live registration.
-// Both normal clicks and expansions must use its current owner and callback.
+// Both left and right clicks must use its current owner and callback.
 func (c *Controller) currentBoxIcon(icons []traybox.Icon, id uint32) (traybox.Icon, error) {
 	i := int(id) - trayBoxedBase
 	if i < 0 || i >= len(icons) {
@@ -341,7 +309,6 @@ func (c *Controller) showBoxError(icon traybox.Icon, err error) {
 type menuItem struct {
 	id        uint32
 	text      string
-	submenu   win.HMENU
 	bitmap    win.HBITMAP
 	checked   bool
 	disabled  bool
@@ -372,10 +339,6 @@ func appendTrayMenuItem(hMenu win.HMENU, m menuItem) bool {
 	}
 	if m.disabled {
 		item.FState |= win.MFS_DISABLED
-	}
-	if m.submenu != 0 {
-		item.FMask |= win.MIIM_SUBMENU
-		item.HSubMenu = m.submenu
 	}
 	if m.bitmap != 0 {
 		item.FMask |= win.MIIM_BITMAP

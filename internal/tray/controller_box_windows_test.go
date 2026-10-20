@@ -43,7 +43,7 @@ func TestContextMenuWithoutCollectedIconsContainsOnlyActions(t *testing.T) {
 	}
 }
 
-func TestCollectedIconsHaveNativeExpansionArrowsAndOwnBitmaps(t *testing.T) {
+func TestCollectedIconsHavePlainRowsAndOwnBitmaps(t *testing.T) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	solid := func(c color.NRGBA) *image.NRGBA {
@@ -88,19 +88,11 @@ func TestCollectedIconsHaveNativeExpansionArrowsAndOwnBitmaps(t *testing.T) {
 		t.Fatal("missing separator between WinTray actions and collected icons")
 	}
 	want := []win.HBITMAP{bitmaps[0], bitmaps[1], 0}
-	submenus := make(map[win.HMENU]bool)
 	for i := range icons {
 		info := win.MENUITEMINFO{CbSize: uint32(unsafe.Sizeof(win.MENUITEMINFO{})), FMask: win.MIIM_ID | win.MIIM_SUBMENU | win.MIIM_BITMAP | win.MIIM_STATE}
-		if !win.GetMenuItemInfo(menu, uint32(i+3), win.BOOL(1), &info) || info.WID != uint32(trayBoxedBase+i) || info.HSubMenu == 0 || info.HbmpItem != want[i] {
-			t.Errorf("entry %d is missing its native arrow or icon: %+v", i, info)
+		if !win.GetMenuItemInfo(menu, uint32(i+3), win.BOOL(1), &info) || info.WID != uint32(trayBoxedBase+i) || info.HSubMenu != 0 || info.HbmpItem != want[i] {
+			t.Errorf("entry %d must be a plain command with its own icon: %+v", i, info)
 		}
-		if info.HSubMenu != 0 && win.GetMenuItemCount(info.HSubMenu) != 0 {
-			t.Errorf("entry %d copies program-owned menu items", i)
-		}
-		if submenus[info.HSubMenu] {
-			t.Errorf("entry %d shares an aggregate submenu with another program", i)
-		}
-		submenus[info.HSubMenu] = true
 		// None of these test icons registered a callback message.
 		if info.FState&win.MFS_DISABLED == 0 {
 			t.Errorf("entry %d without a callback message is enabled", i)
