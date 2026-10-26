@@ -135,6 +135,9 @@ type ManagedAppEntry struct {
 	Args            string `json:"args"`
 	RunOnStartup    bool   `json:"runOnStartup"`
 	CollectTrayIcon bool   `json:"collectTrayIcon"`
+	// WeChatAutoLogin clicks only a recognized WeChat login button. It is
+	// opt-in; old settings leave it off and other executables ignore it.
+	WeChatAutoLogin bool `json:"wechatAutoLogin"`
 	// LaunchViaLogonTask replaces only the sign-in trigger. It reuses an app's
 	// native task, or migrates its original user startup entry without changing
 	// arguments, window behaviour or privileges. If no original entry exists,
@@ -157,6 +160,18 @@ func (e *ManagedAppEntry) UnmarshalJSON(b []byte) error {
 	}
 	*e = ManagedAppEntry(decoded)
 	return nil
+}
+
+// IsWeChatExecutable limits the login option to the two desktop client names,
+// not a display name the user can rename or a similarly named helper process.
+func IsWeChatExecutable(path string) bool {
+	name := filepath.Base(path)
+	return strings.EqualFold(name, "Weixin.exe") || strings.EqualFold(name, "WeChat.exe")
+}
+
+// WeChatAutoLoginEnabled excludes background mode, which may not expose login UI.
+func WeChatAutoLoginEnabled(entry ManagedAppEntry) bool {
+	return entry.WeChatAutoLogin && IsWeChatExecutable(entry.ExePath) && !entry.LaunchHiddenInBackground
 }
 
 type Settings struct {

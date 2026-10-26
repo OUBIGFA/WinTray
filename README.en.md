@@ -99,10 +99,17 @@ WinTray closes the program window after **Wait before closing** expires. Use the
 
 - **Range**: 0–600 seconds. The default is 0 seconds, which closes the window immediately.
 - **Start of the wait**: The time when the target process was created. This also applies when the program starts through its own startup entry.
-- **Program sign-in**: WinTray does not detect whether sign-in is complete. Set the wait longer than the actual sign-in time. Use **Start normally** if manual sign-in is required.
+- **Program sign-in**: Except when **WeChat auto login** is enabled for WeChat, set the wait longer than the actual sign-in time. Use **Start normally** if manual sign-in is required.
+- **Esc handling**: Tries `Esc` first. If the program disables **Close** and does not respond to `Esc`, the window stays open.
 - **Window limits**: A window can briefly appear or take focus during startup. Pinned taskbar shortcuts remain visible. Graphical programs that do not support closing to the tray can exit.
 
 Select **Close to tray** for console programs such as `syncthing.exe` and `frpc.exe` to give them a WinTray-hosted tray icon. Left-click the icon to show or hide the window. Right-click it to show the window, hide it, stop hosting and show it, or quit the program.
+
+### WeChat auto login
+
+Select `Weixin.exe` or `WeChat.exe` to show **WeChat auto login**. The option is off by default and unavailable in **Run in background** mode.
+
+WinTray clicks the login button automatically. With **Close to tray**, it waits for the WeChat main window before closing it. Scan the QR code or confirm on your phone when required. If login is not confirmed within 30 seconds, the login window stays open.
 
 ### Tray collection
 

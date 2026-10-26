@@ -317,6 +317,16 @@ func (w *MainWindow) nativeEditor(c *native.Context, m i18n.Messages) {
 				})
 				nativeHint(c, m.ManagedCloseDelayHint)
 			}
+			if config.IsWeChatExecutable(entry.ExePath) {
+				// Keep the saved choice when switching modes, but hidden launches
+				// cannot provide the login UI needed by this option.
+				native.Column(c).Gap(5).Disabled(mode == startHidden).Children(func() {
+					if native.Checkbox(c, &entry.WeChatAutoLogin, m.ManagedWeChatAutoLogin).Changed() {
+						w.save()
+					}
+					nativeHint(c, m.ManagedWeChatAutoLoginHint)
+				})
+			}
 		})
 		native.Column(c).Gap(5).Disabled(!entry.RunOnStartup).Children(func() {
 			native.Text(c, m.ManagedAppArgs)

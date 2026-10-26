@@ -76,6 +76,8 @@ type Messages struct {
 	ManagedCloseDelay              string
 	ManagedCloseDelayHint          string
 	ManagedCloseDelayInvalid       string
+	ManagedWeChatAutoLogin         string
+	ManagedWeChatAutoLoginHint     string
 	ManagedSchedule                string
 	ManagedScheduleEnabled         string
 	ManagedScheduleStart           string
@@ -235,6 +237,8 @@ var zhCN = Messages{
 	ManagedCloseDelay:              "收起前等待",
 	ManagedCloseDelayHint:          "先弹出登录窗口的程序（如 QQ）建议设为 10–15 秒，0 表示立即收起",
 	ManagedCloseDelayInvalid:       "收起前等待时间必须是 0 到 600 之间的整数",
+	ManagedWeChatAutoLogin:         "微信自动登录",
+	ManagedWeChatAutoLoginHint:     "自动点击登录按钮；扫码或手机确认仍需手动完成",
 	ManagedSchedule:                "自定义时间",
 	ManagedScheduleEnabled:         "启用",
 	ManagedScheduleStart:           "开机后",
@@ -397,6 +401,8 @@ var enUS = Messages{
 	ManagedCloseDelay:              "Wait before closing",
 	ManagedCloseDelayHint:          "Programs that show a sign-in window first (such as QQ) need about 10–15 seconds; 0 closes right away",
 	ManagedCloseDelayInvalid:       "The wait must be a whole number from 0 to 600",
+	ManagedWeChatAutoLogin:         "WeChat auto login",
+	ManagedWeChatAutoLoginHint:     "Click the login button automatically; scan the QR code or confirm on your phone when required",
 	ManagedSchedule:                "Custom timing",
 	ManagedScheduleEnabled:         "On",
 	ManagedScheduleStart:           "Start",
@@ -566,6 +572,7 @@ func TranslateResultCode(language, code string) string {
 		"startup_frequency_limit":        "automatic startup limit reached",
 		"startup_frequency_check_failed": "automatic startup limit check failed",
 		"external_startup_timeout":       "external startup timeout",
+		"wechat_login_incomplete":        "wechat login incomplete",
 		"cancelled":                      "cancelled",
 		"started_only":                   "started only",
 		"started_hidden":                 "started hidden",
@@ -628,6 +635,11 @@ func TranslateResultMessage(language, message string) string {
 			return "cancelled before launch"
 		}
 		return "已取消启动"
+	case "wechat login incomplete":
+		if Resolve(language) == LangEnUS {
+			return "WeChat login is not confirmed; complete login in the WeChat window"
+		}
+		return "尚未确认微信登录成功，请在微信窗口中完成登录"
 	case "started only":
 		if Resolve(language) == LangEnUS {
 			return "started only"

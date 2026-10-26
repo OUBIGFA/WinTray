@@ -29,8 +29,39 @@ var fixtureRefusesClose bool
 var fixturePartiallyRefusesClose bool
 var fixtureOwnerCloses int
 var fixtureFormCloses int
+var fixtureEscapeMode string
+var fixtureEscapes int
 var fixtureProc = syscall.NewCallback(func(hwnd win.HWND, msg uint32, w, l uintptr) uintptr {
 	switch msg {
+	case win.WM_SETFOCUS:
+		if fixtureEscapeMode != "" {
+			// Like an embedded renderer, only the child consumes keyboard input.
+			if child := win.GetWindow(hwnd, win.GW_CHILD); child != 0 {
+				win.SetFocus(child)
+			}
+		}
+	case win.WM_KEYUP:
+		if fixtureEscapeMode != "" && w == win.VK_ESCAPE && win.GetParent(hwnd) != 0 {
+			fixtureEscapes++
+			if fixtureEscapeMode == "escape-exits" {
+				os.Exit(0)
+			}
+			if fixtureEscapeMode != "escape-ignore" {
+				win.ShowWindow(win.GetParent(hwnd), win.SW_HIDE)
+			}
+			return 0
+		}
+	case win.WM_APP + 24:
+		// Test control: establish this fixture's input focus on its own thread,
+		// without relying on permission to activate the user's desktop. A
+		// background thread needs an active top-level window before SetFocus
+		// can assign focus to its embedded child.
+		form := win.HWND(w)
+		win.SetActiveWindow(form)
+		win.SetFocus(win.GetWindow(form, win.GW_CHILD))
+		return 1
+	case win.WM_APP + 23:
+		return uintptr(fixtureEscapes)
 	case win.WM_SYSCOMMAND:
 		if w&0xfff0 == scClose {
 			if uintptr(hwnd) == fixture.Owner {
@@ -38,6 +69,11 @@ var fixtureProc = syscall.NewCallback(func(hwnd win.HWND, msg uint32, w, l uintp
 				return 0
 			}
 			fixtureFormCloses++
+			if fixtureEscapeMode != "" {
+				// Reproduce applications that disable Close in their UI but quit
+				// when an external sender bypasses that restriction with SC_CLOSE.
+				os.Exit(17)
+			}
 			if !fixtureRefusesClose && !(fixturePartiallyRefusesClose && len(fixture.Forms) > 1 && uintptr(hwnd) == fixture.Forms[1]) {
 				win.SetTimer(hwnd, 17, 180, 0)
 			}
@@ -70,6 +106,9 @@ func TestStartupVisibilityProcess(t *testing.T) {
 	runtime.LockOSThread()
 	fixtureRefusesClose = os.Args[4] == "refuse" || os.Args[4] == "taskbar-refuse"
 	fixturePartiallyRefusesClose = os.Args[4] == "partial"
+	if strings.HasPrefix(os.Args[4], "escape-") {
+		fixtureEscapeMode = os.Args[4]
+	}
 	class := syscall.StringToUTF16Ptr("WinTrayStartupVisibilityFixture")
 	wc := win.WNDCLASSEX{LpfnWndProc: fixtureProc, HInstance: win.GetModuleHandle(nil), LpszClassName: class}
 	wc.CbSize = uint32(unsafe.Sizeof(wc))
@@ -85,6 +124,10 @@ func TestStartupVisibilityProcess(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		form := win.CreateWindowEx(0, class, syscall.StringToUTF16Ptr("Fixture UI"), win.WS_OVERLAPPEDWINDOW, -32000, -32000, 120, 80, formOwner, 0, wc.HInstance, nil)
 		fixture.Forms = append(fixture.Forms, uintptr(form))
+		if fixtureEscapeMode != "" {
+			win.EnableMenuItem(win.GetSystemMenu(form, false), scClose, win.MF_BYCOMMAND|win.MF_GRAYED)
+			win.CreateWindowEx(0, class, nil, win.WS_CHILD|win.WS_VISIBLE, 0, 0, 100, 50, form, 0, wc.HInstance, nil)
+		}
 		if os.Args[4] == "layered" {
 			win.SetWindowLong(form, win.GWL_EXSTYLE, exLayered)
 			procSetLayeredWindowAttributes.Call(uintptr(form), 0x112233, 173, 3)

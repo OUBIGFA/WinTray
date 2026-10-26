@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sys/windows"
 	"wintray/internal/config"
 	"wintray/internal/stringutil"
 )
@@ -27,6 +28,7 @@ type startOptions struct {
 	hideProcessWindow      bool
 	hideConsoleWindow      bool
 	manageWindow           bool
+	autoLogin              bool
 	windowOptional         bool
 	respectExternalStartup bool
 	externalOwned          bool
@@ -53,6 +55,7 @@ func managedStartOptions(entry config.ManagedAppEntry) startOptions {
 		hideProcessWindow:      entry.LaunchHiddenInBackground,
 		manageWindow:           !entry.LaunchHiddenInBackground && entry.TrayBehavior.AutoMinimizeAndHideOnLaunch,
 		externalOwned:          entry.LaunchViaLogonTask,
+		autoLogin:              config.WeChatAutoLoginEnabled(entry),
 	}
 	// A task-launched program runs outside WinTray: no launch mode of
 	// WinTray's own can apply to it, and its window is left alone.
@@ -84,11 +87,12 @@ func (s *Service) StartNow(ctx context.Context, entry config.ManagedAppEntry, re
 		return s.start(ctx, entry, retrySeconds, startOptions{windowOptional: true})
 	}
 	if entry.LaunchViaLogonTask {
-		return s.start(ctx, entry, retrySeconds, startOptions{windowOptional: true, launchViaTask: true})
+		return s.start(ctx, entry, retrySeconds, startOptions{windowOptional: true, launchViaTask: true, autoLogin: config.WeChatAutoLoginEnabled(entry)})
 	}
 	return s.start(ctx, entry, retrySeconds, startOptions{
 		hideProcessWindow: entry.LaunchHiddenInBackground,
 		manageWindow:      !entry.LaunchHiddenInBackground && entry.TrayBehavior.AutoMinimizeAndHideOnLaunch,
+		autoLogin:         config.WeChatAutoLoginEnabled(entry),
 		windowOptional:    true,
 	})
 }
@@ -137,7 +141,9 @@ func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retry
 	// A console close would terminate the program; a console-free launch
 	// would make both its output and the requested Show Window unavailable.
 	consoleProgram := (opts.manageWindow || opts.hideProcessWindow) && hasNativeConsole(entry.ExePath)
-	if opts.manageWindow && !consoleProgram {
+	// Authentication may need a QR code or phone confirmation. Keep its UI
+	// visible throughout login instead of applying the startup window shield.
+	if opts.manageWindow && !consoleProgram && !opts.autoLogin {
 		var err error
 		s, err = s.withStartupVisibility(entry.ExePath)
 		if err != nil {
@@ -234,7 +240,7 @@ func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retry
 			return Result{AppName: entry.Name, Code: ResultExternalStartupTimeout, Message: "original startup task did not start the process"}
 		}
 		unlockLaunch()
-		if opts.manageWindow || consoleProgram {
+		if opts.manageWindow || consoleProgram || opts.autoLogin {
 			return s.manageRunning(ctx, entry, retrySeconds, opts, consoleProgram, expectedPath, expectedName)
 		}
 		return startedResult(entry, opts)
@@ -266,6 +272,10 @@ func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retry
 		return result
 	}
 
+	loginWindow, err := s.completeWeChatLogin(ctx, entry, opts)
+	if err != nil {
+		return weChatLoginFailure(entry, err)
+	}
 	if !opts.manageWindow {
 		return startedResult(entry, opts)
 	}
@@ -275,7 +285,7 @@ func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retry
 	}
 
 	managed, ok := s.manageFirstMatchingWindow(ctx, func(w ManagedWindowInfo) bool {
-		return w.ProcessID == pid || matchesExecutableWithIdentityFallback(w, expectedPath, expectedName)
+		return weChatManagedWindowMatches(opts.autoLogin, loginWindow, w) && (w.ProcessID == pid || matchesExecutableWithIdentityFallback(w, expectedPath, expectedName))
 	}, expectedPath, expectedName, &pid, baseline, retrySeconds, "close", closeDelay(entry))
 	if !ok {
 		return windowNotManagedResult(entry, opts)
@@ -332,6 +342,10 @@ func (s *Service) manageRunning(ctx context.Context, entry config.ManagedAppEntr
 		return cancelledResult(entry)
 	}
 	s.logger.Info(fmt.Sprintf("skip start: already running %s", entry.Name))
+	loginWindow, err := s.completeWeChatLogin(ctx, entry, opts)
+	if err != nil {
+		return weChatLoginFailure(entry, err)
+	}
 	if consoleProgram {
 		if hidden, ok := s.adoptRunningConsole(ctx, entry, expectedPath, expectedName); ok {
 			result := hiddenToTrayResult(entry, hidden)
@@ -347,13 +361,16 @@ func (s *Service) manageRunning(ctx context.Context, entry config.ManagedAppEntr
 			return cancelledResult(entry)
 		}
 		managed, ok := s.manageFirstMatchingWindow(ctx, func(w ManagedWindowInfo) bool {
-			return matchesExecutableWithIdentityFallback(w, expectedPath, expectedName)
+			return weChatManagedWindowMatches(opts.autoLogin, loginWindow, w) && matchesExecutableWithIdentityFallback(w, expectedPath, expectedName)
 		}, expectedPath, expectedName, nil, nil, retrySeconds, "close", closeDelay(entry))
 		if ok {
 			return managedResult(entry, managed, ResultAlreadyRunningManaged, "already running managed existing")
 		}
 		if ctx.Err() != nil {
 			return cancelledResult(entry)
+		}
+		if !s.hasExistingManagedProcess(expectedPath, expectedName) && !s.hasExistingManagedWindow(expectedPath, expectedName) {
+			return Result{AppName: entry.Name, Code: ResultNoWindowManaged, Message: "program exited while dismissing its window"}
 		}
 	}
 	return Result{AppName: entry.Name, Managed: true, Code: ResultAlreadyRunningSkipped, Message: "already running skipped"}
@@ -654,12 +671,40 @@ func (s *Service) manageFirstMatchingWindow(ctx context.Context, predicate func(
 	}
 }
 
-func (s *Service) tryManageAndVerify(ctx context.Context, window ManagedWindowInfo, score int, actionType string) (managedWindow, bool) {
+func (s *Service) tryManageAndVerify(ctx context.Context, window ManagedWindowInfo, score int, actionType string) (managed managedWindow, applied bool) {
+	if ctx.Err() != nil {
+		return managedWindow{}, false
+	}
 	if score < closeAllowedScoreThreshold {
 		s.logger.Warn(fmt.Sprintf("skip low confidence candidate score=%d threshold=%d %s", score, closeAllowedScoreThreshold, describeWindow(window)))
 		return managedWindow{}, false
 	}
 	target := resolveActionTargetHandle(window)
+	// Hold the original process through dismissal. A destroyed HWND alone is
+	// not success: WM_CLOSE can terminate the program and remove its tray icon.
+	// An already-gone window is still rejected by the native manager below.
+	if isWindow(target) {
+		identity := windowIdentity(target)
+		if identity.ProcessID != window.ProcessID {
+			return managedWindow{}, false
+		}
+		process, err := windows.OpenProcess(windows.SYNCHRONIZE, false, window.ProcessID)
+		if err != nil {
+			s.logger.Warn(fmt.Sprintf("cannot observe window process pid=%d: %v", window.ProcessID, err))
+			return managedWindow{}, false
+		}
+		defer windows.CloseHandle(process)
+		defer func() {
+			state, err := windows.WaitForSingleObject(process, 0)
+			if applied && (ctx.Err() != nil || err != nil || state != uint32(windows.WAIT_TIMEOUT)) {
+				s.logger.Warn(fmt.Sprintf("window dismissal did not preserve the process: pid=%d hwnd=0x%X", window.ProcessID, target))
+				managed, applied = managedWindow{}, false
+			}
+		}()
+		if !identity.valid() {
+			return managedWindow{}, false
+		}
+	}
 	closed := managedWindow{Handle: target, ProcessID: window.ProcessID}
 	hidden := managedWindow{Handle: target, ProcessID: window.ProcessID, Hidden: true}
 
@@ -670,8 +715,17 @@ func (s *Service) tryManageAndVerify(ctx context.Context, window ManagedWindowIn
 		return hidden, s.applyAndVerify(ctx, window, score, "hide", s.manager.HideWindow)
 	}
 
-	// "hide" uses WM_CLOSE first and falls back to SW_HIDE for callers that
-	// explicitly request a hide action. "close" sends WM_CLOSE only.
+	// Esc precedes native close. The manager scopes input to this window and
+	// refuses native close when the program has disabled/removed that command.
+	if s.applyAndVerify(ctx, window, score, "escape", func(hwnd uintptr) (bool, error) {
+		return s.manager.SendEscape(ctx, hwnd)
+	}) {
+		return closed, true
+	}
+
+	// "hide" tries the program's Esc action and WM_CLOSE first, then falls back
+	// to SW_HIDE for callers that explicitly request a hide action. "close"
+	// uses the same graceful requests without hiding the window itself.
 	// A close succeeds when the window is destroyed or becomes invisible, which
 	// covers applications that intercept close and move themselves to the tray.
 	if actionType == "hide" {
@@ -689,6 +743,9 @@ func (s *Service) tryManageAndVerify(ctx context.Context, window ManagedWindowIn
 }
 
 func (s *Service) applyAndVerify(ctx context.Context, window ManagedWindowInfo, score int, action string, fn func(uintptr) (bool, error)) bool {
+	if ctx.Err() != nil {
+		return false
+	}
 	targetHwnd := resolveActionTargetHandle(window)
 	if targetHwnd != window.Handle {
 		s.logger.Info(fmt.Sprintf("retarget action action=%s score=%d from=0x%X to=0x%X", action, score, window.Handle, targetHwnd))
@@ -729,7 +786,12 @@ func (s *Service) verifyActionApplied(ctx context.Context, hwnd uintptr, score i
 	// while still allowing async framework event loops enough time.
 	attempts := 10
 	delay := 400 * time.Millisecond
-	if action == "hide" {
+	if action == "escape" {
+		// Esc is tried first. Leave enough time for a UI event loop to
+		// process the posted key pair before considering native close.
+		attempts = 4
+		delay = 250 * time.Millisecond
+	} else if action == "hide" {
 		attempts = 4
 		delay = 300 * time.Millisecond
 	}

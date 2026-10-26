@@ -57,10 +57,10 @@ func (s *Service) IsProgramRunning(entry config.ManagedAppEntry) bool {
 	return hasRunningProcessByIdentity(expectedPath, expectedName) || s.hasExistingManagedWindow(expectedPath, expectedName)
 }
 
-// StopNow asks matching windows to close, then terminates any remaining
-// matching process trees. The close request gives programs their normal save
-// and cleanup path; the termination fallback also handles tray-only and
-// console programs that have no closeable window.
+// StopNow explicitly exits the program, unlike startup window dismissal.
+// Give enabled native close handlers their cleanup path, then terminate any
+// remaining matching process trees. Esc can merely hide a window, so it is
+// not part of this exit operation.
 func (s *Service) StopNow(ctx context.Context, entry config.ManagedAppEntry) error {
 	if err := ctx.Err(); err != nil {
 		return err
