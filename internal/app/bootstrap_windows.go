@@ -40,6 +40,8 @@ const (
 var readyWait = 2 * time.Minute
 
 func Run(args []string) int {
+	var deadline exitDeadline
+	defer deadline.stop() // after registration waits, logger and instance cleanup
 	if code := runAppTaskHelper(args); code >= 0 {
 		return code
 	}
@@ -114,6 +116,7 @@ func Run(args []string) int {
 	}()
 	return runMainSession(args, settings, sessionServices{
 		store: store, logger: logger, activationName: activationEvent, readyName: readyMarker,
+		beginExit:     deadline.start,
 		setRunAtLogon: logon.Request,
 		syncAppTasks: func(r appTaskSyncRequest) {
 			appTaskWorker.Request(r.snapshot())
@@ -154,6 +157,7 @@ type sessionServices struct {
 	logger            *logging.Logger
 	activationName    string
 	readyName         string
+	beginExit         func()
 	setRunAtLogon     func(config.Settings)
 	syncAppTasks      func(appTaskSyncRequest)
 	waitAppTasks      func()
@@ -187,8 +191,10 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 	quitting := false
 	defer func() {
 		cancelLaunches()
-		launchWG.Wait()
+		// Release existing windows before waiting for workers: a blocked
+		// worker must not keep already-hosted programs hidden until timeout.
 		host.RestoreAll()
+		launchWG.Wait()
 		trayController.Dispose()
 		if err := box.Close(); err != nil {
 			logger.Warn(fmt.Sprintf("restore collected tray icons on shutdown failed: %v", err))
@@ -212,27 +218,25 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 	// Reconciliation runs in the background and never gates existing tasks.
 	services.syncAppTasks(appTaskSyncRequest{settings: settings, allowElevated: false})
 
-	// Keep pumping UI messages while outstanding work is cancelled and hidden
-	// windows are recovered. Closing the message loop first loses hand-offs.
+	// Exit is a terminal decision, not a tray-selection transaction. Cancel
+	// first, suppress pending dialogs, and let deferred cleanup report errors
+	// without vetoing exit. The outer deadline also covers blocked workers.
 	requestExit := func() {
 		if quitting {
 			return
 		}
-		if err := box.Close(); err != nil {
-			logger.Warn(fmt.Sprintf("restore collected tray icons before exit failed: %v", err))
-			mainWindow.ShowError(i18n.For(safeLanguage(mainWindow)).TrayBoxFailedTitle, err.Error())
-			return
-		}
 		quitting = true
-		logger.Info("shutdown requested: cancelling pending tasks")
+		if services.beginExit != nil {
+			services.beginExit()
+		}
 		cancelLaunches()
-		mainWindow.SetEnabled(false)
+		mainWindow.RequestExplicitClose()
+		logger.Info("shutdown requested: cancelling pending tasks; cleanup deadline 2s")
 		// Dispose the icon before closing the window so an open shell menu is
 		// dismissed immediately instead of being left behind while workers stop.
 		if trayController != nil {
 			trayController.Dispose()
 		}
-		mainWindow.RequestExplicitClose()
 	}
 	applyResidency := func() {
 		if quitting || mainWindow == nil {
@@ -432,6 +436,9 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 				logger.Warn(fmt.Sprintf("save settings failed: %v", saveErr))
 				mainWindow.ShowError(i18n.For(s.Language).WindowTitle, saveErr.Error())
 				return // do not migrate system startup from unpersisted settings
+			}
+			if quitting {
+				return // save the last edit, but never start registration/UAC on exit
 			}
 			services.setRunAtLogon(s)
 			// A task change made in the UI may ask for one elevated

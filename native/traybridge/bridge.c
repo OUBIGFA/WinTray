@@ -219,7 +219,10 @@ static LRESULT CALLBACK shell_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp,
         if (data->dwData == WINTRAY_RESUME_DATA && wp == (WPARAM)route->broker && alive &&
             data->cbData == sizeof(uint64_t) && data->lpData) {
             uint64_t token; memcpy(&token, data->lpData, sizeof(token));
-            if (!route->pause_token || route->pause_token != token) { result = 2; goto done; }
+            if (!route->pause_token) { result = 2; goto done; }
+            // A different active pause is not a completed resume. Reporting
+            // 2 here makes Go discard the real resume notification as stale.
+            if (route->pause_token != token) goto done;
             if (!route->packets) {
                 if (route->observed_overflow) { SetEvent(route->stopped); goto done; }
                 // Acknowledged batches remain ordered and retryable. The Go
@@ -296,15 +299,20 @@ static LRESULT CALLBACK shell_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp,
             DWORD error = GetLastError();
             route->packets = packet.previous;
             HeapFree(GetProcessHeap(), 0, wire);
-            if (sent) { result = (LRESULT)reply; goto done; }
-            // A single slow request pauses forwarding, not the whole lease.
-            // If Go already reached Explorer, return that exact result. If it
-            // has not, finish natively once; its token is now invalid in Go.
-            route->pause_token = packet.token;
-            route->timeout_error = error ? error : ERROR_TIMEOUT;
+            if (sent && !route->pause_token) { result = (LRESULT)reply; goto done; }
+            // SendMessageTimeout pumps nested native calls. If an inner call
+            // paused the route, Go can answer the outer call without having
+            // forwarded it. Finish that native request exactly once as well.
+            if (!sent) {
+                // A late outer timeout must not move the pause generation
+                // backwards to its older packet token. All nested timeouts
+                // share the newest issued token until the stack has unwound.
+                route->pause_token = route->serial;
+                route->timeout_error = error ? error : ERROR_TIMEOUT;
+            }
             result = accept_duplicate(hwnd, wp, data, packet.forwarded ? packet.result : DefSubclassProc(hwnd, msg, wp, lp));
             if (!packet.forwarded && result) observe_native(route, data);
-            PostMessageW(route->broker, WINTRAY_BROKER_RESUME, (WPARAM)packet.token, route->timeout_error);
+            PostMessageW(route->broker, WINTRAY_BROKER_RESUME, (WPARAM)route->pause_token, route->timeout_error);
             goto done;
         }
     }

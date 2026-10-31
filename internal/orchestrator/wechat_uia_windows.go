@@ -30,6 +30,7 @@ const (
 	uiaCurrentIsEnabled      = 28
 	uiaCurrentClassName      = 30
 	uiaCurrentIsOffscreen    = 38
+	uiaCurrentBoundingRect   = 43
 	uiaArrayLength           = 3
 	uiaArrayElement          = 4
 	uiaInvoke                = 3
@@ -145,7 +146,63 @@ func (a *weChatAutomation) root(ctx context.Context, window HiddenWindow) (*weCh
 		root.release()
 		return nil, weChatUnknown, err
 	}
-	return root, weChatKind(class), nil
+	kind := weChatKind(class)
+	if kind == weChatUnknown && weChatCandidateClass(class) {
+		main, err := a.renderedMain(ctx, root, window.ProcessID)
+		if err != nil {
+			root.release()
+			return nil, weChatUnknown, err
+		}
+		if main {
+			kind = weChatMainWindow
+		}
+	}
+	return root, kind, nil
+}
+
+// Weixin 4.1.12+ can keep the main UIA tree disabled after a fresh launch.
+// Its native chat render surface remains visible under the titled Qt shell.
+// Require both identities, visibility and the same PID; a generic Qt window
+// alone must never confirm login or authorize dismissing an account's window.
+func (a *weChatAutomation) renderedMain(ctx context.Context, root *weChatUIAObject, pid uint32) (bool, error) {
+	name, err := root.text(uiaCurrentName)
+	if err != nil || (name != "微信" && name != "Weixin" && name != "WeChat") {
+		return false, err
+	}
+	elements, err := weChatUIARead[*weChatUIAObject](root, uiaFindAll, uiaTreeScopeDescendants, uintptr(unsafe.Pointer(a.condition)))
+	if err != nil || elements == nil {
+		return false, err
+	}
+	defer elements.release()
+	count, err := weChatUIARead[int32](elements, uiaArrayLength)
+	if err != nil {
+		return false, err
+	}
+	if count < 0 || count > 512 {
+		return false, errors.New("unexpected WeChat main tree size")
+	}
+	for i := int32(0); i < count; i++ {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		element, err := weChatUIARead[*weChatUIAObject](elements, uiaArrayElement, uintptr(i))
+		if err != nil || element == nil {
+			return false, errors.Join(errors.New("read WeChat main element"), err)
+		}
+		class, err := element.text(uiaCurrentClassName)
+		if err != nil || class != "MMUIRenderSubWindowHW" {
+			element.release()
+			if err != nil {
+				return false, err
+			}
+			continue
+		}
+		owner, pidErr := weChatUIARead[int32](element, uiaCurrentProcessID)
+		offscreen, visibilityErr := weChatUIARead[int32](element, uiaCurrentIsOffscreen)
+		element.release()
+		return uint32(owner) == pid && offscreen == 0, errors.Join(pidErr, visibilityErr)
+	}
+	return false, nil
 }
 
 func (a *weChatAutomation) observe(ctx context.Context, window HiddenWindow) (weChatObservation, error) {
@@ -250,6 +307,15 @@ func (a *weChatAutomation) clickLogin(ctx context.Context, window HiddenWindow) 
 		return errors.New("WeChat login button unavailable")
 	}
 	defer button.release()
+	class, err := root.text(uiaCurrentClassName)
+	if err != nil {
+		return err
+	}
+	// Weixin 4's Qt provider advertises Invoke but returns success without
+	// activating this button. Deliver one click to its login HWND instead.
+	if class == "mmui::LoginWindow" {
+		return clickWeChatQtButton(ctx, window, button)
+	}
 	pattern, err := weChatUIARead[*weChatUIAObject](button, uiaGetCurrentPattern, uiaInvokePatternID)
 	if err != nil {
 		return err
@@ -265,4 +331,49 @@ func (a *weChatAutomation) clickLogin(ctx context.Context, window HiddenWindow) 
 		return errors.New("WeChat window changed before Invoke")
 	}
 	return pattern.call(uiaInvoke)
+}
+
+func clickWeChatQtButton(ctx context.Context, window HiddenWindow, button *weChatUIAObject) error {
+	// UIA rectangles use physical screen pixels. Match that coordinate space
+	// during conversion, including when tests or the caller are DPI-unaware.
+	setDPI := user32.NewProc("SetThreadDpiAwarenessContext")
+	previous, _, dpiErr := setDPI.Call(^uintptr(3)) // DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
+	if previous == 0 {
+		return fmt.Errorf("set WeChat click DPI context: %w", dpiErr)
+	}
+	defer setDPI.Call(previous)
+	rect, err := weChatUIARead[win.RECT](button, uiaCurrentBoundingRect)
+	if err != nil {
+		return err
+	}
+	if rect.Right <= rect.Left || rect.Bottom <= rect.Top {
+		return errors.New("WeChat login button has no clickable rectangle")
+	}
+	hwnd := win.HWND(window.Handle)
+	point := win.POINT{X: rect.Left + (rect.Right-rect.Left)/2, Y: rect.Top + (rect.Bottom-rect.Top)/2}
+	var client win.RECT
+	if !win.ScreenToClient(hwnd, &point) || !win.GetClientRect(hwnd, &client) {
+		return errors.New("read WeChat login client coordinates")
+	}
+	if point.X < 0 || point.Y < 0 || point.X >= client.Right || point.Y >= client.Bottom || point.X > 32767 || point.Y > 32767 {
+		return errors.New("WeChat login button is outside the client area")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if windowIdentity(window.Handle).ProcessID != window.ProcessID || !isWindowVisible(window.Handle) || win.IsIconic(hwnd) {
+		return errors.New("WeChat login window changed before click")
+	}
+	// HWND-local messages avoid moving the user's pointer or clicking another
+	// application that happens to cover the login window.
+	position := uintptr(uint16(point.X)) | uintptr(uint16(point.Y))<<16
+	for _, input := range []struct {
+		message uint32
+		keys    uintptr
+	}{{win.WM_MOUSEMOVE, 0}, {win.WM_LBUTTONDOWN, win.MK_LBUTTON}, {win.WM_LBUTTONUP, 0}} {
+		if ok, _, err := procPostMessageW.Call(window.Handle, uintptr(input.message), input.keys, position); ok == 0 {
+			return fmt.Errorf("send WeChat login click: %w", err)
+		}
+	}
+	return nil
 }

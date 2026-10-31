@@ -184,7 +184,19 @@ func (b *Box) Icons() []Icon {
 	return b.listener.snapshot()
 }
 
-// Close shows every collected icon in the notification area again.
+// Close is terminal shutdown, unlike SetPaths(nil), which must roll back a
+// failed deselection. Restoration errors are returned for logging, but cannot
+// keep collecting or discard the companion's pending recovery snapshot.
 func (b *Box) Close() error {
-	return b.SetPaths(nil)
+	var errs []error
+	if b.listener != nil {
+		errs = append(errs, b.listener.close())
+		b.listener = nil
+	}
+	if b.bridge != nil {
+		errs = append(errs, b.bridge.close())
+		b.bridge = nil
+	}
+	b.paths = nil
+	return errors.Join(errs...)
 }

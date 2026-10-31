@@ -399,8 +399,11 @@ func runMainSessionProcess(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	var deadline exitDeadline
+	defer deadline.stop()
 	code := runMainSession([]string{"--autorun", "--background"}, settings, sessionServices{
 		store: store, logger: logger, activationName: eventName, readyName: readyName, setRunAtLogon: checkStartup,
+		beginExit:    deadline.start,
 		syncAppTasks: func(appTaskSyncRequest) {}, // never touch real program tasks from the session fixture
 	})
 	if code != 0 {

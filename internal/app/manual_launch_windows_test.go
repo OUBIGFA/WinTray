@@ -142,18 +142,21 @@ func TestManualLaunchOnlyShowsFailures(t *testing.T) {
 					_, _ = windows.WaitForSingleObject(handle, 3000)
 					_ = windows.CloseHandle(handle)
 				})
-				for attempt := 0; attempt < 2; attempt++ {
-					if attempt == 1 {
-						// Already-running is also a successful no-op, not an error.
-						clickSessionButton(t, hwnd, "立即启动")
-					}
-					waitSessionCondition(t, "launch action restored", func() bool { return sessionHasButton(hwnd, "立即启动") })
-					for until := time.Now().Add(600 * time.Millisecond); time.Now().Before(until); time.Sleep(20 * time.Millisecond) {
-						if !win.IsWindowEnabled(hwnd) || manualLaunchDialog(uint32(cmd.Process.Pid), hwnd) != 0 {
-							t.Fatal("successful launch displayed a modal dialog")
-						}
+				// The live action changes from Launch Now to Stop Program once
+				// the process exists; waiting for another launch button would
+				// incorrectly report a responsive, successful launch as a hang.
+				waitSessionCondition(t, "stop action after launch", func() bool { return sessionHasButton(hwnd, "停止程序") })
+				for until := time.Now().Add(600 * time.Millisecond); time.Now().Before(until); time.Sleep(20 * time.Millisecond) {
+					if !win.IsWindowEnabled(hwnd) || manualLaunchDialog(uint32(cmd.Process.Pid), hwnd) != 0 {
+						t.Fatal("successful launch displayed a modal dialog")
 					}
 				}
+				clickSessionButton(t, hwnd, "停止程序")
+				waitSessionCondition(t, "manually stopped program", func() bool {
+					status, err := windows.WaitForSingleObject(handle, 0)
+					return err == nil && status == windows.WAIT_OBJECT_0
+				})
+				waitSessionCondition(t, "launch action restored after stop", func() bool { return sessionHasButton(hwnd, "立即启动") })
 			} else {
 				var dialog win.HWND
 				waitSessionCondition(t, "launch failure dialog", func() bool {

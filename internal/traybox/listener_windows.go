@@ -60,6 +60,7 @@ const (
 	msgBridgeFailed = win.WM_APP + 4
 	msgBridgeResume = win.WM_APP + 5
 	msgBridgeEpoch  = win.WM_APP + 6
+	msgClose        = win.WM_APP + 7 // terminal shutdown; never roll collection back
 	// Explorer posts rather than sends this message; sending it can deadlock.
 	msgPostOnly = win.WM_USER + 372
 
@@ -364,23 +365,36 @@ func (l *listener) reportError(err error) {
 // stop hands every hidden icon back to Explorer and ends the thread. It
 // keeps the listener alive on failure. Each forwarded request has its own
 // timeout; never abandon a shutdown that could still destroy the listener.
-func (l *listener) stop() error {
+func (l *listener) stop() error { return l.stopWithMessage(msgStop) }
+
+// close is terminal. Unlike deselection, a rejected restoration must release
+// the broker and let the acknowledged recovery snapshot finish out of process.
+func (l *listener) close() error { return l.stopWithMessage(msgClose) }
+
+func (l *listener) stopWithMessage(message uint32) error {
 	select {
 	case <-l.done:
 		return nil
 	default:
 	}
-	if win.PostMessage(l.hwnd, msgStop, 0, 0) == 0 {
+	if win.PostMessage(l.hwnd, message, 0, 0) == 0 {
 		return errors.New("could not request tray icon restoration")
 	}
 	select {
 	case err := <-l.stopResult:
-		if err == nil {
+		if err == nil || message == msgClose {
 			<-l.done
 		}
 		return err
 	case <-l.done:
-		return nil
+		// A terminal close can fail restoration and still end the thread.
+		// Do not lose its diagnostic when both channels are ready.
+		select {
+		case err := <-l.stopResult:
+			return err
+		default:
+			return nil
+		}
 	}
 }
 
@@ -452,11 +466,11 @@ func (l *listener) wndProc(msg uint32, wParam, lParam uintptr) uintptr {
 			l.reportError(err)
 		}
 		return 0
-	case msgStop:
-		l.stopResult <- l.shutdown()
+	case msgStop, msgClose:
+		l.stopResult <- l.shutdown(msg == msgClose)
 		return 0
 	case win.WM_CLOSE:
-		if err := l.shutdown(); err != nil {
+		if err := l.shutdown(true); err != nil {
 			l.logger.Warn(fmt.Sprintf("tray box: %v", err))
 		}
 		return 0
@@ -905,9 +919,9 @@ func (l *listener) sync() error {
 	return nil
 }
 
-// restoreIcons keeps failed restores for the next heal/stop attempt. During
-// shutdown all records survive until every restore succeeds, so a failed stop
-// can resume collecting the previous selection.
+// restoreIcons retains failed restores for retry. A selection transaction
+// keeps all records until success; terminal close instead leaves the recovery
+// companion's acknowledged snapshot intact before releasing the listener.
 func (l *listener) restoreIcons(all bool) error {
 	l.mu.Lock()
 	ids := make([]iconID, 0, len(l.icons))
@@ -930,10 +944,10 @@ func (l *listener) restoreIcons(all bool) error {
 			l.mu.Unlock()
 			continue
 		}
-		request, revision, path := stateRequest(t.template, false), t.revision, t.ExePath
+		request, revision, path, owner, uid := stateRequest(t.template, false), t.revision, t.ExePath, t.owner, t.uid
 		l.mu.Unlock()
-		if l.sendRequest(0, request) == 0 {
-			errs = append(errs, fmt.Errorf("could not restore tray icon of %s", path))
+		if result, delivered := l.sendRequestResult(0, request); result == 0 {
+			errs = append(errs, fmt.Errorf("could not restore tray icon of %s (hwnd=0x%X uid=%d delivered=%t)", path, owner, uid, delivered))
 			continue
 		}
 		l.mu.Lock()
@@ -950,35 +964,42 @@ func (l *listener) restoreIcons(all bool) error {
 	return errors.Join(errs...)
 }
 
-func (l *listener) shutdown() error {
+func (l *listener) shutdown(terminal bool) error {
 	l.mu.Lock()
 	l.closing = true // reentrant requests must pass through without being hidden
 	l.mu.Unlock()
-	if err := l.restoreIcons(true); err != nil {
+	restoreErr := l.restoreIcons(true)
+	if restoreErr != nil && !terminal {
 		l.mu.Lock()
 		l.closing = l.recoveryFailed
 		l.mu.Unlock()
-		return err
+		return restoreErr
 	}
 	if !win.DestroyWindow(l.hwnd) {
-		l.mu.Lock()
-		l.closing = l.recoveryFailed
-		l.mu.Unlock()
-		return errors.New("could not stop the tray icon listener")
+		err := errors.Join(restoreErr, errors.New("could not stop the tray icon listener"))
+		if terminal {
+			// Do not keep pumping/healing after the application has committed
+			// to exit; closing the recovery pipe remains the fallback.
+			win.PostQuitMessage(0)
+		} else {
+			l.mu.Lock()
+			l.closing = l.recoveryFailed
+			l.mu.Unlock()
+		}
+		return err
 	}
-	// DestroyWindow also removes its timers.
+	// DestroyWindow also removes its timers. On failure retain the recovery
+	// companion's last acknowledged snapshot, not an empty "success" frame.
 	l.mu.Lock()
 	clear(l.icons)
 	clear(l.paths)
 	l.mu.Unlock()
-	if l.recovery != nil && !l.recoveryFailed {
-		// Native restoration is already complete; a helper stop failure must
-		// be logged, but cannot resurrect the destroyed listener window.
+	if restoreErr == nil && l.recovery != nil && !l.recoveryFailed {
 		if err := l.recovery.stop(); err != nil {
 			l.logger.Warn(fmt.Sprintf("tray box: stop recovery: %v", err))
 		}
 	}
-	return nil
+	return restoreErr
 }
 
 // forward passes a message on to Explorer. Posted messages stay posted.

@@ -35,15 +35,8 @@ var gwlExStyle = int32(-20)
 
 type Win32WindowEnumerator struct{}
 
-type enumState struct {
-	result        *[]ManagedWindowInfo
-	foreground    uintptr
-	processes     map[uint32][2]string
-	includeHidden bool
-}
-
-var enumStateMu sync.Mutex
-var activeEnum enumState
+var enumHandlesMu sync.Mutex
+var activeEnumHandles []uintptr
 
 func NewWin32WindowEnumerator() *Win32WindowEnumerator { return &Win32WindowEnumerator{} }
 
@@ -54,24 +47,32 @@ func (e *Win32WindowEnumerator) EnumerateTopLevelWindows() []ManagedWindowInfo {
 // Explicit Show Window also needs hidden windows; startup matching retains its
 // visible-only enumeration so this action does not change automatic closing.
 func enumerateTopLevelWindows(includeHidden bool) []ManagedWindowInfo {
-	enumStateMu.Lock()
-	defer enumStateMu.Unlock()
-
-	result := make([]ManagedWindowInfo, 0)
+	handles := enumerateTopLevelHandles()
+	result := make([]ManagedWindowInfo, 0, len(handles))
 	foreground, _, _ := procGetForegroundWindow.Call()
-	activeEnum = enumState{result: &result, foreground: foreground, processes: make(map[uint32][2]string), includeHidden: includeHidden}
-	defer func() { activeEnum = enumState{} }()
-	_, _, _ = procEnumWindows.Call(enumWindowsCallback, 0)
+	processes := make(map[uint32][2]string)
+	for _, hwnd := range handles {
+		if !includeHidden && !isWindowVisible(hwnd) {
+			continue
+		}
+		result = append(result, windowInfo(hwnd, foreground, processes))
+	}
 	return result
 }
 
-func enumWindowsProc(hwnd uintptr, _ uintptr) uintptr {
-	v, _, _ := procIsWindowVisible.Call(hwnd)
-	if v == 0 && !activeEnum.includeHidden {
-		return 1
-	}
+// Only the callback's handle collection needs serialization. GetWindowText*
+// sends messages to our own window threads; holding this lock while reading
+// titles would deadlock a UI thread that checks running state during rendering.
+func enumerateTopLevelHandles() []uintptr {
+	enumHandlesMu.Lock()
+	defer enumHandlesMu.Unlock()
+	defer func() { activeEnumHandles = nil }()
+	_, _, _ = procEnumWindows.Call(enumWindowsCallback, 0)
+	return activeEnumHandles
+}
 
-	*activeEnum.result = append(*activeEnum.result, windowInfo(hwnd, activeEnum.foreground, activeEnum.processes))
+func enumWindowsProc(hwnd uintptr, _ uintptr) uintptr {
+	activeEnumHandles = append(activeEnumHandles, hwnd)
 	return 1
 }
 

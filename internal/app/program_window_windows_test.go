@@ -95,7 +95,8 @@ func TestMainSessionNativeWindowActions(t *testing.T) {
 				t.Fatal(err)
 			}
 			m := i18n.For(language)
-			clickSessionButton(t, hwnd, m.ManagedLaunchNow)
+			// This fixture starts with the session. Its live action becomes
+			// Stop Program, so a second Launch Now is neither needed nor stable.
 			var pid uint32
 			waitSessionCondition(t, "native console process", func() bool {
 				data, err := os.ReadFile(release + ".pid")
@@ -118,7 +119,7 @@ func TestMainSessionNativeWindowActions(t *testing.T) {
 				return console != 0 && !win.IsWindowVisible(console)
 			})
 			waitSessionCondition(t, "show window action", func() bool {
-				return sessionHasButton(hwnd, m.HostedShowWindow) && sessionHasButton(hwnd, m.ManagedLaunchNow)
+				return sessionHasButton(hwnd, m.HostedShowWindow) && sessionHasButton(hwnd, m.ManagedStopProgram)
 			})
 			assertNativeTaskbar(t, false)
 			captureWindowActionSession(t, uint32(cmd.Process.Pid), "native-window-"+language)
