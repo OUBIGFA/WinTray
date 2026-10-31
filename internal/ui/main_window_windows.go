@@ -9,6 +9,7 @@ import (
 	"os"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"syscall"
 
 	"github.com/egoist/mygo"
@@ -52,6 +53,7 @@ type MainWindow struct {
 	programWindowBusy map[string]bool
 	checkingUpdate    bool
 	allowClose        bool
+	closing           atomic.Bool // suppress worker dialogs as soon as exit is requested
 	starting          []func()
 	bounds            mygo.Rectangle
 	queueMu           sync.Mutex
@@ -201,14 +203,14 @@ func (w *MainWindow) Run() int {
 
 func (w *MainWindow) ShowMainWindow() {
 	w.Synchronize(func() {
-		if w.allowClose {
+		if w.closing.Load() {
 			return
 		}
 		if w.desktop.window == nil {
 			// Releasing the whole surface when hidden keeps GPU and text
 			// caches out of the long-lived, background-only tray session.
 			w.onSettingsPage = false
-			width, height := 1200, 850
+			width, height := 1280, 850
 			if w.bounds.Width > 0 {
 				w.bounds.Width = max(mainWindowMinWidth, w.bounds.Width)
 				w.bounds.Height = max(720, w.bounds.Height)
@@ -262,21 +264,27 @@ func (w *MainWindow) HideMainWindow() {
 		w.desktop.icons = nil
 		w.desktop.numberCommits = nil
 		w.desktop.frameNumberCommits = nil
+		w.desktop.frameBlurCommits = nil
+		w.desktop.exitPressed = false
 		w.resetNativeList(first)
 	}
 }
 
 func (w *MainWindow) RequestExplicitClose() {
+	// Worker errors may already be queued ahead of the close callback.
+	// Publish the terminal state now, not when that callback finally runs.
+	if !w.closing.CompareAndSwap(false, true) {
+		return
+	}
 	w.Synchronize(func() {
-		if w.allowClose {
-			return
-		}
-		w.commitNativeEdits()
 		w.allowClose = true
 		if w.desktop.window != nil {
 			w.desktop.window.Destroy()
 			w.desktop.window = nil
 		}
+		// Persist valid pending values after dismissing the window. An error
+		// cannot reopen a dialog, and the app deadline bounds a stalled save.
+		w.commitNativeEdits()
 		mygo.App.Quit()
 	})
 }
@@ -342,12 +350,19 @@ func (w *MainWindow) ShowInfo(title, body string)  { w.showMessage(title, body, 
 func (w *MainWindow) ShowError(title, body string) { w.showMessage(title, body, mygo.MessageError) }
 func (w *MainWindow) showMessage(title, body string, kind mygo.MessageType) {
 	w.Synchronize(func() {
+		if w.closing.Load() {
+			log.Printf("dialog suppressed during shutdown: %s: %s", title, body)
+			return
+		}
 		if _, err := mygo.Dialog.Message(mygo.MessageOptions{Parent: w.desktop.window, Title: title, Message: body, Type: kind}); err != nil {
 			log.Printf("show dialog: %v", err)
 		}
 	})
 }
 func (w *MainWindow) Confirm(title, body string) bool {
+	if w.closing.Load() {
+		return false
+	}
 	yes, no := "是", "否"
 	if w.settings.Language == "en-US" {
 		yes, no = "Yes", "No"
@@ -360,6 +375,9 @@ func (w *MainWindow) Confirm(title, body string) bool {
 	return result.Button == 0
 }
 func (w *MainWindow) ConfirmContext(ctx context.Context, title, body string) bool {
+	if w.closing.Load() {
+		return false
+	}
 	answer := make(chan bool, 1)
 	w.Synchronize(func() {
 		if ctx.Err() == nil {

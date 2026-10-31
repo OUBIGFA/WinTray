@@ -92,7 +92,7 @@ func TestNativeDeleteRestoresCollectedIconBeforeRemovingEntry(t *testing.T) {
 	}
 }
 
-func TestNativeDeleteLastProgramShowsDisabledEditor(t *testing.T) {
+func TestNativeDeleteLastProgramShowsEmptyEditor(t *testing.T) {
 	w := nativeProgramsFixture(1)
 	w.callbacks.OnLaunchNow = func(config.ManagedAppEntry) { t.Error("empty editor launched a program") }
 	tt := native.NewTester(w.nativeView, 1200, 850)
@@ -106,10 +106,10 @@ func TestNativeDeleteLastProgramShowsDisabledEditor(t *testing.T) {
 	if err := tt.ChooseMenuItem(m.RemoveConfirmLabel); err != nil {
 		t.Fatal(err)
 	}
-	if !tt.HasText(m.ManagedExampleName) || !tt.HasText(m.ManagedListEmpty) || w.desktop.selected != -1 {
+	if !tt.HasText(m.ManagedSelectPrompt) || !tt.HasText(m.ManagedListEmpty) || w.desktop.selected != -1 {
 		t.Fatal("last deletion left a live editor or stale selection")
 	}
-	if err := tt.Click(m.ManagedLaunchNow); err != nil {
-		t.Fatal(err)
+	if _, found := tt.Find(m.ManagedLaunchNow); found {
+		t.Fatal("empty editor still offers a launch action")
 	}
 }

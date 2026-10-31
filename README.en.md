@@ -84,7 +84,7 @@ Clear **Start this program at sign-in** to stop normal startup scheduling. The p
 ### Show or hide a window
 
 1. Select a running program in the list on the left.
-2. Select **Show Window** beside the program name on the right.
+2. Select **Show Window** below the program name on the right.
 3. Select **Hide Window** in the same position to hide it again.
 
 Use the native console to view output, scroll through its history, and enter commands. Showing or hiding the window does not change the startup mode. Closing the console window can end the program.
@@ -162,11 +162,13 @@ Scripts started by WinTray can use the limit. WinTray cannot take over a script'
 
 Clear **Custom timing** to disable the start delay, automatic exit, and launch limit.
 
-### Delay between programs
+### Launch interval
 
-**Delay between programs** in **Settings** sets the minimum interval between programs that WinTray starts automatically. The default is 3 seconds. The range is 0–120 seconds; 0 means no wait.
+**Launch interval (seconds)** in **Settings** sets the minimum interval between programs that WinTray starts automatically. The default is 3 seconds. The range is 0–120 seconds; 0 means no wait.
 
-Select a number in each program's **Order** list to change the start order. This interval does not apply to **Launch at boot**, programs started by their own startup entries, or **Launch Now**.
+Drag the grip on the left of a program row, or select a number in its **Order** list, to change the start order. Press `Esc` during a drag to cancel.
+
+This interval does not apply to **Launch at boot**, programs started by their own startup entries, or **Launch Now**.
 
 ## Common use cases
 
@@ -193,7 +195,7 @@ When automatic exit is enabled, WinTray continues running while any of these con
 
 Select **Run silently** at the bottom of **Settings** or in the tray menu to hide the main window. WinTray keeps its own tray icon while tray collection or background windows are in use. Otherwise, it hides that icon. Hosted console icons remain available. Run `WinTray.exe` again to open the main window.
 
-Selecting **Exit WinTray** restores the hidden windows of programs that are still running.
+Selecting **Exit WinTray** attempts to restore hidden windows and waits up to 2 seconds for cleanup. If a window cannot be restored, you may need to restart that program.
 
 ## System requirements
 
@@ -250,7 +252,7 @@ Detection covers registry `Run` entries, including `HKCU`, `HKLM`, and 32-bit en
 2. Make sure **Start this program at sign-in** is selected for the program.
 3. Make sure **Close to tray** is selected.
 4. Make sure the selected `.exe` displays the main window.
-5. If the window appears slowly, increase **Wait for a window up to**. The default is 10 seconds; the range is 0–120 seconds.
+5. If the window appears slowly, increase **Window wait limit (seconds)**. The default is 10 seconds; the range is 0–120 seconds.
 6. If the problem continues, select **Open Logs** to check the cause.
 
 ## License

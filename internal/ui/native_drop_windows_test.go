@@ -132,12 +132,9 @@ func TestNativeDropCommitsPendingEditor(t *testing.T) {
 		t.Fatal(err)
 	}
 	label := i18n.For("zh-CN").ManagedAppArgs
-	r, ok := tt.Find(label)
-	if !ok {
-		t.Fatal("missing arguments editor")
+	if err := tt.Click(label); err != nil {
+		t.Fatal(err)
 	}
-	// The arguments input is directly below its text label, with a 5-DIP gap.
-	tt.ClickAt(r.X+24, r.Y+r.H+20)
 	tt.Type("--keep-original")
 	if !tt.Focused(label) || !w.desktop.argsDirty {
 		t.Fatal("test did not leave the arguments edit pending")

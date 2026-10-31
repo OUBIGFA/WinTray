@@ -109,24 +109,15 @@ func TestNativePausedProgramCanEditFullSchedule(t *testing.T) {
 	if !w.settings.ManagedApps[0].Schedule.FrequencyEnabled {
 		t.Fatal("frequency cannot be enabled with sign-in startup off")
 	}
-	for _, field := range []struct {
-		label, value string
-		fieldFirst   bool // Find returns the input when it appears before its text label.
-	}{
-		{m.ManagedScheduleStart, "17", false},
-		{m.ManagedScheduleExit, "43", false},
-		{m.ManagedFrequencyDays, "7", true},
-		{m.ManagedFrequencyRuns, "3", true},
+	for _, field := range []struct{ label, value string }{
+		{m.ManagedScheduleStart, "17"},
+		{m.ManagedScheduleExit, "43"},
+		{m.ManagedFrequencyDays, "7"},
+		{m.ManagedFrequencyRuns, "3"},
 	} {
-		r, ok := tt.Find(field.label)
-		if !ok {
-			t.Fatalf("missing %s", field.label)
+		if err := tt.Click(field.label); err != nil {
+			t.Fatal(err)
 		}
-		x := r.X + r.W + 24
-		if field.fieldFirst {
-			x = r.X + r.W/2
-		}
-		tt.ClickAt(x, r.Y+r.H/2)
 		tt.Key(native.Ctrl, native.KeyA)
 		tt.Type(field.value)
 		tt.Key(0, native.KeyEnter)
@@ -176,9 +167,8 @@ func TestNativeBlankListClickClearsSelection(t *testing.T) {
 	}
 }
 
-// The empty editor must neither retain a real program's values nor save or
-// launch the illustrative entry, including after the last program is removed.
-func TestNativeUnselectedEditorShowsDisabledDefaults(t *testing.T) {
+// Empty and cleared selections show guidance, never stale or fake settings.
+func TestNativeUnselectedEditorShowsSelectionPrompt(t *testing.T) {
 	for _, lang := range []string{"zh-CN", "en-US"} {
 		for _, scenario := range []string{"empty", "unselected", "deselected"} {
 			t.Run(lang+"/"+scenario, func(t *testing.T) {
@@ -206,23 +196,18 @@ func TestNativeUnselectedEditorShowsDisabledDefaults(t *testing.T) {
 				before := slices.Clone(w.settings.ManagedApps)
 				saves = 0
 				captureNativeTest(t, tt, lang+"-editor-"+scenario)
-				for _, label := range []string{m.ManagedExampleName, `C:\Apps\Example\Example.exe`, m.ManagedLaunchNow, m.BrowseProgram, m.ManagedEnabled, m.ManagedModeLabel, m.ManagedAppArgs, m.ManagedCloseDelay, m.ManagedSchedule, m.ManagedScheduleStart, m.ManagedScheduleExit, m.ManagedFrequency, m.ManagedFrequencyDays, m.ManagedFrequencyRuns} {
+				for _, label := range []string{m.ManagedSelectPrompt, m.ManagedSelectHint} {
 					if !tt.HasText(label) {
 						t.Fatalf("unselected editor missing %q", label)
 					}
 				}
-				if tt.HasText(`C:\WinTray-test\app0.exe`) {
-					t.Fatal("unselected editor retained the real program path")
-				}
-				for _, label := range []string{m.ManagedLaunchNow, m.ManagedEnabled, m.ManagedLaunchHidden, m.ManagedSchedule, m.ManagedFrequency} {
-					if err := tt.Click(label); err != nil {
-						t.Fatal(err)
+				for _, label := range []string{m.ManagedExampleName, m.ManagedLaunchNow, m.ManagedAppArgs, m.ManagedCloseDelay, m.ManagedSchedule, `C:\WinTray-test\app0.exe`} {
+					if _, found := tt.Find(label); found {
+						t.Fatalf("unselected editor retained control or program %q", label)
 					}
 				}
-				r, _ := tt.Find(m.ManagedCloseDelay)
-				tt.ClickAt(r.X+r.W+24, r.Y+r.H/2)
-				if tt.Focused(m.ManagedCloseDelay) {
-					t.Fatal("disabled numeric field accepted focus")
+				if err := tt.Click(m.ManagedSelectPrompt); err != nil {
+					t.Fatal(err)
 				}
 				tt.Key(native.Ctrl, native.KeyA)
 				tt.Type("99")
@@ -375,19 +360,19 @@ func TestNativeProgramColumnsAndControlsFit(t *testing.T) {
 	}
 }
 
-func TestNativeDraggingDoesNotReorder(t *testing.T) {
+func TestNativeDraggingGripSavesNewOrder(t *testing.T) {
 	w := nativeProgramsFixture(3)
 	saved := 0
 	w.callbacks.OnSave = func(config.Settings) { saved++ }
 	tt := native.NewTester(w.nativeView, 1200, 850)
-	first, _ := tt.Find("Program 000")
+	m := i18n.For(w.settings.Language)
+	first, _ := tt.Find(m.ManagedDragHandle + " Program 000")
 	last, _ := tt.Find("Program 002")
-	x := first.X + 160
-	tt.Press(x, first.Y+first.H/2)
-	tt.Move(x, last.Y+last.H-2)
-	tt.Release(x, last.Y+last.H-2)
-	if w.settings.ManagedApps[0].ID != "0" || saved != 0 {
-		t.Fatal("removed drag gesture still changed the order")
+	tt.Press(first.X+first.W/2, first.Y+first.H/2)
+	tt.Move(first.X+first.W/2, last.Y+last.H-2)
+	tt.Release(first.X+first.W/2, last.Y+last.H-2)
+	if w.settings.ManagedApps[2].ID != "0" || w.desktop.selected != 2 || saved != 1 {
+		t.Fatalf("grip did not reorder: selected=%d saved=%d apps=%+v", w.desktop.selected, saved, w.settings.ManagedApps)
 	}
 }
 
@@ -456,7 +441,7 @@ func TestNativeFullPagesFitWithoutPageScroll(t *testing.T) {
 			if err := tt.Click(m.BackToPrograms); err != nil {
 				t.Fatal(err)
 			}
-			for _, label := range []string{m.ManagedFrequencyHint, m.ExitApp} {
+			for _, label := range []string{m.ManagedFrequencyRuns, m.ExitApp} {
 				r, ok := tt.Find(label)
 				if !ok || r.Y+r.H > 680 {
 					t.Errorf("small programs clips %s: %+v", label, r)

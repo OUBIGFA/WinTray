@@ -11,13 +11,13 @@ import (
 	"wintray/internal/i18n"
 )
 
-// Keep the established table and editor proportions. Only the name column
-// gives up space to the wider start action and the new trailing delete column.
+// Every program stays on one line. Give names the remaining width; compact
+// secondary columns keep the inspector and all row actions in view.
 func (w *MainWindow) nativeProgramTable(c *native.Context, m i18n.Messages) {
 	columns := []native.TableColumn{
-		{ID: "name", Title: m.ManagedColumnName, MinWidth: 96, Fixed: true},
-		{ID: "tray", Title: m.TrayBoxHomeTitle, Width: 96, Fixed: true, Align: native.Center},
-		{ID: "mode", Title: m.ManagedColumnRule, Width: 180, Fixed: true, Align: native.Center},
+		{ID: "name", Title: m.ManagedColumnName, MinWidth: 100, Fixed: true},
+		{ID: "tray", Title: m.TrayBoxHomeTitle, Width: 94, Fixed: true, Align: native.Center},
+		{ID: "mode", Title: m.ManagedColumnRule, Width: nativeActionColumnWidth(c, m), Fixed: true, Align: native.Center},
 		{ID: "order", Title: m.ManagedColumnOrder, Width: 88, Fixed: true, Align: native.Center},
 		{ID: "delete", Title: m.ManagedColumnDelete, Width: 64, Fixed: true, Align: native.Center},
 	}
@@ -25,7 +25,7 @@ func (w *MainWindow) nativeProgramTable(c *native.Context, m i18n.Messages) {
 	removeID := ""
 	theme := c.Theme()
 	listTheme := *theme
-	listTheme.Accent, listTheme.AccentText = theme.SurfacePressed, theme.Text
+	listTheme.Accent, listTheme.AccentText = desktopSelection(theme), theme.Text
 	c.SetTheme(&listTheme)
 	table := native.Table(c, &w.desktop.list, columns, len(w.settings.ManagedApps), func(row, column int) {
 		c.SetTheme(theme)
@@ -33,16 +33,22 @@ func (w *MainWindow) nativeProgramTable(c *native.Context, m i18n.Messages) {
 		entry := &w.settings.ManagedApps[row]
 		switch column {
 		case 0:
-			native.Row(c).Gap(6).Children(func() {
+			native.Row(c).Gap(6).MinHeight(38).Children(func() {
+				// The toolkit's row drag supplies preview, insertion marker,
+				// edge scrolling and Escape cancellation; the grip exposes it.
+				native.Icon(c, gripIcon).Size(16, 20).Shrink(0).TextColor(theme.TextMuted).Cursor(native.CursorGrab).Label(m.ManagedDragHandle + " " + entry.Name).Tooltip(m.ManagedDragHint)
 				if native.Checkbox(c, &entry.RunOnStartup, "").Label(m.ManagedEnabled + " " + entry.Name).Changed() {
 					w.save()
 				}
 				if icon := w.desktop.icons[entry.ExePath]; icon != nil {
-					native.Image(c, icon).Size(18, 18)
+					native.Image(c, icon).Size(20, 20).Shrink(0)
 				} else {
-					native.Icon(c, programIconSVG).Size(18, 18)
+					native.Icon(c, programIconSVG).Size(20, 20).Shrink(0).TextColor(theme.TextMuted)
 				}
-				name := native.Text(c, entry.Name).SingleLine().Grow(1).Tooltip(entry.Name)
+				name := native.Text(c, entry.Name).SingleLine().Grow(1).MinWidth(0).Tooltip(entry.Name)
+				if row == w.desktop.selected {
+					name.FontWeight(500)
+				}
 				if !entry.RunOnStartup {
 					name.TextColor(theme.TextMuted)
 				}
@@ -56,7 +62,7 @@ func (w *MainWindow) nativeProgramTable(c *native.Context, m i18n.Messages) {
 			})
 		case 2:
 			action := i18n.FormatManagedParam(w.settings.Language, *entry)
-			native.Text(c, action).SingleLine().Tooltip(action)
+			native.Text(c, action).SingleLine().Tooltip(action).TextColor(theme.TextMuted)
 		case 3:
 			order := strconv.Itoa(row + 1)
 			if nativeOrderSelect(c, &order, w.desktop.orderOptions, m.ManagedColumnOrder+" "+entry.Name).Changed() {
@@ -89,6 +95,18 @@ func (w *MainWindow) nativeProgramTable(c *native.Context, m i18n.Messages) {
 	if removeID != "" {
 		w.nativeRemove(removeID)
 	}
+}
+
+// Reserve the longest supported action, including the three-digit close
+// delay and schedule suffix, before allocating remaining space to the name.
+// Measuring the actual localized glyphs also respects the system text scale.
+func nativeActionColumnWidth(c *native.Context, m i18n.Messages) float32 {
+	width, _ := c.MeasureText(0, native.Span{Text: m.ManagedColumnRule, Weight: 600})
+	for _, action := range []string{m.ManagedAutoHide, fmt.Sprintf(m.ManagedAutoHideDelayed, 600), m.ManagedLaunchHidden, m.ManagedTaskLaunch, m.ManagedLaunchOnly, m.ManagedListParamPausedTemplate} {
+		w, _ := c.MeasureText(0, native.Span{Text: fmt.Sprintf(m.ManagedScheduleTag, action)})
+		width = max(width, w)
+	}
+	return width + c.Theme().Space(5) + 2
 }
 
 // SelectBase retains the toolkit's selection, focus and keyboard behavior.

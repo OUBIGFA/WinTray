@@ -29,7 +29,7 @@ func TestNativeWindowActionBesideLaunchNow(t *testing.T) {
 				m := i18n.For(lang)
 				show, found := tt.Find(m.HostedShowWindow)
 				launch, hasLaunch := tt.Find(m.ManagedLaunchNow)
-				if !found || !hasLaunch || show.Y != launch.Y || show.X+show.W > launch.X || launch.X+launch.W > float32(size[0]) || show.H < 24 {
+				if !found || !hasLaunch || absFloat(show.Y+show.H/2-launch.Y-launch.H/2) > 1 || launch.X+launch.W > show.X || show.X+show.W > float32(size[0]) || show.H < 24 {
 					t.Fatalf("window action not visible beside Launch Now: show=%+v launch=%+v", show, launch)
 				}
 				tt.Move(-1, -1)
@@ -62,10 +62,9 @@ func TestNativeWindowActionPreservesStartupAndTracksLiveWindow(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			// The illustrative entry has no actions before selection.
-			click(m.HostedShowWindow)
-			if len(calls) != 0 {
-				t.Fatal("unselected example accepted a window action")
+			// No live actions exist before a real program is selected.
+			if _, found := tt.Find(m.HostedShowWindow); found {
+				t.Fatal("unselected editor offers a window action")
 			}
 			click("Program 000")
 			click(m.HostedShowWindow)

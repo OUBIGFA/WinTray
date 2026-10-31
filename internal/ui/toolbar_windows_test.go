@@ -11,7 +11,7 @@ import (
 	"wintray/internal/i18n"
 )
 
-func TestNativeToolbarMovesMoreFeaturesLeftAndKeepsLanguageRight(t *testing.T) {
+func TestNativeToolbarKeepsTitleLeftAndActionsRight(t *testing.T) {
 	for _, language := range []string{"zh-CN", "en-US"} {
 		for _, size := range [][2]int{{1124, 720}, {1200, 850}} {
 			for _, count := range []int{0, 4} {
@@ -22,8 +22,9 @@ func TestNativeToolbarMovesMoreFeaturesLeftAndKeepsLanguageRight(t *testing.T) {
 					m := i18n.For(language)
 					settings, hasSettings := tt.Find(m.OpenSettings)
 					languageButton, hasLanguage := tt.Find(m.LanguageLabel)
-					if !hasSettings || !hasLanguage || settings.X > 32 || languageButton.X < settings.X+settings.W {
-						t.Fatalf("toolbar did not move more features to the left: settings=%+v language=%+v", settings, languageButton)
+					title, hasTitle := tt.Find(m.ManagedListTitle)
+					if !hasTitle || !hasSettings || !hasLanguage || title.X > 32 || settings.X < title.X+title.W || languageButton.X < settings.X+settings.W {
+						t.Fatalf("header does not separate title and actions: title=%+v settings=%+v language=%+v", title, settings, languageButton)
 					}
 					if absFloat(settings.Y+settings.H/2-languageButton.Y-languageButton.H/2) > 1 || size[0]-int(languageButton.X+languageButton.W) > 32 {
 						t.Fatalf("language switch is not aligned at the right: settings=%+v language=%+v", settings, languageButton)
