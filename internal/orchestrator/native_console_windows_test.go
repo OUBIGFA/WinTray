@@ -116,6 +116,15 @@ func TestNativeConsolePreservesOutputInputAndSameWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("WINTRAY_NATIVE_PROBE", "inherited environment")
+	fixtureRoot, err := os.MkdirTemp("", "wintray-native-console-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(fixtureRoot); err != nil {
+			t.Errorf("remove native console fixture: %v", err)
+		}
+	})
 	for _, kind := range []string{"exe", "cmd", "bat", "ps1", "py"} {
 		t.Run(kind, func(t *testing.T) {
 			if kind == "py" {
@@ -123,8 +132,11 @@ func TestNativeConsolePreservesOutputInputAndSameWindow(t *testing.T) {
 					t.Skip("python.exe is not installed")
 				}
 			}
-			dir := filepath.Join(t.TempDir(), "native scripts with spaces")
-			if err := os.Mkdir(dir, 0700); err != nil {
+			// Keep the root outside the subtest. On Windows CI, a subtest-scoped
+			// t.TempDir path can contain a 0x01 component; PowerShell 5.1
+			// normalizes it before the helper reports its working directory.
+			dir := filepath.Join(fixtureRoot, kind, "native scripts with spaces")
+			if err := os.MkdirAll(dir, 0700); err != nil {
 				t.Fatal(err)
 			}
 			output := filepath.Join(dir, "probe")
