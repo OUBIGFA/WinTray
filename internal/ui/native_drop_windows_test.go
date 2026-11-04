@@ -41,7 +41,7 @@ func TestNativeDroppedProgramsAppendAndPersist(t *testing.T) {
 			tt := native.NewTester(w.nativeView, 1200, 850)
 			dir := t.TempDir()
 			var paths []string
-			for _, name := range []string{"中文 程序.EXE", "batch.bat", "command.CMD", "powershell.ps1", "python.py", "pythonw.PYW"} {
+			for _, name := range []string{"中文 程序.EXE", "batch.bat", "command.CMD", "powershell.ps1", "python.py", "pythonw.PYW", "hotkeys.AHK"} {
 				paths = append(paths, droppedTestFile(t, dir, name))
 			}
 			w.nativeDropPaths(paths)

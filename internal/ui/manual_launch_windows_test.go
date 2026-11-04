@@ -3,6 +3,7 @@
 package ui
 
 import (
+	"sync/atomic"
 	"testing"
 
 	native "github.com/egoist/mygo/ui"
@@ -93,10 +94,11 @@ func TestNativeRunningProgramUsesStopAction(t *testing.T) {
 		t.Run(language, func(t *testing.T) {
 			w := nativeProgramsFixture(1)
 			w.settings.Language = language
-			running := true
+			var running atomic.Bool
+			running.Store(true)
 			stops := 0
 			launches := 0
-			w.callbacks.OnProgramRunning = func(config.ManagedAppEntry) bool { return running }
+			w.callbacks.OnProgramRunning = func(config.ManagedAppEntry) bool { return running.Load() }
 			w.callbacks.OnStopNow = func(config.ManagedAppEntry) { stops++ }
 			w.callbacks.OnLaunchNow = func(config.ManagedAppEntry) { launches++ }
 			tt := native.NewTester(w.nativeView, 1200, 850)
@@ -104,16 +106,16 @@ func TestNativeRunningProgramUsesStopAction(t *testing.T) {
 			if err := tt.Click("Program 000"); err != nil {
 				t.Fatal(err)
 			}
+			waitNativeProgramStatus(t, w, tt, "0")
 			if err := tt.Click(m.ManagedStopProgram); err != nil {
 				t.Fatal(err)
 			}
 			if stops != 1 || !tt.HasText(m.ManagedStopProgramBusy) || tt.HasText(m.ManagedLaunchNow) {
 				t.Fatalf("running program did not switch to the stop action: stops=%d texts=%v", stops, tt.Texts())
 			}
-			running = false
+			running.Store(false)
 			w.FinishStopNow("0")
-			w.drain()
-			tt.Frame()
+			waitNativeProgramStatus(t, w, tt, "0")
 			if !tt.HasText(m.ManagedLaunchNow) || tt.HasText(m.ManagedStopProgram) {
 				t.Fatalf("stopped program did not restore launch action: texts=%v", tt.Texts())
 			}

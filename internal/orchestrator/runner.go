@@ -38,6 +38,9 @@ func (p *startedProcess) Wait() error {
 }
 
 func startProcess(exePath, args string, mode launchMode) (*startedProcess, error) {
+	if isAutoHotkeyScript(exePath) {
+		return startAssociatedScript(exePath, args, mode != launchVisible)
+	}
 	dir := filepath.Dir(exePath)
 	cmd := buildLaunchCommand(exePath, args, mode == launchNoWindow)
 	if _, err := os.Stat(dir); err == nil {

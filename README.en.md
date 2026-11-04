@@ -57,6 +57,7 @@ Settings and logs are stored in your user data directory. Before deleting WinTra
 | Batch script | `.bat` / `.cmd` | Run in background | Uses Windows `cmd.exe` |
 | PowerShell script | `.ps1` | Run in background | Uses `powershell.exe` |
 | Python script | `.py` / `.pyw` | Run in background | `python.exe` / `pythonw.exe` must be available through `PATH` |
+| AutoHotkey script | `.ahk` | Run in background | Install AutoHotkey and check that double-clicking the script runs it |
 
 Scripts always use **Run in background** and cannot use tray collection. Install the interpreter and packages that each script requires.
 

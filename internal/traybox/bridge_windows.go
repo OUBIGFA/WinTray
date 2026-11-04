@@ -224,12 +224,16 @@ func (n *nativeBridge) attach(target shellEndpoint) (*bridgeLease, error) {
 	return lease, nil
 }
 
+// ErrTaskbarUnavailable means Explorer has not created its taskbar yet.
+// Callers may retry after sign-in without treating it as a broken component.
+var ErrTaskbarUnavailable = errors.New("Windows taskbar is unavailable")
+
 // currentShellEndpoint never enumerates or opens selected applications for
 // injection. Both elevated and sandboxed owners already send to this receiver.
 func currentShellEndpoint() (shellEndpoint, error) {
 	hwnd := explorerTray(0)
 	if hwnd == 0 {
-		return shellEndpoint{}, errors.New("Windows taskbar is unavailable")
+		return shellEndpoint{}, ErrTaskbarUnavailable
 	}
 	var pid uint32
 	win.GetWindowThreadProcessId(hwnd, &pid)

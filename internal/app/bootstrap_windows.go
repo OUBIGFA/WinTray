@@ -205,14 +205,21 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 	// native controls and loading program icons can block on the busy Shell
 	// at sign-in, so release helpers before any of that work. The collector
 	// has its own message thread and is already able to receive their icons.
-	boxErr := box.SetPaths(config.CollectedTrayIconPaths(settings))
-	if boxErr != nil {
+	startupTray := &trayStartup{setPaths: box.SetPaths, readyName: services.readyName, ready: make(chan struct{})}
+	defer startupTray.close()
+	collectTray := func(paths []string) error {
+		wasReady := startupTray.release != nil
+		err := startupTray.collect(paths)
+		if err == nil && !wasReady {
+			logger.Info(fmt.Sprintf("startup: program tasks released after %s", time.Since(started).Round(time.Millisecond)))
+		}
+		return err
+	}
+	boxErr := collectTray(config.CollectedTrayIconPaths(settings))
+	if errors.Is(boxErr, traybox.ErrTaskbarUnavailable) {
+		logger.Warn("startup: taskbar is not ready; tray collection will retry")
+	} else if boxErr != nil {
 		logger.Warn(fmt.Sprintf("collect tray icons failed; startup helpers remain blocked: %v", boxErr))
-	} else if release, readyErr := ipc.MarkReady(services.readyName); readyErr != nil {
-		logger.Warn(fmt.Sprintf("publish ready state failed: %v", readyErr))
-	} else {
-		defer release()
-		logger.Info(fmt.Sprintf("startup: program tasks released after %s", time.Since(started).Round(time.Millisecond)))
 	}
 	services.setRunAtLogon(settings)
 	// Reconciliation runs in the background and never gates existing tasks.
@@ -465,7 +472,7 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 			}
 			// Collect or release the icons first; a failed save hands the
 			// previous selection back to the box.
-			if err := box.SetPaths(config.CollectedTrayIconPaths(next)); err != nil {
+			if err := collectTray(config.CollectedTrayIconPaths(next)); err != nil {
 				logger.Warn(fmt.Sprintf("change tray collection failed: %v", err))
 				return errors.New(i18n.For(next.Language).TrayBoxFailedBody)
 			}
@@ -644,7 +651,7 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 		emitFatalWithLog(settings.Language, "failed to create main window", err)
 		return 1
 	}
-	box.SetErrorHandler(func(err error) {
+	reportTrayError := func(err error) {
 		logger.Warn(fmt.Sprintf("tray collection error: %v", err))
 		mainWindow.Synchronize(func() {
 			if !quitting {
@@ -652,8 +659,24 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 				mainWindow.ShowError(m.TrayBoxFailedTitle, m.TrayBoxFailedBody)
 			}
 		})
-	})
-	if boxErr != nil {
+	}
+	box.SetErrorHandler(reportTrayError)
+	if errors.Is(boxErr, traybox.ErrTaskbarUnavailable) {
+		mainWindow.OnStarting(func() {
+			launchWG.Add(1)
+			go func() {
+				defer launchWG.Done()
+				retryTrayCollection(launchCtx, mainWindow.Synchronize, func() error {
+					// A manual selection may have recovered first. Do not refresh
+					// every owner a second time or restore the old boot selection.
+					if startupTray.release != nil {
+						return nil
+					}
+					return collectTray(config.CollectedTrayIconPaths(mainWindow.Settings()))
+				}, reportTrayError)
+			}()
+		})
+	} else if boxErr != nil {
 		m := i18n.For(settings.Language)
 		mainWindow.ShowError(m.TrayBoxFailedTitle, m.TrayBoxFailedBody)
 	}
@@ -720,6 +743,14 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 			launchWG.Add(1)
 			go func() {
 				defer launchWG.Done()
+				// Use the same readiness gate as the per-program logon tasks.
+				// Starting owners before a delayed collector misses their first
+				// native registrations and cannot be repaired by the main icon.
+				select {
+				case <-startupTray.ready:
+				case <-launchCtx.Done():
+					return
+				}
 				// Limited startups must not race their original-trigger takeover.
 				for _, entry := range settings.ManagedApps {
 					if config.StartupFrequencyEnabled(entry) && services.waitAppTasks != nil {

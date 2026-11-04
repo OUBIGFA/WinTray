@@ -24,13 +24,25 @@ func scriptInterpreter(path string) string {
 		return "python.exe"
 	case ".pyw":
 		return "pythonw.exe"
+	case ".ahk":
+		return "autohotkey.exe"
 	}
 	return ""
 }
 
 func scriptProcessMatches(pid uint32, name, script string) bool {
-	return strings.EqualFold(filepath.Base(name), scriptInterpreter(script)) &&
-		scriptCommandMatches(processCommandLine(pid), script)
+	interpreter := strings.EqualFold(filepath.Base(name), scriptInterpreter(script))
+	if isAutoHotkeyScript(script) {
+		// Match the runtime, not the short-lived version-selecting UX launcher.
+		switch strings.ToLower(filepath.Base(name)) {
+		case "autohotkey.exe", "autohotkey32.exe", "autohotkey64.exe",
+			"autohotkeya32.exe", "autohotkeyu32.exe", "autohotkeyu64.exe",
+			"autohotkey32_uia.exe", "autohotkey64_uia.exe",
+			"autohotkeyu32_uia.exe", "autohotkeyu64_uia.exe":
+			interpreter = true
+		}
+	}
+	return interpreter && scriptCommandMatches(processCommandLine(pid), script)
 }
 
 func scriptCommandMatches(line, script string) bool {
@@ -66,6 +78,27 @@ func scriptCommandMatches(line, script string) bool {
 		}
 	case "python.exe", "pythonw.exe":
 		operand = args[1]
+	case "autohotkey.exe":
+		// Only the first script operand owns the process. A different script
+		// may take the wanted path as data; never stop that unrelated script.
+		for i := 1; i < len(args); i++ {
+			arg := strings.ToLower(args[i])
+			switch {
+			case arg == "/include" || arg == "/ilib":
+				i++ // these switches consume a file which is not the main script
+			case arg == "/f" || arg == "/force" || arg == "/r" || arg == "/restart" || arg == "/script" || arg == "/validate",
+				arg == "/errorstdout" || strings.HasPrefix(arg, "/errorstdout="),
+				arg == "/debug" || strings.HasPrefix(arg, "/debug="), strings.HasPrefix(arg, "/cp"):
+				continue
+			case strings.HasPrefix(arg, "/"):
+				return false
+			default:
+				operand = args[i]
+			}
+			if operand != "" {
+				break
+			}
+		}
 	}
 	// Relative operands cannot be resolved against WinTray's working directory.
 	// Our launcher passes absolute script paths, so fail closed for other forms.

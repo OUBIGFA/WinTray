@@ -46,6 +46,7 @@ const (
 	ResultEmptyExePath            ResultCode = "empty_exe_path"
 	ResultInvalidExePath          ResultCode = "invalid_exe_path"
 	ResultProcessStartFailed      ResultCode = "process_start_failed"
+	ResultScriptNoAssociation     ResultCode = "script_association_missing"
 	ResultStartupCheckFailed      ResultCode = "startup_check_failed"
 	ResultFrequencyLimit          ResultCode = "startup_frequency_limit"
 	ResultFrequencyCheckFailed    ResultCode = "startup_frequency_check_failed"

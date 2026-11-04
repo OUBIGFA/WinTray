@@ -23,13 +23,14 @@ import (
 )
 
 type Callbacks struct {
-	OnSave                    func(config.Settings)
-	OnToggleTrayBox           func(string, bool) error
-	OnOpenLogs                func()
-	OnCleanupRestore          func()
-	OnRemoveLogon             func()
-	OnLaunchNow               func(config.ManagedAppEntry)
-	OnStopNow                 func(config.ManagedAppEntry)
+	OnSave           func(config.Settings)
+	OnToggleTrayBox  func(string, bool) error
+	OnOpenLogs       func()
+	OnCleanupRestore func()
+	OnRemoveLogon    func()
+	OnLaunchNow      func(config.ManagedAppEntry)
+	OnStopNow        func(config.ManagedAppEntry)
+	// OnProgramRunning runs on a worker; it must not access UI-owned state.
 	OnProgramRunning          func(config.ManagedAppEntry) bool
 	OnProgramWindowVisible    func(config.ManagedAppEntry) bool
 	OnSetProgramWindowVisible func(config.ManagedAppEntry, bool)
@@ -51,6 +52,7 @@ type MainWindow struct {
 	onSettingsPage    bool
 	launchNowBusy     map[string]bool
 	programWindowBusy map[string]bool
+	programStatuses   map[string]*programStatus
 	checkingUpdate    bool
 	allowClose        bool
 	closing           atomic.Bool // suppress worker dialogs as soon as exit is requested
@@ -252,6 +254,7 @@ func (w *MainWindow) ShowMainWindow() {
 
 func (w *MainWindow) HideMainWindow() {
 	w.commitNativeEdits()
+	w.programStatuses = nil
 	if w.iconsCancel != nil {
 		w.iconsCancel()
 		w.iconsCancel = nil
@@ -332,11 +335,14 @@ func (w *MainWindow) SetLanguage(language string) {
 // FinishLaunchNow releases the initiating program even if selection or row
 // order changed while it was starting. Autorun never owns this button state.
 func (w *MainWindow) FinishLaunchNow(id string) {
-	w.Synchronize(func() { delete(w.launchNowBusy, id) })
+	w.Synchronize(func() {
+		delete(w.launchNowBusy, id)
+		delete(w.programStatuses, id)
+	})
 }
 
 func (w *MainWindow) FinishStopNow(id string) {
-	w.Synchronize(func() { delete(w.launchNowBusy, id) })
+	w.FinishLaunchNow(id)
 }
 
 // FinishProgramWindow restores only the initiating program's window action.

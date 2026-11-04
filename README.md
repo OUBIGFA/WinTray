@@ -53,6 +53,7 @@ WinTray 仅提供便携版，无需安装。
 | 批处理脚本 | `.bat` / `.cmd` | 后台启动 | 使用 Windows 的 `cmd.exe` |
 | PowerShell 脚本 | `.ps1` | 后台启动 | 使用 `powershell.exe` |
 | Python 脚本 | `.py` / `.pyw` | 后台启动 | 需能通过 `PATH` 找到 `python.exe` / `pythonw.exe` |
+| AutoHotkey 脚本 | `.ahk` | 后台启动 | 需安装 AutoHotkey，并确认双击脚本可运行 |
 
 脚本的启动方式固定为“后台启动”，不能启用“托盘收纳”；所需解释器和依赖包需自行安装。
 

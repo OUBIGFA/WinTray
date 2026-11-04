@@ -388,7 +388,7 @@ func (w *MainWindow) nativeSetOrder(from, to int) {
 func (w *MainWindow) nativeChooseProgram(replace bool) {
 	m := i18n.For(w.settings.Language)
 	opts := mygo.OpenDialogOptions{Parent: w.desktop.window, Title: m.SelectManagedExe, Multiple: !replace, Filters: []mygo.FileFilter{
-		{Name: m.SelectManagedExe, Extensions: []string{"exe", "bat", "cmd", "ps1", "py", "pyw"}}, {Name: "*.*", Extensions: []string{"*"}},
+		{Name: m.SelectManagedExe, Extensions: []string{"exe", "bat", "cmd", "ps1", "py", "pyw", "ahk"}}, {Name: "*.*", Extensions: []string{"*"}},
 	}}
 	if entry, ok := w.nativeSelected(); replace && ok {
 		opts.Title = m.SelectReplacementExe
@@ -410,7 +410,7 @@ func (w *MainWindow) nativeDropPaths(paths []string) {
 	var accepted, rejected []string
 	for _, path := range paths {
 		switch strings.ToLower(filepath.Ext(path)) {
-		case ".exe", ".bat", ".cmd", ".ps1", ".py", ".pyw":
+		case ".exe", ".bat", ".cmd", ".ps1", ".py", ".pyw", ".ahk":
 			if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() {
 				accepted = append(accepted, path)
 				continue

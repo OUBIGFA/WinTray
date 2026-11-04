@@ -8,6 +8,15 @@ import (
 	"wintray/internal/config"
 )
 
+func TestScriptAssociationErrorGivesNextStep(t *testing.T) {
+	for _, language := range []string{"zh-CN", "en-US"} {
+		text := TranslateResultCode(language, "script_association_missing")
+		if !strings.Contains(text, "AutoHotkey") || !strings.Contains(text, ".ahk") {
+			t.Fatalf("%s association error lacks installation guidance: %q", language, text)
+		}
+	}
+}
+
 func TestCloseDelayRecommendation(t *testing.T) {
 	for _, language := range []string{"zh-CN", "en-US"} {
 		if hint := For(language).ManagedCloseDelayHint; !strings.Contains(hint, "10–15") || strings.Contains(hint, "20–30") {

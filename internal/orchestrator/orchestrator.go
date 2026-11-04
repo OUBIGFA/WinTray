@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -309,6 +310,9 @@ func frequencyLaunchError(entry config.ManagedAppEntry, opts startOptions, err e
 	code := ResultProcessStartFailed
 	if opts.limitFrequency {
 		code = ResultFrequencyCheckFailed
+	}
+	if isAutoHotkeyScript(entry.ExePath) && errors.Is(err, windows.ERROR_NO_ASSOCIATION) {
+		code = ResultScriptNoAssociation
 	}
 	return Result{AppName: entry.Name, Code: code, Message: err.Error()}
 }

@@ -29,14 +29,22 @@ func TestScriptCommandMatchesOnlyActualScriptOperand(t *testing.T) {
 		{`C:\My Scripts\job.py`, `python.exe "C:\My Scripts\other.py" "C:\My Scripts\job.py"`, false},
 		{`C:\My Scripts\job.pyw`, `pythonw.exe "C:\My Scripts\job.pyw"`, true},
 		{`C:\My Scripts\job.py`, `python.exe -c "C:\My Scripts\job.py"`, false},
+		{`C:\My Scripts\job.ahk`, `AutoHotkey64.exe "c:\my scripts\JOB.ahk" "two words"`, true},
+		{`C:\My Scripts\job.ahk`, `AutoHotkeyU64.exe /CP65001 /r "C:\My Scripts\job.ahk"`, true},
+		{`C:\My Scripts\job.ahk`, `AutoHotkey32.exe /script /ErrorStdOut=UTF-8 /include "C:\Lib\init.ahk" "C:\My Scripts\job.ahk"`, true},
+		{`C:\My Scripts\job.ahk`, `AutoHotkey64.exe "C:\My Scripts\other.ahk" "C:\My Scripts\job.ahk"`, false},
+		{`C:\My Scripts\job.ahk`, `AutoHotkey64.exe /include "C:\My Scripts\job.ahk" "C:\Other.ahk"`, false},
+		{`C:\My Scripts\job.ahk`, `AutoHotkeyUX.exe "C:\AutoHotkey\UX\launcher.ahk" "C:\My Scripts\job.ahk"`, false},
+		{`C:\My Scripts\job.ahk`, `AutoHotkey64.exe job.ahk`, false},
+		{`C:\My Scripts\job.ahk`, `AutoHotkey64.exe /unknown "C:\My Scripts\job.ahk"`, false},
 		{`C:\My Scripts\job.py`, ``, false},
 	} {
 		if got := scriptCommandMatches(tc.command, tc.script); got != tc.want {
 			t.Errorf("scriptCommandMatches(%q, %q) = %t, want %t", tc.command, tc.script, got, tc.want)
 		}
 	}
-	if hasNativeConsole(`C:\Scripts\job.pyw`) {
-		t.Fatal("pythonw must not be given an artificial console")
+	if hasNativeConsole(`C:\Scripts\job.pyw`) || hasNativeConsole(`C:\Scripts\job.ahk`) {
+		t.Fatal("GUI script interpreters must not be given an artificial console")
 	}
 }
 

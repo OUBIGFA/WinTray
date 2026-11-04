@@ -31,8 +31,20 @@ var fixtureOwnerCloses int
 var fixtureFormCloses int
 var fixtureEscapeMode string
 var fixtureEscapes int
-var fixtureProc = syscall.NewCallback(func(hwnd win.HWND, msg uint32, w, l uintptr) uintptr {
+var fixtureLayeredChanges int
+var fixtureProc = syscall.NewCallback(func(hwnd win.HWND, msg uint32, w uintptr, l unsafe.Pointer) uintptr {
 	switch msg {
+	case win.WM_STYLECHANGING:
+		// Observe even temporary changes: restoring the final style does not
+		// repair a renderer initialized while its own/class DC was layered.
+		if int32(w) == win.GWL_EXSTYLE {
+			style := (*struct{ old, next uint32 })(l)
+			if style.old&uint32(exLayered) == 0 && style.next&uint32(exLayered) != 0 {
+				fixtureLayeredChanges++
+			}
+		}
+	case win.WM_APP + 25:
+		return uintptr(fixtureLayeredChanges)
 	case win.WM_SETFOCUS:
 		if fixtureEscapeMode != "" {
 			// Like an embedded renderer, only the child consumes keyboard input.
@@ -93,7 +105,7 @@ var fixtureProc = syscall.NewCallback(func(hwnd win.HWND, msg uint32, w, l uintp
 	case win.WM_APP + 22:
 		return uintptr(fixtureFormCloses)
 	}
-	return win.DefWindowProc(hwnd, msg, w, l)
+	return win.DefWindowProc(hwnd, msg, w, uintptr(l))
 })
 
 // The fixture owns an invisible application/tray receiver and two normal UI
@@ -111,6 +123,12 @@ func TestStartupVisibilityProcess(t *testing.T) {
 	}
 	class := syscall.StringToUTF16Ptr("WinTrayStartupVisibilityFixture")
 	wc := win.WNDCLASSEX{LpfnWndProc: fixtureProc, HInstance: win.GetModuleHandle(nil), LpszClassName: class}
+	switch {
+	case strings.Contains(os.Args[4], "own-dc"):
+		wc.Style = win.CS_OWNDC | win.CS_HREDRAW | win.CS_VREDRAW
+	case strings.Contains(os.Args[4], "class-dc"):
+		wc.Style = win.CS_CLASSDC
+	}
 	wc.CbSize = uint32(unsafe.Sizeof(wc))
 	if win.RegisterClassEx(&wc) == 0 {
 		os.Exit(2)

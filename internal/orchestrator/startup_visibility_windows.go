@@ -72,6 +72,7 @@ var (
 	procUnhookWinEvent             = user32.NewProc("UnhookWinEvent")
 	procGetLayeredWindowAttributes = user32.NewProc("GetLayeredWindowAttributes")
 	procSetLayeredWindowAttributes = user32.NewProc("SetLayeredWindowAttributes")
+	procGetClassLong               = user32.NewProc("GetClassLongW")
 	visibilityEvent                = syscall.NewCallback(func(hook, event, hwnd uintptr, objectID, childID int32, thread, stamp uint32) uintptr {
 		if objectID != 0 || childID != 0 || hwnd == 0 {
 			return 0
@@ -246,35 +247,46 @@ func (g *startupVisibility) track(hwnd uintptr) {
 		return
 	}
 	v := &veiledWindow{}
-	v.layered = exStyle&exLayered != 0
-	if v.layered {
-		ok, _, _ := procGetLayeredWindowAttributes.Call(hwnd, uintptr(unsafe.Pointer(&v.color)), uintptr(unsafe.Pointer(&v.alpha)), uintptr(unsafe.Pointer(&v.flags)))
-		if ok == 0 {
-			g.warn(hwnd, "per-pixel layered window cannot be safely shielded")
-			return
+	// WS_EX_LAYERED is incompatible with CS_OWNDC and CS_CLASSDC. Changing
+	// that style even temporarily can disrupt GPU/WebView rendering. Keep
+	// these windows in native close/taskbar handling without changing their
+	// drawing path; a brief startup frame is safer than a blank restored UI.
+	classStyle, _, _ := procGetClassLong.Call(hwnd, ^uintptr(25)) // GCL_STYLE (-26)
+	if uint32(classStyle)&(win.CS_OWNDC|win.CS_CLASSDC) == 0 {
+		v.layered = exStyle&exLayered != 0
+		if v.layered {
+			ok, _, _ := procGetLayeredWindowAttributes.Call(hwnd, uintptr(unsafe.Pointer(&v.color)), uintptr(unsafe.Pointer(&v.alpha)), uintptr(unsafe.Pointer(&v.flags)))
+			if ok == 0 {
+				g.warn(hwnd, "per-pixel layered window cannot be safely shielded")
+				return
+			}
 		}
+		v.addedStyle = exLayered &^ exStyle
 	}
 	// Keep the shell's window classification intact. Adding TOOLWINDOW or
 	// NOACTIVATE to an already registered taskbar window suppresses its later
 	// HSHELL_WINDOWDESTROYED notification when the app hides it on close.
 	// Explorer then retains an unresponsive button even after styles restore.
 	// Transparency is best effort; it must not alter the native tray lifecycle.
-	v.addedStyle = exLayered &^ exStyle
 	if ok, _, _ := procSetProp.Call(hwnd, uintptr(unsafe.Pointer(visibilityProperty)), g.token); ok == 0 {
 		g.warn(hwnd, "window property access denied")
 		return
 	}
-	win.SetWindowLong(win.HWND(hwnd), win.GWL_EXSTYLE, exStyle|v.addedStyle)
-	ok, _, _ := procSetLayeredWindowAttributes.Call(hwnd, uintptr(v.color), 0, uintptr(v.flags|lwaAlpha))
-	if ok == 0 {
-		win.SetWindowLong(win.HWND(hwnd), win.GWL_EXSTYLE, exStyle)
-		procRemoveProp.Call(hwnd, uintptr(unsafe.Pointer(visibilityProperty)))
-		g.warn(hwnd, "window transparency access denied")
-		return
+	if v.layered || v.addedStyle != 0 {
+		win.SetWindowLong(win.HWND(hwnd), win.GWL_EXSTYLE, exStyle|v.addedStyle)
+		ok, _, _ := procSetLayeredWindowAttributes.Call(hwnd, uintptr(v.color), 0, uintptr(v.flags|lwaAlpha))
+		if ok == 0 {
+			win.SetWindowLong(win.HWND(hwnd), win.GWL_EXSTYLE, exStyle)
+			procRemoveProp.Call(hwnd, uintptr(unsafe.Pointer(visibilityProperty)))
+			g.warn(hwnd, "window transparency access denied")
+			return
+		}
 	}
 	g.windows[hwnd] = v
 	g.hideTaskbar(hwnd, v)
-	win.SetWindowPos(win.HWND(hwnd), 0, 0, 0, 0, 0, win.SWP_NOMOVE|win.SWP_NOSIZE|win.SWP_NOZORDER|win.SWP_NOACTIVATE|win.SWP_FRAMECHANGED)
+	if v.layered || v.addedStyle != 0 {
+		win.SetWindowPos(win.HWND(hwnd), 0, 0, 0, 0, 0, win.SWP_NOMOVE|win.SWP_NOSIZE|win.SWP_NOZORDER|win.SWP_NOACTIVATE|win.SWP_FRAMECHANGED)
+	}
 }
 
 func (g *startupVisibility) warn(hwnd uintptr, reason string) {
@@ -314,13 +326,17 @@ func (g *startupVisibility) restore() {
 				errs = append(errs, fmt.Errorf("restore window 0x%X transparency: %v", hwnd, err))
 			}
 		}
-		style := win.GetWindowLong(win.HWND(hwnd), win.GWL_EXSTYLE)
-		win.SetWindowLong(win.HWND(hwnd), win.GWL_EXSTYLE, style&^v.addedStyle)
-		if win.GetWindowLong(win.HWND(hwnd), win.GWL_EXSTYLE)&v.addedStyle != 0 {
-			errs = append(errs, fmt.Errorf("restore window 0x%X styles failed", hwnd))
+		if v.addedStyle != 0 {
+			style := win.GetWindowLong(win.HWND(hwnd), win.GWL_EXSTYLE)
+			win.SetWindowLong(win.HWND(hwnd), win.GWL_EXSTYLE, style&^v.addedStyle)
+			if win.GetWindowLong(win.HWND(hwnd), win.GWL_EXSTYLE)&v.addedStyle != 0 {
+				errs = append(errs, fmt.Errorf("restore window 0x%X styles failed", hwnd))
+			}
 		}
 		procRemoveProp.Call(hwnd, uintptr(unsafe.Pointer(visibilityProperty)))
-		win.SetWindowPos(win.HWND(hwnd), 0, 0, 0, 0, 0, win.SWP_NOMOVE|win.SWP_NOSIZE|win.SWP_NOZORDER|win.SWP_NOACTIVATE|win.SWP_FRAMECHANGED)
+		if v.layered || v.addedStyle != 0 {
+			win.SetWindowPos(win.HWND(hwnd), 0, 0, 0, 0, 0, win.SWP_NOMOVE|win.SWP_NOSIZE|win.SWP_NOZORDER|win.SWP_NOACTIVATE|win.SWP_FRAMECHANGED)
+		}
 		// Release the explicit taskbar suppression even after a native close.
 		// AddTab re-enrolls a hidden window without showing it or its button;
 		// omitting this would also suppress its next native tray restoration.

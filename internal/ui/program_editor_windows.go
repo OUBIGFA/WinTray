@@ -72,7 +72,7 @@ func (w *MainWindow) nativeEditor(c *native.Context, m i18n.Messages) {
 
 func (w *MainWindow) nativeProgramActions(c *native.Context, m i18n.Messages, entry *config.ManagedAppEntry) {
 	visible := w.callbacks.OnProgramWindowVisible != nil && w.callbacks.OnProgramWindowVisible(*entry)
-	running := w.callbacks.OnProgramRunning != nil && w.callbacks.OnProgramRunning(*entry)
+	running := w.programRunning(*entry)
 	windowBusy, busy := w.programWindowBusy[entry.ID], w.launchNowBusy[entry.ID]
 	windowLabel := m.HostedShowWindow
 	if visible {
