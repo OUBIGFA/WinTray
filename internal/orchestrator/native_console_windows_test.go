@@ -191,7 +191,8 @@ func TestNativeConsolePreservesOutputInputAndSameWindow(t *testing.T) {
 				t.Fatalf("native streams/output lost: %+v", before)
 			}
 			if before.Environment != "inherited environment" || !strings.EqualFold(before.Directory, filepath.Dir(path)) {
-				t.Fatalf("native launch changed directory/environment: %+v", before)
+				wantDirectory := filepath.Dir(path)
+				t.Fatalf("native launch changed directory/environment: environment=%q directory=%q (% x) want=%q (% x)", before.Environment, before.Directory, []byte(before.Directory), wantDirectory, []byte(wantDirectory))
 			}
 			// A fresh service represents reopening WinTray: scripts must resolve
 			// by interpreter + path, without relying on a launch-time PID cache.
