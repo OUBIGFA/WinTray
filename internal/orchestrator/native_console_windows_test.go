@@ -120,6 +120,12 @@ func TestNativeConsolePreservesOutputInputAndSameWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	resolvedRoot, err := filepath.EvalSymlinks(fixtureRoot)
+	if err != nil {
+		_ = os.RemoveAll(fixtureRoot)
+		t.Fatal(err)
+	}
+	fixtureRoot = resolvedRoot
 	t.Cleanup(func() {
 		if err := os.RemoveAll(fixtureRoot); err != nil {
 			t.Errorf("remove native console fixture: %v", err)
@@ -132,9 +138,10 @@ func TestNativeConsolePreservesOutputInputAndSameWindow(t *testing.T) {
 					t.Skip("python.exe is not installed")
 				}
 			}
-			// Keep the root outside the subtest. On Windows CI, a subtest-scoped
-			// t.TempDir path can contain a 0x01 component; PowerShell 5.1
-			// normalizes it before the helper reports its working directory.
+			// Keep the root outside the subtest and use its long spelling. On
+			// Windows CI, a subtest-scoped t.TempDir path can contain a 0x01
+			// component, while %TEMP% can use an 8.3 alias. PowerShell 5.1
+			// reports the normalized long spelling as the working directory.
 			dir := filepath.Join(fixtureRoot, kind, "native scripts with spaces")
 			if err := os.MkdirAll(dir, 0700); err != nil {
 				t.Fatal(err)
@@ -191,8 +198,7 @@ func TestNativeConsolePreservesOutputInputAndSameWindow(t *testing.T) {
 				t.Fatalf("native streams/output lost: %+v", before)
 			}
 			if before.Environment != "inherited environment" || !strings.EqualFold(before.Directory, filepath.Dir(path)) {
-				wantDirectory := filepath.Dir(path)
-				t.Fatalf("native launch changed directory/environment: environment=%q directory=%q (% x) want=%q (% x)", before.Environment, before.Directory, []byte(before.Directory), wantDirectory, []byte(wantDirectory))
+				t.Fatalf("native launch changed directory/environment: %+v", before)
 			}
 			// A fresh service represents reopening WinTray: scripts must resolve
 			// by interpreter + path, without relying on a launch-time PID cache.
