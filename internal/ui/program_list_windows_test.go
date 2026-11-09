@@ -75,7 +75,7 @@ func TestNativeProgramListDefaultLayout(t *testing.T) {
 			}
 			tt.Move(-1, -1)
 			m := i18n.For(language)
-			if _, hasTitle := tt.Find(m.WindowTitle); hasTitle || !tt.HasText(m.OpenSettings) || !tt.HasText(m.ManagedFrequencyHint) {
+			if _, hasTitle := tt.Find(m.WindowTitle); hasTitle || !tt.HasText(m.SettingsTab) || !tt.HasText(m.ManagedFrequency) {
 				t.Fatal("default page retained the removed title or lost its main actions or program settings")
 			}
 			captureNativeTest(t, tt, "rebuilt-main-"+language)

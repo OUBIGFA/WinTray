@@ -1,7 +1,8 @@
 param(
   [string]$OutputDir = "dist",
   [string]$PackageDir = "publish",
-  [string]$Version = ""
+  [string]$Version = "",
+  [string]$NsisExe = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -14,6 +15,28 @@ $localConfig = Join-Path $PSScriptRoot "package.local.ps1"
 if (Test-Path $localConfig) {
   . $localConfig
 }
+
+if (-not $Version) {
+  $versionSource = [IO.File]::ReadAllText((Join-Path $root 'internal/version/version.go'))
+  $match = [regex]::Match($versionSource, 'var Number = "(\d+\.\d+\.\d+)"')
+  if (-not $match.Success) { throw 'Could not read the application version' }
+  $Version = $match.Groups[1].Value
+}
+$Version = $Version.TrimStart('v')
+if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw 'Version must be X.Y.Z or vX.Y.Z' }
+if (-not $NsisExe) {
+  $candidate = Get-Command makensis.exe -ErrorAction SilentlyContinue
+  if ($candidate) { $NsisExe = $candidate.Source }
+}
+if (-not $NsisExe) {
+  $candidate = Join-Path ${env:ProgramFiles(x86)} 'NSIS/makensis.exe'
+  if (Test-Path -LiteralPath $candidate) { $NsisExe = $candidate }
+}
+if (-not $NsisExe -or -not (Test-Path -LiteralPath $NsisExe -PathType Leaf)) {
+  throw 'NSIS compiler not found. Pass -NsisExe or install NSIS.'
+}
+$scratch = Join-Path $root ('_temp/package-' + [Guid]::NewGuid().ToString('N'))
+[IO.Directory]::CreateDirectory($scratch) | Out-Null
 
 $goCommand = "go"
 if ($GoExe) {
@@ -73,17 +96,13 @@ if (!(Test-Path $publishDir)) {
   New-Item -ItemType Directory -Path $publishDir | Out-Null
 }
 
-$portableDir = Join-Path $publishDir "WinTray-Portable"
+$portableDir = Join-Path $scratch "WinTray-Portable"
 if (!(Test-Path $portableDir)) {
   New-Item -ItemType Directory -Path $portableDir | Out-Null
 }
 
-# Remove only superseded app-side bridge files from our staging directory.
-# Never include stale injection components in the new receiving-end package.
-foreach ($arch in @('x64', 'x86')) {
-  $oldBridge = Join-Path $portableDir "native/$arch/WinTray-TrayBridge.dll"
-  if (Test-Path -LiteralPath $oldBridge) { Remove-Item -LiteralPath $oldBridge -Force }
-}
+# A fresh staging directory prevents stale files or a local user profile from
+# entering either artifact. Both formats are built from exactly these bytes.
 $portableExe = Join-Path $portableDir "WinTray.exe"
 $portableManifest = Join-Path $portableDir "WinTray.exe.manifest"
 $portableChecksums = Join-Path $portableDir "checksums.txt"
@@ -122,20 +141,36 @@ Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination (Join-Path $port
 
 $zipName = "WinTray-Portable.zip"
 $zipTarget = Join-Path $publishDir $zipName
-$tempZipTarget = Join-Path $publishDir "WinTray-Portable.tmp.zip"
-if (Test-Path $tempZipTarget) {
-  $timestamp = Get-Date -Format "yyyyMMddHHmmss"
-  Move-Item -Path $tempZipTarget -Destination (Join-Path $publishDir "WinTray-Portable.tmp.$timestamp.zip") -Force
-}
+$tempZipTarget = Join-Path $scratch "WinTray-Portable.zip"
 
 Compress-Archive -Path (Join-Path $portableDir "*") -DestinationPath $tempZipTarget -Force
-Move-Item -Path $tempZipTarget -Destination $zipTarget -Force
+
+# The installer uses the same staged files as the portable archive. It writes
+# only the program directory and shortcuts; WinTray's configuration stays in
+# the user data directory and is therefore preserved during uninstall.
+$setupTarget = Join-Path $publishDir "WinTray-Setup.exe"
+$setupTemp = Join-Path $scratch "WinTray-Setup.exe"
+& $NsisExe /V2 /INPUTCHARSET UTF8 "/DWINTRAY_PAYLOAD_DIR=$portableDir" "/DWINTRAY_OUTPUT=$setupTemp" "/DWINTRAY_VERSION=$Version" (Join-Path $PSScriptRoot 'installer.nsi')
+if ($LASTEXITCODE -ne 0) { throw "installer build failed" }
+
+# Replace the fixed deliverables only after both build successfully.
+Copy-Item -LiteralPath $tempZipTarget -Destination $zipTarget -Force
+Copy-Item -LiteralPath $setupTemp -Destination $setupTarget -Force
+$publishedPortable = Join-Path $publishDir 'WinTray-Portable'
+[IO.Directory]::CreateDirectory($publishedPortable) | Out-Null
+Copy-Item -Path (Join-Path $portableDir '*') -Destination $publishedPortable -Recurse -Force
 $archiveHash = (Get-FileHash $zipTarget -Algorithm SHA256).Hash
-$archiveChecksumsPath = Join-Path $publishDir (([System.IO.Path]::GetFileNameWithoutExtension($zipTarget)) + ".sha256")
-[System.IO.File]::WriteAllText($archiveChecksumsPath, "$archiveHash  $(Split-Path $zipTarget -Leaf)" + [Environment]::NewLine, $utf8NoBom)
-Write-Host "Packaged portable version: $portableDir"
+[IO.File]::WriteAllText((Join-Path $publishDir 'WinTray-Portable.sha256'), "$archiveHash  WinTray-Portable.zip" + [Environment]::NewLine, $utf8NoBom)
+$setupHash = (Get-FileHash $setupTarget -Algorithm SHA256).Hash
+[IO.File]::WriteAllText((Join-Path $publishDir 'WinTray-Setup.sha256'), "$setupHash  WinTray-Setup.exe" + [Environment]::NewLine, $utf8NoBom)
 Write-Host "Packaged portable archive: $zipTarget"
+Write-Host "Packaged installer: $setupTarget"
 
 } finally {
   Pop-Location
+  if ($scratch -and (Test-Path -LiteralPath $scratch)) {
+    # Only this invocation's GUID directory is owned by this build.
+    Add-Type -AssemblyName Microsoft.VisualBasic
+    [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($scratch, 'OnlyErrorDialogs', 'SendToRecycleBin')
+  }
 }

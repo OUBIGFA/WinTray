@@ -49,7 +49,6 @@ type MainWindow struct {
 	settings          config.Settings
 	callbacks         Callbacks
 	desktop           desktopState
-	onSettingsPage    bool
 	launchNowBusy     map[string]bool
 	programWindowBusy map[string]bool
 	programStatuses   map[string]*programStatus
@@ -57,16 +56,18 @@ type MainWindow struct {
 	allowClose        bool
 	closing           atomic.Bool // suppress worker dialogs as soon as exit is requested
 	starting          []func()
-	bounds            mygo.Rectangle
 	queueMu           sync.Mutex
 	queue             []func()
 	disposed          bool
 	iconsCancel       context.CancelFunc
 }
 
-// Preserve the original-sized order selects and editor after adding a delete
-// column. A narrower minimum would force row controls to shrink or disappear.
-const mainWindowMinWidth = 1140
+// Content dimensions fit the complete settings page in both languages. The
+// program editor uses the same space; only the program list needs scrolling.
+const (
+	mainWindowMinWidth  = 1200
+	mainWindowMinHeight = 850
+)
 
 const dispatchMessage = win.WM_APP + 0x51
 
@@ -179,6 +180,17 @@ func (w *MainWindow) Run() int {
 	}
 	log.Printf("desktop: Windows=%d.%d.%d arch=%s MYGO_GPU=%q", osVersion.MajorVersion, osVersion.MinorVersion, osVersion.BuildNumber, runtime.GOARCH, renderer)
 	mygo.App.SetName("WinTray")
+	// Use the same data directory for installed and portable copies. MyGo's
+	// window state keeps normal bounds separately from maximize/minimize state.
+	dataDir, err := config.AppDirWithError()
+	if err == nil {
+		err = os.MkdirAll(dataDir, 0o755)
+	}
+	if err != nil {
+		log.Printf("window state directory: %v", err)
+		return 1
+	}
+	mygo.App.SetPath(mygo.PathUserData, dataDir)
 	mygo.App.OnWindowAllClosed(func() {})
 	var initErr error
 	mygo.App.WhenReady(func() {
@@ -211,19 +223,19 @@ func (w *MainWindow) ShowMainWindow() {
 		if w.desktop.window == nil {
 			// Releasing the whole surface when hidden keeps GPU and text
 			// caches out of the long-lived, background-only tray session.
-			w.onSettingsPage = false
-			width, height := 1280, 850
-			if w.bounds.Width > 0 {
-				w.bounds.Width = max(mainWindowMinWidth, w.bounds.Width)
-				w.bounds.Height = max(720, w.bounds.Height)
-				width, height = w.bounds.Width, w.bounds.Height
-			}
+			w.desktop.pageTab = 0
 			w.desktop.window = mygo.NewWindow(mygo.WindowOptions{
-				Title: i18n.For(w.settings.Language).WindowTitle, Width: width, Height: height, MinWidth: mainWindowMinWidth, MinHeight: 720, Hidden: true, Content: native.View(w.nativeView),
+				Title: i18n.For(w.settings.Language).WindowTitle,
+				Width: mainWindowMinWidth, Height: mainWindowMinHeight, UseContentSize: true,
+				StateKey: "main", Hidden: true, Content: native.View(w.nativeView),
 			})
 			window := w.desktop.window
-			if w.bounds.Width > 0 {
-				window.SetBounds(w.bounds)
+			// Minimum size includes the current Windows title bar and borders;
+			// the layout's measurements describe only the client area.
+			bounds, content := window.Bounds(), window.ContentBounds()
+			window.SetMinimumSize(mainWindowMinWidth+bounds.Width-content.Width, mainWindowMinHeight+bounds.Height-content.Height)
+			if !window.IsMaximized() && (content.Width < mainWindowMinWidth || content.Height < mainWindowMinHeight) {
+				window.SetContentSize(max(mainWindowMinWidth, content.Width), max(mainWindowMinHeight, content.Height))
 			}
 			if icon, err := branding.AppIcon(); err == nil {
 				hwnd := win.HWND(window.NativeHandle())
@@ -247,6 +259,12 @@ func (w *MainWindow) ShowMainWindow() {
 			w.loadNativeIcons()
 		}
 		w.desktop.window.Show()
+		// Windows may apply the launcher's STARTF_USESHOWWINDOW/SW_HIDE to
+		// the first Show call. An explicit request to open the UI must still
+		// show it; newer MyGo Restore only affects minimized windows.
+		if !w.desktop.window.IsVisible() {
+			w.desktop.window.Show()
+		}
 		w.desktop.window.Restore()
 		w.desktop.window.Focus()
 	})
@@ -261,7 +279,6 @@ func (w *MainWindow) HideMainWindow() {
 	}
 	if window := w.desktop.window; window != nil {
 		first, _ := w.desktop.list.Visible()
-		w.bounds = window.Bounds()
 		w.desktop.window = nil
 		window.Destroy()
 		w.desktop.icons = nil

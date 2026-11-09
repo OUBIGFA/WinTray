@@ -16,6 +16,8 @@ import (
 	"wintray/internal/config"
 	"wintray/internal/i18n"
 	"wintray/internal/stringutil"
+	"wintray/internal/ui/kit"
+	"wintray/internal/ui/kit/icons"
 	"wintray/internal/version"
 )
 
@@ -31,53 +33,21 @@ type desktopState struct {
 	frameBlurCommits   []func()
 	exitPressed        bool
 	orderOptions       []string
+	pageTab            int
+	detailTab          int
+	detailFor          string
+	split              kit.SplitState
+	removeID           string
 }
-
-// One 24-DIP SVG vocabulary keeps toolbar, empty-state and row icons at the
-// same visual weight. The toolkit supplies rendering and interaction states.
-func nativeIcon(shapes string) *native.SVG {
-	return native.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">` + shapes + `</svg>`))
-}
-
-var (
-	addIcon      = nativeIcon(`<path d="M12 5v14M5 12h14"/>`)
-	gripIcon     = nativeIcon(`<circle cx="9" cy="5" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="19" r="1"/>`)
-	settingsIcon = nativeIcon(`<path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/>`)
-	backIcon     = nativeIcon(`<path d="m12 5-7 7 7 7M5 12h14"/>`)
-	playIcon     = nativeIcon(`<path d="m8 5 11 7-11 7z"/>`)
-	stopIcon     = nativeIcon(`<rect x="6" y="6" width="12" height="12" rx="1"/>`)
-	deleteIcon   = nativeIcon(`<path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13M10 11v5M14 11v5"/>`)
-	chevronIcon  = nativeIcon(`<path d="m4 8 8 8 8-8"/>`)
-	helpIcon     = nativeIcon(`<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 5 0c0 2-2.5 2-2.5 4M12 17h.01"/>`)
-	clockIcon    = nativeIcon(`<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>`)
-	trayIcon     = nativeIcon(`<path d="M4 13h4l2 3h4l2-3h4M4 13l2-8h12l2 8v6H4z"/>`)
-	toolsIcon    = nativeIcon(`<path d="m14 6 4 4M4 20l8-8M14 3a6 6 0 0 0-6 7L3 15a3 3 0 0 0 4 4l5-5a6 6 0 0 0 8-7l-4 4-3-3 4-4z"/>`)
-	// Lucide Languages (ISC); the notice is kept in icons/LICENSE.lucide.
-	translateIcon  = nativeIcon(`<path d="m5 8 6 6M4 14l6-6 2-3M2 5h12M7 2h1m14 20-5-10-5 10M14 18h6"/>`)
-	programIconSVG = nativeIcon(`<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M7 6.5h.01M10 6.5h.01"/>`)
-)
 
 func nativeAction(c *native.Context, label string, icon *native.SVG) native.Element {
-	return native.Button(c, "").Label(label).Children(func() {
-		if icon != nil {
-			native.Icon(c, icon).Size(16, 16)
-		}
-		native.Text(c, strings.TrimPrefix(label, "← ")).SingleLine()
-	})
-}
-
-func nativeHint(c *native.Context, text string) {
-	hint := native.Text(c, text).TextColor(c.Theme().TextMuted)
-	if _, height := c.Size(); height < 800 {
-		// Keep controls on screen at the minimum window height. The complete
-		// explanation remains available through the tooltip and accessibility.
-		hint.SingleLine().Tooltip(text)
-	}
+	return kit.Button(c, strings.TrimPrefix(label, "← "), icon, false).Label(label)
 }
 
 // Only the program table scrolls. Page chrome and the inspector have bounded
 // layouts, so list navigation never moves the selected program's controls.
 func (w *MainWindow) nativeView(c *native.Context) {
+	c.SetTheme(kit.Theme(c.Preferences(), c.Theme().Dark))
 	w.desktop.frameNumberCommits = nil
 	w.desktop.frameBlurCommits = nil
 	w.desktop.exitPressed = false
@@ -85,6 +55,7 @@ func (w *MainWindow) nativeView(c *native.Context) {
 		w.desktop.initialized = true
 		w.desktop.selected = -1
 		w.resetNativeList(0)
+		w.desktop.split.Percent = 50
 	}
 	if count := len(w.settings.ManagedApps); len(w.desktop.orderOptions) != count {
 		w.desktop.orderOptions = make([]string, count)
@@ -96,12 +67,7 @@ func (w *MainWindow) nativeView(c *native.Context) {
 	var dropped []string
 	native.Column(c).Fill().Children(func() {
 		w.nativeHeader(c, m)
-		native.Divider(c)
-		if w.onSettingsPage {
-			w.nativeSettings(c, m)
-		} else {
-			dropped = w.nativePrograms(c, m)
-		}
+		dropped = w.nativePrograms(c, m)
 		native.Divider(c)
 		w.nativeFooter(c, m)
 	})
@@ -117,32 +83,24 @@ func (w *MainWindow) nativeView(c *native.Context) {
 		// Finish rows and editor before changing their identities.
 		w.nativeDropPaths(dropped)
 	}
+	if id := w.desktop.removeID; id != "" {
+		w.desktop.removeID = ""
+		w.nativeRemove(id)
+	}
 }
 
 func (w *MainWindow) nativeHeader(c *native.Context, m i18n.Messages) {
-	native.Row(c).Padding(14, 24).Gap(16).Children(func() {
-		if w.onSettingsPage {
-			if nativeQuietAction(c, m.BackToPrograms, backIcon).Clicked() {
-				w.commitNativeEdits()
-				w.onSettingsPage = false
-			}
-			native.Text(c, m.SettingsTitle).FontSize(24).FontWeight(500)
-		} else {
-			native.Text(c, m.ManagedListTitle).FontSize(24).FontWeight(500)
-			native.Text(c, fmt.Sprintf(m.ManagedProgramCount, len(w.settings.ManagedApps))).TextColor(c.Theme().TextMuted)
-		}
+	native.Row(c).Padding(12, 24).Gap(16).Children(func() {
+		kit.Title(c, m.ManagedListTitle)
+		kit.Caption(c, fmt.Sprintf(m.ManagedProgramCount, len(w.settings.ManagedApps)))
 		native.Spacer(c)
 		native.Toolbar(c, func() {
-			if !w.onSettingsPage && nativeAction(c, m.OpenSettings, settingsIcon).Clicked() {
-				w.commitNativeEdits()
-				w.onSettingsPage = true
-			}
 			if native.Button(c, "").Padding(8).Label(m.LanguageLabel).Tooltip(m.SwitchLanguageHint).Children(func() {
-				native.Icon(c, translateIcon).Size(20, 20)
+				native.Icon(c, icons.Languages).Size(20, 20)
 			}).Clicked() {
 				w.nativeSwitchLanguage()
 			}
-		}).Padding(0).Gap(8).Justify(native.End).Label(m.SettingsTitle)
+		}).Padding(0).Gap(8).Justify(native.End)
 	})
 }
 
@@ -151,7 +109,9 @@ func (w *MainWindow) resetNativeList(first int) {
 	w.desktop.list = native.ListState{
 		Selected: &w.desktop.selected,
 		Key:      func(i int) any { return w.settings.ManagedApps[i].ID },
-		Label:    func(i int) string { return w.settings.ManagedApps[i].Name },
+		Label: func(i int) string {
+			return i18n.For(w.settings.Language).ProgramsTab + ": " + w.settings.ManagedApps[i].Name
+		},
 		Reorder: func(rows []int, before int) {
 			// Mygo reports an insertion boundary; the order selector uses the
 			// final index. This single-selection table always moves one row.
@@ -168,49 +128,42 @@ func (w *MainWindow) resetNativeList(first int) {
 	w.desktop.list.ScrollTo(first, native.Start)
 }
 
+// Only the program list scrolls. Page tabs, Add and the application footer
+// stay fixed.
 func (w *MainWindow) nativePrograms(c *native.Context, m i18n.Messages) []string {
 	var dropped []string
-	if !w.settings.RunAtLogon {
-		native.Row(c).Gap(12).Padding(8, 24).Background(c.Theme().Surface).Children(func() {
-			native.Text(c, m.LogonOffNotice).Grow(1)
-			if native.Button(c, m.LogonOffEnable).Clicked() {
-				w.settings.RunAtLogon = true
-				w.save()
-			}
-		})
-		native.Divider(c)
-	}
-	native.Row(c).Grow(1).MinHeight(0).AlignItems(native.Stretch).Children(func() {
-		list := native.Column(c).Grow(1).Basis(0).MinWidth(0).Padding(16, 16, 0, 24).Gap(12)
-		dropped = list.DroppedFiles()
-		if list.FileDragOver() {
-			list.Background(desktopSelection(c.Theme()))
+	native.Column(c).Grow(1).MinHeight(0).Padding(0, 24, 16, 24).Gap(16).Children(func() {
+		kit.Tabs(c, &w.desktop.pageTab, []kit.Tab{{Label: m.ProgramsTab, Icon: icons.List}, {Label: m.SettingsTab, Icon: icons.Settings2}}, func(apply func()) { w.commitNativeEdits(); apply() })
+		if w.desktop.pageTab == 1 {
+			w.nativeSettings(c, m)
+			return
 		}
-		list.Children(func() {
-			native.Row(c).Gap(12).Children(func() {
-				native.Text(c, m.ManagedListHint).TextColor(c.Theme().TextMuted).SingleLine().Tooltip(m.ManagedListHint).Grow(1).MinWidth(0)
-				if nativePrimaryAction(c, m.AddProgram, addIcon).Clicked() {
-					w.nativeChooseProgram(false)
+		native.Row(c).Gap(16).Children(func() {
+			if nativePrimaryAction(c, m.AddProgram, icons.Plus).Clicked() {
+				w.nativeChooseProgram(false)
+			}
+			if !w.settings.RunAtLogon {
+				kit.Help(c, m.LogonOffNotice).Grow(1)
+				if kit.Button(c, m.LogonOffEnable, nil, false).Label(m.LogonOffEnable).Clicked() {
+					w.settings.RunAtLogon = true
+					w.save()
 				}
-			})
-			if len(w.settings.ManagedApps) == 0 {
-				native.Column(c).Grow(1).Center().Gap(16).Padding(24).Children(func() {
-					native.Icon(c, addIcon).Size(40, 40).TextColor(c.Theme().TextMuted)
-					native.Text(c, m.ManagedListEmpty).FontSize(22).FontWeight(500)
-					native.Text(c, m.ManagedListEmptyHint).TextAlign(native.Center).TextColor(c.Theme().TextMuted)
-				})
-				return
+			} else {
+				kit.Help(c, m.ManagedListHint).SingleLine().MinWidth(0).Tooltip(m.ManagedListHint)
 			}
-			w.nativeProgramTable(c, m)
 		})
-		native.Divider(c)
-		// A fixed inspector keeps the established left/right split and leaves
-		// numeric controls usable while the name column absorbs width changes.
-		padding := float32(16)
-		if _, height := c.Size(); height < 800 {
-			padding = 12
-		}
-		native.Column(c).Width(506).Shrink(0).Padding(padding, 20).Background(desktopPanel(c.Theme())).Children(func() { w.nativeEditor(c, m) })
+		area := native.Column(c).Grow(1).MinHeight(0).BorderWidth(1, 0, 0, 0).BorderColor(kit.Colors(c).Hairline)
+		area.Children(func() {
+			width, _ := c.Size()
+			if width < 908 {
+				native.Column(c).FillWidth().Height(180).Shrink(0).Children(func() { dropped = w.nativeProgramTable(c, m) })
+				native.Column(c).Grow(1).MinHeight(0).BorderWidth(1, 0, 0, 0).BorderColor(kit.Colors(c).Hairline).Children(func() { w.nativeEditor(c, m) })
+			} else {
+				// Let startup choices wrap while retaining room for the paired
+				// schedule fields when the user narrows the editor.
+				kit.Split(c, &w.desktop.split, kit.SplitOptions{Label: m.ResizePanels, MinFirst: 35, MinSecond: max(30, 560/(width-48)*100)}, func() { dropped = w.nativeProgramTable(c, m) }, func() { w.nativeEditor(c, m) }).Grow(1).MinHeight(0)
+			}
+		})
 	})
 	return dropped
 }
@@ -224,43 +177,69 @@ func (w *MainWindow) nativeSelected() (*config.ManagedAppEntry, bool) {
 }
 
 type numberEditor struct {
-	value float64
+	text  string
 	dirty bool
 }
 
-// NumberInput owns parsing, range constraints, keyboard stepping and buttons.
-// Defer the settings write until blur/Enter/close, not on every typed digit.
-func (w *MainWindow) nativeNumber(c *native.Context, value *int, low, high int, label string) {
-	row := native.Row(c).Shrink(0)
-	state := native.Local(row, "number", func() numberEditor { return numberEditor{value: float64(*value)} })
+// Use the shared 120-DIP text field and arrow-key stepping. Only valid whole
+// numbers commit on Enter, blur or close; an invalid entry stays visible.
+func (w *MainWindow) nativeNumber(c *native.Context, value *int, low, high int, label string, handles ...*native.Handle) native.Element {
+	box := native.Column(c).Width(120).Shrink(0).Gap(4)
+	state := native.Local(box, "number", func() numberEditor { return numberEditor{text: strconv.Itoa(*value)} })
+	parse := func() (int, bool) {
+		n, err := strconv.Atoi(strings.TrimSpace(state.text))
+		return n, err == nil && n >= low && n <= high
+	}
 	commit := func() {
 		if !state.dirty {
 			return
 		}
-		state.dirty = false
-		v := int(state.value)
-		if v != *value {
-			*value = v
-			w.save()
+		if n, ok := parse(); ok {
+			state.dirty = false
+			if n != *value {
+				*value = n
+				w.save()
+			}
 		}
 	}
 	w.desktop.frameNumberCommits = append(w.desktop.frameNumberCommits, commit)
-	row.Children(func() {
-		input := native.NumberInput(c, &state.value, float64(low), float64(high), 1).Label(label)
+	box.Children(func() {
+		input := native.TextInput(c, &state.text).FillWidth().Label(label)
+		if len(handles) > 0 {
+			input.Bind(handles[0])
+		}
 		if input.Changed() {
 			state.dirty = true
 		}
+		step := func(delta int) {
+			n, ok := parse()
+			if !ok {
+				n = *value
+			}
+			state.text = strconv.Itoa(min(high, max(low, n+delta)))
+			state.dirty = true
+		}
+		if input.Shortcut(0, native.KeyUp) {
+			step(1)
+		}
+		if input.Shortcut(0, native.KeyDown) {
+			step(-1)
+		}
+		if _, ok := parse(); !ok {
+			input.Error(fmt.Sprintf("%d–%d", low, high))
+		}
 		if state.dirty {
-			if input.Shortcut(0, native.KeyEnter) {
+			if input.Submitted() {
 				commit()
-			} else if !input.FocusWithin() {
+			} else if !input.Focused() {
 				w.desktop.frameBlurCommits = append(w.desktop.frameBlurCommits, commit)
 			}
 		}
-		if !state.dirty && !input.FocusWithin() {
-			state.value = float64(*value)
+		if !state.dirty && !input.Focused() {
+			state.text = strconv.Itoa(*value)
 		}
 	})
+	return box
 }
 
 func (w *MainWindow) nativeFooter(c *native.Context, m i18n.Messages) {
@@ -280,7 +259,7 @@ func (w *MainWindow) nativeFooter(c *native.Context, m i18n.Messages) {
 			}
 		}).Padding(0)
 		native.Spacer(c)
-		if nativeAction(c, m.RunSilently, trayIcon).Clicked() && w.callbacks.OnRunSilently != nil {
+		if nativeAction(c, m.RunSilently, icons.PanelTopClose).Clicked() && w.callbacks.OnRunSilently != nil {
 			w.commitNativeEdits()
 			w.callbacks.OnRunSilently()
 		}
@@ -423,6 +402,26 @@ func (w *MainWindow) nativeDropPaths(paths []string) {
 		m := i18n.For(w.settings.Language)
 		w.ShowError(m.AddProgram, fmt.Sprintf(m.ManagedDropRejected, strings.Join(rejected, "\r\n")))
 	}
+}
+
+// A file dropped on Change replaces only that row and never launches it.
+func (w *MainWindow) nativeReplacePaths(paths []string) {
+	if len(paths) == 0 {
+		return
+	}
+	path := paths[0]
+	supported := false
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".exe", ".bat", ".cmd", ".ps1", ".py", ".pyw", ".ahk":
+		info, err := os.Stat(path)
+		supported = err == nil && info.Mode().IsRegular()
+	}
+	if !supported {
+		m := i18n.For(w.settings.Language)
+		w.ShowError(m.BrowseProgram, fmt.Sprintf(m.ManagedDropRejected, path))
+		return
+	}
+	w.nativeAddPaths(paths[:1], true)
 }
 
 func (w *MainWindow) nativeAddPaths(paths []string, replace bool) {

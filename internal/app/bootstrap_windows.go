@@ -40,6 +40,13 @@ const (
 var readyWait = 2 * time.Minute
 
 func Run(args []string) int {
+	if len(args) == 1 && args[0] == "--prepare-uninstall" {
+		if err := runPrepareUninstall(); err != nil {
+			emitFatalBeforeUI("uninstall preparation failed", err)
+			return 1
+		}
+		return 0
+	}
 	var deadline exitDeadline
 	defer deadline.stop() // after registration waits, logger and instance cleanup
 	if code := runAppTaskHelper(args); code >= 0 {

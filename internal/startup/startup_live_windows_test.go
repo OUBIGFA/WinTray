@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -27,11 +29,13 @@ type liveLaunchReport struct {
 
 // Test children execute the same startup helper functions as WinTray, without
 // bringing up the UI or depending on an installed release. This is a fixture
-// process, not a second test run, and is also the harmless target application.
+// process, not a second test run. The target is a separate reporting program.
 func TestMain(m *testing.M) {
 	args := os.Args[1:]
 	if len(args) == 3 && args[0] == AppTaskHelperRun {
-		if err := LaunchStartupRun(args[1], args[2]); err != nil {
+		// Exercise the production reader/launcher against a private fixture,
+		// without making a test executable an actual Windows Run entry.
+		if err := launchStartupRunFrom(liveRunKey(args[1]), args[1], args[2], shellLaunchOriginal); err != nil {
 			os.Exit(1)
 		}
 		os.Exit(0)
@@ -48,19 +52,20 @@ func TestMain(m *testing.M) {
 		}
 		os.Exit(0)
 	}
-	if len(args) >= 2 && args[0] == "--wintray-startup-test-report" {
-		cwd, _ := os.Getwd()
-		var info windows.StartupInfo
-		windows.GetStartupInfo(&info)
-		report := liveLaunchReport{Args: args[2:], Cwd: cwd, Elevated: IsProcessElevated(), Show: info.ShowWindow, Flags: info.Flags}
-		data, err := json.Marshal(report)
-		if err != nil || os.WriteFile(args[1], data, 0o600) != nil {
-			os.Exit(1)
-		}
-		os.Exit(0)
-	}
 	os.Exit(m.Run())
 }
+
+// Do not copy the task-registering test binary into a real startup entry.
+// Keep the launched payload limited to reporting its observable launch state.
+func buildLaunchReporter(t *testing.T, path string) {
+	t.Helper()
+	cmd := exec.Command(filepath.Join(runtime.GOROOT(), "bin", "go.exe"), "build", "-ldflags=-H=windowsgui", "-o", path, "./testdata/launch-report")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build launch reporter: %v\n%s", err, out)
+	}
+}
+
+func liveRunKey(name string) string { return `Software\WinTrayLiveTests\` + name }
 
 func waitForLiveLaunch(t *testing.T, path string) liveLaunchReport {
 	t.Helper()
@@ -77,8 +82,8 @@ func waitForLiveLaunch(t *testing.T, path string) liveLaunchReport {
 	return liveLaunchReport{}
 }
 
-// Opt-in because this test registers temporary tasks and, for the Run case, a
-// uniquely named real HKCU Run value. It never changes an existing app's entry.
+// Opt-in because this test registers temporary tasks. The Run fixture lives
+// in a private registry key and never creates an actual Windows startup entry.
 // Every task/value/file is removed on exit, including failure paths.
 func TestOriginalStartupLiveRoundTrip(t *testing.T) {
 	if os.Getenv("WINTRAY_STARTUP_LIVE_TEST") != "1" {
@@ -97,10 +102,6 @@ func TestOriginalStartupLiveRoundTrip(t *testing.T) {
 	} else if _, err := os.Stat(helper); err != nil {
 		t.Fatal(err)
 	}
-	image, err := os.ReadFile(self)
-	if err != nil {
-		t.Fatal(err)
-	}
 	user, err := windows.GetCurrentProcessToken().GetTokenUser()
 	if err != nil {
 		t.Fatal(err)
@@ -109,9 +110,7 @@ func TestOriginalStartupLiveRoundTrip(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			dir := t.TempDir()
 			target := filepath.Join(dir, "原程序 & original.exe")
-			if err := os.WriteFile(target, image, 0o700); err != nil {
-				t.Fatal(err)
-			}
+			buildLaunchReporter(t, target)
 			output := filepath.Join(dir, "启动 report.json")
 			wantArgs := []string{"--startup", "参数 with spaces", `C:\ends-with-slash\`, `--literal=%SystemRoot%`, `a"b`}
 			args := windows.ComposeCommandLine(append([]string{"--wintray-startup-test-report", output}, wantArgs...))
@@ -127,11 +126,20 @@ func TestOriginalStartupLiveRoundTrip(t *testing.T) {
 			wantCwd := systemDir()
 			wantShow := uint16(1)
 			if kind == "Run" {
-				run, _, err = registry.CreateKey(registry.CURRENT_USER, runKeyPath, registry.QUERY_VALUE|registry.SET_VALUE|registry.WOW64_64KEY)
+				// Only the test harness knows this private registry location.
+				// An optional installed helper still covers shortcuts below.
+				tasks.selfExe = self
+				keyPath := liveRunKey(name)
+				run, _, err = registry.CreateKey(registry.CURRENT_USER, keyPath, registry.QUERY_VALUE|registry.SET_VALUE|registry.WOW64_64KEY)
 				if err != nil {
 					t.Fatal(err)
 				}
-				t.Cleanup(func() { run.Close() })
+				t.Cleanup(func() {
+					run.Close()
+					if err := registry.DeleteKey(registry.CURRENT_USER, keyPath); err != nil {
+						t.Errorf("remove private Run fixture: %v", err)
+					}
+				})
 				if _, _, err := run.GetStringValue(name); err != registry.ErrNotExist {
 					t.Fatalf("test value already exists or cannot be read: %v", err)
 				}
@@ -140,9 +148,14 @@ func TestOriginalStartupLiveRoundTrip(t *testing.T) {
 					t.Fatal(err)
 				}
 				t.Cleanup(func() { _ = run.DeleteValue(name) })
-				approvalPath = startupApprovedPath + `\Run`
+				approvalPath = keyPath + `\Approval`
+				t.Cleanup(func() {
+					if err := registry.DeleteKey(registry.CURRENT_USER, approvalPath); err != nil && err != registry.ErrNotExist {
+						t.Errorf("remove private approval fixture: %v", err)
+					}
+				})
 				tasks.findEntries = func(path string) ([]startupEntry, error) {
-					return findRunStartupEntries(path, []runSource{{registry.CURRENT_USER, runKeyPath, registry.WOW64_64KEY, approvalPath, "Live HKCU Run"}})
+					return findRunStartupEntries(path, []runSource{{registry.CURRENT_USER, keyPath, registry.WOW64_64KEY, approvalPath, "Test Run"}})
 				}
 			} else {
 				linkPath = filepath.Join(dir, name+".lnk")

@@ -32,7 +32,9 @@ jobs:
 
       - name: Build release package
         shell: pwsh
-        run: ./build/package.ps1 -OutputDir dist -Version "${{ steps.version.outputs.version }}"
+        run: |
+          choco install nsis --no-progress -y
+          ./build/package.ps1 -OutputDir dist -Version "${{ steps.version.outputs.version }}"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
@@ -41,3 +43,6 @@ jobs:
           fail_on_unmatched_files: true
           files: |
             publish/WinTray-Portable.zip
+            publish/WinTray-Portable.sha256
+            publish/WinTray-Setup.exe
+            publish/WinTray-Setup.sha256

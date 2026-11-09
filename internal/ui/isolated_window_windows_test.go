@@ -29,7 +29,7 @@ func runWindowTestInChild(t *testing.T) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, exe, "-test.run=^"+regexp.QuoteMeta(t.Name())+"$", "-test.count=1")
-	cmd.Env = append(os.Environ(), marker+"="+t.Name())
+	cmd.Env = append(os.Environ(), marker+"="+t.Name(), "LOCALAPPDATA="+t.TempDir())
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("isolated window test: %v\n%s", err, output)

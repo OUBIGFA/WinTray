@@ -127,7 +127,7 @@ func TestNativeProgramListFileDrops(t *testing.T) {
 				if !drop("empty list", paths, true) || !drop("row control", paths[:1], true) || !drop("blank list", paths[1:], true) || !drop("editor", paths, false) {
 					return
 				}
-				if !step(func() error { w.onSettingsPage = true; return nil }) || !drop("settings page", paths, false) {
+				if !step(func() error { w.desktop.pageTab = 1; return nil }) || !drop("settings page", paths, false) {
 					return
 				}
 				if !step(func() error { w.HideMainWindow(); return nil }) {
@@ -135,7 +135,7 @@ func TestNativeProgramListFileDrops(t *testing.T) {
 				}
 				w.ShowMainWindow()
 				if !step(func() error {
-					if w.desktop.window == nil || !w.desktop.window.IsVisible() || w.onSettingsPage {
+					if w.desktop.window == nil || !w.desktop.window.IsVisible() || w.desktop.pageTab != 0 {
 						return fmt.Errorf("program list did not reopen")
 					}
 					return nil

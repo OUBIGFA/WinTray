@@ -32,6 +32,9 @@ func TestExitButtonPrecedesPendingSave(t *testing.T) {
 		if err := tt.Click("Program 000"); err != nil {
 			t.Fatal(err)
 		}
+		if err := tt.Click(m.MoreSettings); err != nil {
+			t.Fatal(err)
+		}
 		if err := tt.Click(m.ManagedAppArgs); err != nil {
 			t.Fatal(err)
 		}

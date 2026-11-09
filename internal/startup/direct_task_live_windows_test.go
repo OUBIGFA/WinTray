@@ -23,15 +23,9 @@ func TestConfiguredStartupLiveRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(self)
-	if err != nil {
-		t.Fatal(err)
-	}
 	dir := t.TempDir()
 	exe := filepath.Join(dir, "便携程序 & portable.exe")
-	if err := os.WriteFile(exe, data, 0700); err != nil {
-		t.Fatal(err)
-	}
+	buildLaunchReporter(t, exe)
 	user, err := windows.GetCurrentProcessToken().GetTokenUser()
 	if err != nil {
 		t.Fatal(err)

@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"unicode/utf16"
 
@@ -150,7 +151,15 @@ func utf16LEWithBOM(s string) []byte {
 	return append([]byte{0xFF, 0xFE}, utf16LE(s)...)
 }
 
+// The logon registrar and program-task worker run independently. schtasks
+// enumeration is not a snapshot: deleting a task while /Query /XML ONE is
+// reading it returns partial XML and ERROR_FILE_NOT_FOUND. Serialize our
+// commands so a settings toggle cannot invalidate our own inventory read.
+var schtasksMu sync.Mutex
+
 func runSchtasks(args ...string) ([]byte, error) {
+	schtasksMu.Lock()
+	defer schtasksMu.Unlock()
 	cmd := exec.Command(filepath.Join(systemDir(), "schtasks.exe"), args...)
 	// WinTray is a GUI program; without this every call flashes a console.
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW}

@@ -156,16 +156,16 @@ func TestMessages_AllFieldsArePopulated(t *testing.T) {
 }
 
 func TestTranslateResultCode_UsesTypedCode(t *testing.T) {
-	if got := TranslateResultCode("en-US", "started_hidden"); got != "started hidden in background" {
+	if got := TranslateResultCode("en-US", "started_hidden"); got != "started in the background" {
 		t.Fatalf("TranslateResultCode(en-US, started_hidden) = %q", got)
 	}
-	if got := TranslateResultCode("zh-CN", "started_hidden"); got != "已后台静默启动" {
+	if got := TranslateResultCode("zh-CN", "started_hidden"); got != "已后台启动" {
 		t.Fatalf("TranslateResultCode(zh-CN, started_hidden) = %q", got)
 	}
-	if got := TranslateResultCode("zh-CN", "managed"); got != "前台窗口已成功收起" {
+	if got := TranslateResultCode("zh-CN", "managed"); got != "程序窗口已收起" {
 		t.Fatalf("TranslateResultCode(zh-CN, managed) = %q", got)
 	}
-	if got := TranslateResultCode("zh-CN", "started_only"); got != "已启动 (无窗口规则)" {
+	if got := TranslateResultCode("zh-CN", "started_only"); got != "程序已启动" {
 		t.Fatalf("TranslateResultCode(zh-CN, started_only) = %q", got)
 	}
 	if got := TranslateResultCode("zh-CN", "already_running_skipped"); got != "程序已在运行，已跳过启动" {

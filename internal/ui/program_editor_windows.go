@@ -3,70 +3,108 @@
 package ui
 
 import (
+	"fmt"
 	native "github.com/egoist/mygo/ui"
+	"strconv"
+	"strings"
 	"wintray/internal/config"
 	"wintray/internal/i18n"
+	"wintray/internal/ui/kit"
+	"wintray/internal/ui/kit/icons"
 )
 
+// The editor groups settings by purpose. Each selected identity owns its
+// input state; switching tabs commits pending values first.
 func (w *MainWindow) nativeEditor(c *native.Context, m i18n.Messages) {
-	entry, ok := w.nativeSelected()
-	if !ok {
-		// No placeholder settings: the inspector only edits a real selection.
-		native.Column(c).Grow(1).Center().Gap(16).Padding(24).Children(func() {
-			native.Icon(c, programIconSVG).Size(40, 40).TextColor(c.Theme().TextMuted)
-			native.Text(c, m.ManagedSelectPrompt).FontSize(22).FontWeight(500)
-			native.Text(c, m.ManagedSelectHint).TextColor(c.Theme().TextMuted).TextAlign(native.Center)
-		})
-		return
-	}
-	_, height := c.Size()
-	gap := float32(12)
-	if height < 800 {
-		gap = 4
-	}
-	fieldGap := min(gap, 8)
-	// Entry identity owns every text/number cursor, including pending edits.
-	native.Column(c).Key(entry.ID).Grow(1).Gap(gap).Children(func() {
-		native.Row(c).Gap(12).Children(func() {
-			if icon := w.desktop.icons[entry.ExePath]; icon != nil {
-				native.Image(c, icon).Size(32, 32).Shrink(0)
-			} else {
-				native.Icon(c, programIconSVG).Size(32, 32).Shrink(0).TextColor(c.Theme().TextMuted)
-			}
-			native.Column(c).Grow(1).MinWidth(0).Gap(4).Children(func() {
-				native.Text(c, entry.Name).FontSize(22).FontWeight(500).SingleLine().Tooltip(entry.Name)
-				native.Text(c, entry.ExePath).SingleLine().TextColor(c.Theme().TextMuted).Tooltip(entry.ExePath)
+	native.Column(c).Fill().Padding(12, 4, 12, 20).Children(func() {
+		entry, ok := w.nativeSelected()
+		if !ok {
+			native.Column(c).Gap(8).Children(func() { kit.Help(c, m.ManagedSelectPrompt); kit.Help(c, m.ManagedSelectHint) })
+			return
+		}
+		if w.desktop.detailFor != entry.ID {
+			w.desktop.detailFor = entry.ID
+			w.desktop.detailTab = 0
+		}
+		native.Column(c).Key(entry.ID).FillWidth().Gap(10).Children(func() {
+			native.Column(c).FillWidth().Gap(4).Children(func() {
+				kit.Heading(c, entry.Name).Role(native.RoleHeading).Level(2).SingleLine().Ellipsis("…").Tooltip(entry.Name).Selectable()
+				kit.Mono(c, entry.ExePath).TextColor(c.Theme().TextMuted).SingleLine().Ellipsis("…").Tooltip(entry.ExePath).Selectable()
 			})
-			if nativeQuietAction(c, m.BrowseProgram, nil).Tooltip(m.BrowseProgramHint).Clicked() {
-				w.nativeChooseProgram(true)
-			}
-		})
-		w.nativeProgramActions(c, m, entry)
-		native.Divider(c).Margin(2, 0)
-		native.Column(c).Gap(fieldGap).Children(func() {
-			if native.Checkbox(c, &entry.RunOnStartup, m.ManagedEnabled).FontWeight(500).Tooltip(m.ManagedEnabledHint).Changed() {
-				w.save()
-			}
-			native.Column(c).Gap(fieldGap).Disabled(!entry.RunOnStartup).Children(func() {
-				w.nativeStartMode(c, m, entry)
-				native.Field(c, m.ManagedAppArgs, func() {
-					input := native.TextInput(c, &entry.Args).Placeholder(m.ManagedArgsPlaceholder).Label(m.ManagedAppArgs)
-					if input.Changed() {
-						w.desktop.argsDirty = true
-					}
-					if input.Submitted() {
-						w.commitNativeEdits()
-					} else if !input.Focused() {
-						w.desktop.frameBlurCommits = append(w.desktop.frameBlurCommits, w.commitNativeEdits)
-					}
-				}).Tooltip(m.ManagedArgsHint)
-				if startModeOf(*entry) == startTask {
-					nativeHint(c, m.ManagedTaskArgsHint)
+			w.nativeProgramActions(c, m, entry)
+			kit.SubTabs(c, &w.desktop.detailTab, []string{m.CommonSettings, m.MoreSettings}, func(apply func()) { w.commitNativeEdits(); apply() })
+			native.Column(c).FillWidth().Gap(16).Children(func() {
+				if w.desktop.detailTab == 0 {
+					kit.Group(c, icons.Rocket, m.LaunchBehavior, "", func() {
+						if kit.Toggle(c, &entry.RunOnStartup, m.ManagedEnabled, "").MinHeight(40).Padding(6, 16).Changed() {
+							w.save()
+						}
+						native.Column(c).FillWidth().Disabled(!entry.RunOnStartup).Children(func() { w.nativeStartMode(c, m, entry) })
+					})
+					w.nativeSchedule(c, m, entry)
+				} else {
+					kit.Panel(c, func() {
+						nativeInputField(c, m.ProgramName, "", true, func(handle *native.Handle) { w.nativeProgramName(c, m, entry, handle) })
+						nativeInputField(c, m.ManagedAppArgs, m.ManagedArgsHint, true, func(handle *native.Handle) {
+							input := native.TextInput(c, &entry.Args).FillWidth().Placeholder(m.ManagedArgsPlaceholder).Label(m.ManagedAppArgs).Bind(handle)
+							if input.Changed() {
+								w.desktop.argsDirty = true
+							}
+							if input.Submitted() {
+								w.commitNativeEdits()
+							} else if !input.Focused() {
+								w.desktop.frameBlurCommits = append(w.desktop.frameBlurCommits, w.commitNativeEdits)
+							}
+							if startModeOf(*entry) == startTask {
+								kit.Help(c, m.ManagedTaskArgsHint)
+							}
+						})
+					})
 				}
 			})
 		})
-		native.Divider(c).Margin(2, 0)
-		w.nativeSchedule(c, m, entry)
+	})
+}
+
+type programNameEditor struct {
+	text  string
+	dirty bool
+}
+
+// Only user edits write back; a replaced program refreshes an untouched field.
+// Keep an empty rename in the field rather than persisting an unnamed entry.
+func (w *MainWindow) nativeProgramName(c *native.Context, m i18n.Messages, entry *config.ManagedAppEntry, handle *native.Handle) {
+	box := native.Column(c).FillWidth()
+	state := native.Local(box, "name", func() programNameEditor { return programNameEditor{text: entry.Name} })
+	commit := func() {
+		if !state.dirty {
+			return
+		}
+		if name := strings.TrimSpace(state.text); name != "" {
+			state.dirty = false
+			if name != entry.Name {
+				entry.Name = name
+				w.save()
+			}
+		}
+	}
+	w.desktop.frameNumberCommits = append(w.desktop.frameNumberCommits, commit)
+	box.Children(func() {
+		input := native.TextInput(c, &state.text).FillWidth().Label(m.ProgramName).Bind(handle)
+		if input.Changed() {
+			state.dirty = true
+		}
+		if strings.TrimSpace(state.text) == "" {
+			input.Error(m.ProgramNameRequired)
+		}
+		if input.Submitted() {
+			commit()
+		} else if !input.Focused() {
+			w.desktop.frameBlurCommits = append(w.desktop.frameBlurCommits, commit)
+		}
+		if !state.dirty && !input.Focused() {
+			state.text = entry.Name
+		}
 	})
 }
 
@@ -81,9 +119,9 @@ func (w *MainWindow) nativeProgramActions(c *native.Context, m i18n.Messages, en
 	if windowBusy {
 		windowLabel = m.ManagedWindowBusy
 	}
-	actionLabel, actionIcon, actionHint := m.ManagedLaunchNow, playIcon, m.ManagedLaunchNowHint
+	actionLabel, actionIcon, actionHint := m.ManagedLaunchNow, icons.Play, m.ManagedLaunchNowHint
 	if running {
-		actionLabel, actionIcon, actionHint = m.ManagedStopProgram, stopIcon, m.ManagedStopProgramHint
+		actionLabel, actionIcon, actionHint = m.ManagedStopProgram, icons.Square, m.ManagedStopProgramHint
 	}
 	if busy {
 		actionLabel = m.ManagedLaunchNowBusy
@@ -92,14 +130,9 @@ func (w *MainWindow) nativeProgramActions(c *native.Context, m i18n.Messages, en
 		}
 	}
 	// Live actions remain separate from (and independent of) startup settings.
-	native.Row(c).Gap(8).Disabled(busy || windowBusy).Children(func() {
-		var action native.Element
-		if running {
-			action = nativeAction(c, actionLabel, actionIcon)
-		} else {
-			action = nativePrimaryAction(c, actionLabel, actionIcon)
-		}
-		if action.Tooltip(actionHint).Clicked() {
+	native.Row(c).FillWidth().Gap(8).Wrap().Children(func() {
+		action := nativeAction(c, actionLabel, actionIcon)
+		if action.Disabled(busy || windowBusy).Tooltip(actionHint).Clicked() {
 			w.commitNativeEdits()
 			if w.launchNowBusy == nil {
 				w.launchNowBusy = make(map[string]bool)
@@ -113,124 +146,124 @@ func (w *MainWindow) nativeProgramActions(c *native.Context, m i18n.Messages, en
 				w.callbacks.OnLaunchNow(*entry)
 			}
 		}
-		if nativeAction(c, windowLabel, programIconSVG).Tooltip(m.ManagedWindowHint).Clicked() && w.callbacks.OnSetProgramWindowVisible != nil {
+		if nativeAction(c, windowLabel, icons.PanelTop).Disabled(busy || windowBusy).Tooltip(m.ManagedWindowHint).Clicked() && w.callbacks.OnSetProgramWindowVisible != nil {
 			if w.programWindowBusy == nil {
 				w.programWindowBusy = make(map[string]bool)
 			}
 			w.programWindowBusy[entry.ID] = true
 			w.callbacks.OnSetProgramWindowVisible(*entry, !visible)
 		}
+		// Keep confirmation bound to the selected ID even if the list reorders.
+		id := entry.ID
+		kit.Button(c, m.ManagedColumnDelete, icons.Trash2, false).Label(m.ManagedColumnDelete + " " + entry.Name).Menu(func(menu *native.Menu) {
+			menu.Item(fmt.Sprintf(m.RemoveConfirmPrompt, strings.ReplaceAll(entry.Name, "&", "&&"))).Disabled(true)
+			menu.Separator()
+			if menu.Item(m.RemoveConfirmLabel).Chosen() {
+				w.desktop.removeID = id
+			}
+		})
 	})
 }
 
 func (w *MainWindow) nativeStartMode(c *native.Context, m i18n.Messages, entry *config.ManagedAppEntry) {
 	mode := startModeOf(*entry)
-	script := shouldDefaultLaunchHidden(entry.ExePath)
-	choices := []struct {
-		mode startMode
-		text string
-	}{
-		{startToTray, m.ManagedAutoHide}, {startHidden, m.ManagedLaunchHidden},
-		{startTask, m.ManagedTaskLaunch}, {startNormal, m.ManagedLaunchOnly},
+	current := strconv.Itoa(int(mode))
+	choices := []kit.SelectOption{{Value: "0", Label: m.ManagedAutoHide}, {Value: "1", Label: m.ManagedLaunchHidden}, {Value: "2", Label: m.ManagedTaskLaunch}, {Value: "3", Label: m.ManagedLaunchOnly}}
+	if shouldDefaultLaunchHidden(entry.ExePath) {
+		choices = choices[1:2]
 	}
-	// A two-column radio group preserves native arrow-key selection and fits
-	// complete English labels without making the editor or page scroll.
-	native.RadioGroup(c, func() {
-		for row := 0; row < 2; row++ {
-			native.Row(c).Gap(8).Children(func() {
-				for _, choice := range choices[row*2 : row*2+2] {
-					native.Row(c).Grow(1).Basis(0).Padding(4, 8).Radius(4).Background(c.Theme().Background).Disabled(script && choice.mode != startHidden).Children(func() {
-						if native.Radio(c, &mode, choice.mode, choice.text).Changed() {
-							mode.applyTo(entry)
-							w.save()
-						}
-					})
+	kit.Stack(c, m.ManagedModeLabel, "", func() {
+		native.Row(c).FillWidth().Children(func() {
+			native.Box(c).Shrink(1).MinWidth(0).Children(func() {
+				if kit.Segmented(c, &current, choices, m.ManagedModeLabel) {
+					choice, _ := strconv.Atoi(current)
+					startMode(choice).applyTo(entry)
+					w.save()
 				}
 			})
-		}
-	}).Gap(4).Label(m.ManagedModeLabel)
-	hint := m.ManagedLaunchOnlyHint
-	switch mode {
-	case startToTray:
-		hint = m.ManagedAutoHideTip
-	case startHidden:
-		hint = m.ManagedLaunchHiddenHint
-	case startTask:
-		hint = m.ManagedTaskLaunchTip
-	}
-	nativeHint(c, hint)
+		})
+	}).Padding(6, 16)
 	if mode == startToTray {
-		native.Row(c).Gap(8).Children(func() {
-			native.Text(c, m.ManagedCloseDelay).Tooltip(m.ManagedCloseDelayHint)
-			w.nativeNumber(c, &entry.TrayBehavior.CloseDelaySeconds, 0, 600, m.ManagedCloseDelay)
-			native.Text(c, m.SecondsUnit).TextColor(c.Theme().TextMuted)
-			nativeHelp(c, m.ManagedCloseDelayHint)
+		kit.Indented(c, func() {
+			w.nativeNumberRow(c, m.ManagedCloseDelay, m.ManagedCloseDelayHint, &entry.TrayBehavior.CloseDelaySeconds, 0, 600)
 		})
 	}
 	if config.IsWeChatExecutable(entry.ExePath) {
-		// Hidden launches cannot provide a login UI; keep the saved choice.
-		native.Row(c).Gap(8).Disabled(mode == startHidden).Children(func() {
-			if native.Checkbox(c, &entry.WeChatAutoLogin, m.ManagedWeChatAutoLogin).Tooltip(m.ManagedWeChatAutoLoginHint).Changed() {
-				w.save()
-			}
-			nativeHelp(c, m.ManagedWeChatAutoLoginHint)
-		})
+		if kit.Toggle(c, &entry.WeChatAutoLogin, m.ManagedWeChatAutoLogin, m.ManagedWeChatAutoLoginHint).MinHeight(40).Padding(6, 16).Disabled(mode == startHidden).Changed() {
+			w.save()
+		}
 	}
 }
 
 func (w *MainWindow) nativeSchedule(c *native.Context, m i18n.Messages, entry *config.ManagedAppEntry) {
-	gap := float32(8)
-	if _, height := c.Size(); height < 800 {
-		gap = 4
-	}
-	native.Column(c).Gap(gap).Children(func() {
-		if native.Checkbox(c, &entry.Schedule.Enabled, m.ManagedSchedule).FontWeight(500).Tooltip(m.ManagedScheduleHint).Changed() {
+	plan := &entry.Schedule
+	kit.Group(c, icons.CalendarClock, m.ScheduleTitle, "", func() {
+		if kit.Toggle(c, &plan.Enabled, m.ManagedSchedule, "").MinHeight(40).Padding(6, 16).Changed() {
 			w.save()
 		}
-		if !entry.Schedule.Enabled {
-			nativeHint(c, m.ManagedScheduleOffHint)
-			return
-		}
-		// Timing stays editable when sign-in startup is paused. Labels above
-		// the real NumberInputs leave enough room for both steppers.
-		native.Row(c).Gap(16).AlignItems(native.Start).Children(func() {
-			native.Column(c).Grow(1).Basis(0).Children(func() {
-				native.Field(c, m.ManagedScheduleStart, func() {
-					w.nativeNumber(c, &entry.Schedule.StartDelayMinutes, 0, 1440, m.ManagedScheduleStart)
+		if plan.Enabled {
+			kit.Indented(c, func() {
+				// Pair related values so an expanded schedule fits beside the
+				// list at the same window size as the application settings.
+				native.Row(c).FillWidth().Children(func() {
+					w.nativeScheduleNumber(c, m.ManagedScheduleStart, m.ManagedScheduleRangeHint, &plan.StartDelayMinutes, 0, 1440)
+					w.nativeScheduleNumber(c, m.ManagedScheduleExit, m.ManagedScheduleRangeHint, &plan.AutoExitMinutes, 0, 1440)
 				})
 			})
-			native.Column(c).Grow(1).Basis(0).Children(func() {
-				native.Field(c, m.ManagedScheduleExit, func() {
-					w.nativeNumber(c, &entry.Schedule.AutoExitMinutes, 0, 1440, m.ManagedScheduleExit)
-				})
-			})
-		})
-		if _, height := c.Size(); height >= 800 {
-			nativeHint(c, m.ManagedScheduleRangeHint)
 		}
-		if native.Checkbox(c, &entry.Schedule.FrequencyEnabled, m.ManagedFrequency).Tooltip(m.ManagedFrequencyHint).Changed() {
+		hint := ""
+		if !plan.Enabled {
+			hint = m.ScheduleRequired
+		}
+		if kit.Toggle(c, &plan.FrequencyEnabled, m.ManagedFrequency, hint).MinHeight(40).Padding(6, 16).Disabled(!plan.Enabled).Tooltip(m.ManagedFrequencyHint).Changed() {
 			w.save()
 		}
-		if entry.Schedule.FrequencyEnabled {
-			native.Row(c).Gap(8).Children(func() {
-				w.nativeNumber(c, &entry.Schedule.FrequencyDays, 1, 365, m.ManagedFrequencyDays)
-				native.Text(c, m.ManagedFrequencyDays)
-				w.nativeNumber(c, &entry.Schedule.FrequencyRuns, 1, 1000, m.ManagedFrequencyRuns)
-				native.Text(c, m.ManagedFrequencyRuns)
+		if plan.Enabled && plan.FrequencyEnabled {
+			kit.Indented(c, func() {
+				native.Row(c).FillWidth().Children(func() {
+					w.nativeScheduleNumber(c, m.FrequencyDaysLabel, m.ManagedFrequencyHint, &plan.FrequencyDays, 1, 365)
+					w.nativeScheduleNumber(c, m.FrequencyRunsLabel, m.ManagedFrequencyHint, &plan.FrequencyRuns, 1, 1000)
+				})
 			})
-			if _, height := c.Size(); height >= 800 {
-				nativeHint(c, m.ManagedFrequencyHint)
-			}
 		}
 	})
 }
 
-// Tooltip content is also the accessible label; Tab can reach the help even
-// when a compact window cannot display a long explanation alongside a field.
-func nativeHelp(c *native.Context, hint string) {
-	native.Toolbar(c, func() {
-		native.Button(c, "").Label(hint).Tooltip(hint).Padding(4).Children(func() {
-			native.Icon(c, helpIcon).Size(16, 16).TextColor(c.Theme().TextMuted)
-		})
-	}).Padding(0)
+func (w *MainWindow) nativeScheduleNumber(c *native.Context, label, hint string, value *int, low, high int) {
+	field := native.Row(c).Basis(0).Grow(1).Padding(6, 16).Gap(8).AlignItems(native.Center).Tooltip(hint)
+	handle := native.Local(field, "field-handle", func() native.Handle { return native.Handle{} })
+	field.Children(func() {
+		if kit.Label(c, label).Basis(0).Grow(1).Clicked() {
+			handle.Focus()
+		}
+		w.nativeNumber(c, value, low, high, label, handle).Width(80)
+	})
+}
+
+func (w *MainWindow) nativeNumberRow(c *native.Context, label, hint string, value *int, low, high int) {
+	nativeInputField(c, label, "", false, func(handle *native.Handle) { w.nativeNumber(c, value, low, high, label, handle) }).Tooltip(hint)
+}
+
+// Clicking a field caption focuses its input.
+func nativeInputField(c *native.Context, label, hint string, stacked bool, control func(*native.Handle)) native.Element {
+	var field native.Element
+	if stacked {
+		field = native.Column(c).FillWidth().Padding(12, 16).Gap(8)
+	} else {
+		field = native.Row(c).FillWidth().MinHeight(kit.RowMinHeight).Padding(10, 16).GapX(16).GapY(8).AlignItems(native.Center).Wrap()
+	}
+	handle := native.Local(field, "field-handle", func() native.Handle { return native.Handle{} })
+	return field.Children(func() {
+		text := kit.Label(c, label)
+		if !stacked {
+			text.Basis(220).Grow(1).Shrink(1)
+		}
+		if text.Clicked() {
+			handle.Focus()
+		}
+		control(handle)
+		if hint != "" {
+			kit.Help(c, hint)
+		}
+	})
 }

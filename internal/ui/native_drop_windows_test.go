@@ -131,6 +131,9 @@ func TestNativeDropCommitsPendingEditor(t *testing.T) {
 	if err := tt.Click("Program 000"); err != nil {
 		t.Fatal(err)
 	}
+	if err := tt.Click(i18n.For("zh-CN").MoreSettings); err != nil {
+		t.Fatal(err)
+	}
 	label := i18n.For("zh-CN").ManagedAppArgs
 	if err := tt.Click(label); err != nil {
 		t.Fatal(err)
@@ -156,5 +159,31 @@ func TestNativeEmptyDropIsNoOp(t *testing.T) {
 	w.nativeDropPaths(nil)
 	if !reflect.DeepEqual(before, w.Settings()) || w.desktop.selected != -1 {
 		t.Fatal("empty drop changed the list or selection")
+	}
+}
+
+func TestNativeDropOnChangeReplacesOnlyTargetProgram(t *testing.T) {
+	w := nativeProgramsFixture(2)
+	tt := native.NewTester(w.nativeView, 1200, 850)
+	if err := tt.Click("Program 001"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.Click(i18n.For("zh-CN").MoreSettings); err != nil {
+		t.Fatal(err)
+	}
+	first := w.settings.ManagedApps[0]
+	secondID := w.settings.ManagedApps[1].ID
+	label := i18n.For("zh-CN").BrowseProgram + " Program 001"
+	button, ok := tt.Find(label)
+	if !ok {
+		t.Fatal("change control is missing")
+	}
+	path := droppedTestFile(t, t.TempDir(), "replacement.cmd")
+	if !tt.DropFiles(button.X+button.W/2, button.Y+button.H/2, path) {
+		t.Fatal("change control did not accept the file")
+	}
+	apps := w.settings.ManagedApps
+	if len(apps) != 2 || apps[0] != first || apps[1].ID != secondID || apps[1].ExePath != path || apps[1].Name != "replacement" || !apps[1].LaunchHiddenInBackground {
+		t.Fatalf("drop did not replace only the target: %+v", apps)
 	}
 }

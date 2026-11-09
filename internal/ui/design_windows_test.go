@@ -15,55 +15,45 @@ import (
 // Use the production view and real text shaping: a string appearing in the
 // accessibility tree alone does not prove that it fits on the screen.
 func TestDesktopFullEditorAndSingleLineRowsFit(t *testing.T) {
-	for _, language := range []string{"zh-CN", "en-US"} {
+	for _, lang := range []string{"zh-CN", "en-US"} {
 		for _, dark := range []bool{false, true} {
-			for _, size := range [][2]int{{1124, 680}, {1184, 811}, {1440, 950}} {
-				t.Run(fmt.Sprintf("%s/dark=%t/%dx%d", language, dark, size[0], size[1]), func(t *testing.T) {
+			for _, size := range [][2]int{{mainWindowMinWidth, mainWindowMinHeight}, {1440, 950}} {
+				t.Run(fmt.Sprintf("%s/%t/%d", lang, dark, size[0]), func(t *testing.T) {
 					w := nativeProgramsFixture(16)
-					w.settings.Language, w.settings.RunAtLogon = language, false
+					w.settings.Language = lang
 					entry := &w.settings.ManagedApps[0]
 					entry.Name = "A long program name that gives width to the startup action"
-					entry.ExePath = `C:\Programs\Weixin.exe`
-					entry.TrayBehavior.CloseDelaySeconds = 600
-					entry.Schedule.Enabled, entry.Schedule.FrequencyEnabled = true, true
-					m := i18n.For(language)
-					action := i18n.FormatManagedParam(language, *entry)
-					var actionWidth, actionHeight float32
-					tt := native.NewTester(func(c *native.Context) {
-						w.nativeView(c)
-						actionWidth, actionHeight = c.MeasureText(0, native.Span{Text: action})
-					}, size[0], size[1])
+					entry.ExePath = "C:/Programs/Weixin.exe"
+					entry.Schedule.Enabled = true
+					entry.Schedule.FrequencyEnabled = true
+					m := i18n.For(lang)
+					tt := native.NewTester(w.nativeView, size[0], size[1])
 					tt.SetDark(dark)
 					if err := tt.Click(entry.Name); err != nil {
 						t.Fatal(err)
 					}
 					footer, _ := tt.Find(m.ExitApp)
-					labels := []string{m.ManagedLaunchNow, m.HostedShowWindow, m.ManagedEnabled, m.ManagedWeChatAutoLogin, m.ManagedCloseDelay, m.ManagedAppArgs, m.ManagedScheduleStart, m.ManagedScheduleExit, m.ManagedFrequencyDays, m.ManagedFrequencyRuns}
-					if size[1] >= 800 {
-						labels = append(labels, m.ManagedFrequencyHint)
-					}
-					for _, label := range labels {
+					x, y := float32(size[0]-100), float32(size[1]-150)
+					for _, label := range []string{m.ManagedLaunchNow, m.HostedShowWindow, m.ManagedEnabled, m.ManagedWeChatAutoLogin, m.ManagedCloseDelay, m.ManagedScheduleStart, m.ManagedScheduleExit, m.FrequencyDaysLabel, m.FrequencyRunsLabel} {
 						r, ok := tt.Find(label)
-						if !ok || r.W <= 0 || r.H <= 0 || r.X < 0 || r.X+r.W > float32(size[0])+1 || r.Y+r.H > footer.Y-10 {
-							t.Errorf("editor control clipped: %q = %+v, footer=%+v", label, r, footer)
+						if !ok || r.W == 0 || r.H == 0 || r.X < 0 || r.X+r.W > float32(size[0])+1 || r.Y+r.H > footer.Y {
+							t.Fatalf("clipped %s: %+v", label, r)
 						}
 					}
-					r, found := tt.Find(action)
-					if !found || r.W+0.5 < actionWidth || absFloat(r.H-actionHeight) > 1 {
-						t.Errorf("longest action was shortened or wrapped: rect=%+v text=%vx%v", r, actionWidth, actionHeight)
+					tt.Scroll(x, y, 0, -3000)
+					if err := tt.Click(m.MoreSettings); err != nil {
+						t.Fatal(err)
 					}
-					name, _ := tt.Find(entry.Name)
-					if name.H > 52 || r.Y < name.Y || r.Y+r.H > name.Y+name.H {
-						t.Errorf("program no longer occupies one line: row=%+v action=%+v", name, r)
+					revealNativeControl(t, tt, m.ManagedAppArgs, x, y)
+					if r, _ := tt.Find(m.ExitApp); r != footer {
+						t.Fatal("editor moved footer")
 					}
-					// Every row action must stay to the left of the inspector.
-					editor, _ := tt.Find(m.ManagedEnabled)
-					remove, _ := tt.Find(m.ManagedColumnDelete + " " + entry.Name)
-					if remove.W < 32 || remove.X+remove.W >= editor.X {
-						t.Errorf("action width pushed deletion into the inspector: %+v editor=%+v", remove, editor)
+					captureNativeTest(t, tt, fmt.Sprintf("editor-%s-%t-%d-info", lang, dark, size[0]))
+					if err := tt.Click(m.CommonSettings); err != nil {
+						t.Fatal(err)
 					}
 					tt.Move(-1, -1)
-					captureNativeTest(t, tt, fmt.Sprintf("redesign-%s-%t-%d", language, dark, size[0]))
+					captureNativeTest(t, tt, fmt.Sprintf("editor-%s-%t-%d", lang, dark, size[0]))
 				})
 			}
 		}
@@ -82,6 +72,9 @@ func TestNativeGripReorderCancellationAndPersistence(t *testing.T) {
 			}
 			tt := native.NewTester(w.nativeView, 1200, 850)
 			if err := tt.Click("Program 003"); err != nil {
+				t.Fatal(err)
+			}
+			if err := tt.Click(m.MoreSettings); err != nil {
 				t.Fatal(err)
 			}
 			if err := tt.Click(m.ManagedAppArgs); err != nil {

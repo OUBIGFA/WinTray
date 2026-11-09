@@ -74,7 +74,7 @@ func TestBackgroundWindowBuildsLatestSettingsOnFirstOpen(t *testing.T) {
 					w.desktop.selected = 0
 				})
 				time.Sleep(100 * time.Millisecond)
-				step(func() { capture("live-programs"); w.onSettingsPage = true })
+				step(func() { capture("live-programs"); w.desktop.pageTab = 1 })
 				time.Sleep(100 * time.Millisecond)
 				step(func() {
 					capture("live-settings")
@@ -86,7 +86,7 @@ func TestBackgroundWindowBuildsLatestSettingsOnFirstOpen(t *testing.T) {
 				w.ShowMainWindow()
 				time.Sleep(100 * time.Millisecond)
 				step(func() {
-					if w.desktop.window == nil || !w.desktop.window.IsVisible() || w.onSettingsPage {
+					if w.desktop.window == nil || !w.desktop.window.IsVisible() || w.desktop.pageTab != 0 {
 						t.Error("reopen did not restore programs page")
 					}
 					if saved != 1 {

@@ -31,7 +31,7 @@ func TestNativeListScrollKeepsPageFixed(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := i18n.For("zh-CN")
-	labels := []string{m.AddProgram, m.OpenSettings, m.ManagedLaunchNow, m.ExitApp}
+	labels := []string{m.AddProgram, m.SettingsTab, m.ManagedLaunchNow, m.ExitApp}
 	before := make(map[string]native.Rect)
 	for _, label := range labels {
 		r, ok := tt.Find(label)
@@ -112,9 +112,10 @@ func TestNativePausedProgramCanEditFullSchedule(t *testing.T) {
 	for _, field := range []struct{ label, value string }{
 		{m.ManagedScheduleStart, "17"},
 		{m.ManagedScheduleExit, "43"},
-		{m.ManagedFrequencyDays, "7"},
-		{m.ManagedFrequencyRuns, "3"},
+		{m.FrequencyDaysLabel, "7"},
+		{m.FrequencyRunsLabel, "3"},
 	} {
+		revealNativeControl(t, tt, field.label, 1000, 650)
 		if err := tt.Click(field.label); err != nil {
 			t.Fatal(err)
 		}
@@ -269,6 +270,9 @@ func TestNativeDeleteColumnRemovesAfterConfirmation(t *testing.T) {
 				w.callbacks.OnSave = func(config.Settings) { saved++ }
 				tt := native.NewTester(w.nativeView, 1200, 850)
 				m := i18n.For(language)
+				if err := tt.Click("Program 000"); err != nil {
+					t.Fatal(err)
+				}
 				if err := tt.Click(m.ManagedColumnDelete + " Program 000"); err != nil {
 					t.Fatal(err)
 				}
@@ -315,7 +319,7 @@ func TestNativeProgramColumnsAndControlsFit(t *testing.T) {
 				// Check actual horizontal geometry, not text traversal order.
 				editor, _ := tt.Find(m.ManagedEnabled)
 				lastRight := float32(0)
-				for _, title := range []string{m.ManagedColumnName, m.TrayBoxHomeTitle, m.ManagedColumnRule, m.ManagedColumnOrder, m.ManagedColumnDelete} {
+				for _, title := range []string{m.ManagedColumnName, m.TrayColumn, m.ReplaceColumn, m.ManagedColumnOrder} {
 					header, ok := tt.Find(title)
 					if !ok || header.X < lastRight || header.W < 16 || header.X+header.W >= editor.X {
 						t.Fatalf("column %q overlaps or is out of order: %+v, previous right=%v editor=%+v", title, header, lastRight, editor)
@@ -336,7 +340,7 @@ func TestNativeProgramColumnsAndControlsFit(t *testing.T) {
 				tt.Key(0, native.KeyEscape)
 				deleteLabel := m.ManagedColumnDelete + " Program 001"
 				remove, ok := tt.Find(deleteLabel)
-				if !ok || remove.W < 32 || remove.X+remove.W >= editor.X {
+				if !ok || remove.W < 32 || remove.X < editor.X {
 					t.Fatalf("delete action is clipped: %+v", remove)
 				}
 				if err := tt.Click(deleteLabel); err != nil {
@@ -347,6 +351,7 @@ func TestNativeProgramColumnsAndControlsFit(t *testing.T) {
 				}
 				tt.CloseMenu()
 				for _, number := range []string{"1", "10"} {
+					revealNativeControl(t, tt, number, 180, 550)
 					digit, ok := tt.Find(number)
 					header, _ := tt.Find(m.ManagedColumnOrder)
 					if !ok || absFloat(digit.X+digit.W/2-header.X-header.W/2) > 1 {
@@ -383,12 +388,9 @@ func TestNativeClosingCommitsEditedNumber(t *testing.T) {
 		t.Fatal(err)
 	}
 	label := i18n.For("zh-CN").ManagedCloseDelay
-	// The label and field share accessible text; the field follows the label.
-	r, ok := tt.Find(label)
-	if !ok {
-		t.Fatal("close-delay label missing")
+	if err := tt.Click(label); err != nil {
+		t.Fatal(err)
 	}
-	tt.ClickAt(r.X+r.W+24, r.Y+r.H/2)
 	tt.Key(native.Ctrl, native.KeyA)
 	tt.Type("45")
 	w.commitNativeEdits()
@@ -399,78 +401,59 @@ func TestNativeClosingCommitsEditedNumber(t *testing.T) {
 
 func TestNativeFullPagesFitWithoutPageScroll(t *testing.T) {
 	for _, lang := range []string{"zh-CN", "en-US"} {
-		t.Run(lang, func(t *testing.T) {
-			w := nativeProgramsFixture(10)
-			w.settings.Language = lang
-			w.settings.RunAtLogon = false
-			w.settings.ManagedApps[0].Schedule.Enabled = true
-			w.settings.ManagedApps[0].Schedule.FrequencyEnabled = true
-			tt := native.NewTester(w.nativeView, 1200, 850)
-			if err := tt.Click("Program 000"); err != nil {
-				t.Fatal(err)
-			}
-			m := i18n.For(lang)
-			check := func(labels ...string) {
-				for _, label := range labels {
-					r, ok := tt.Find(label)
-					if !ok || r.X < 0 || r.Y < 0 || r.X+r.W > 1201 || r.Y+r.H > 851 {
-						t.Errorf("%q clipped: %+v found=%t", label, r, ok)
-					}
-				}
-			}
-			captureNativeTest(t, tt, lang+"-full-programs")
-			check(m.OpenSettings, m.ManagedFrequencyHint, m.ExitApp, m.RunSilently)
-			tt.SetSize(1184, 811)
-			remove, ok := tt.Find(m.ManagedColumnDelete + " Program 000")
-			footer, _ := tt.Find(m.ExitApp)
-			if !ok || remove.W <= 0 || remove.Y+remove.H > footer.Y {
-				t.Errorf("list row overlaps footer with window chrome: delete=%+v footer=%+v", remove, footer)
-			}
-			if err := tt.Click(m.OpenSettings); err != nil {
-				t.Fatal(err)
-			}
-			captureNativeTest(t, tt, lang+"-settings")
-			check(m.RunAtLogon, m.CleanupRestore, m.ExitApp, m.BackToPrograms)
-			tt.SetSize(1040, 680)
-			for _, label := range []string{m.CleanupRestore, m.ExitApp} {
-				r, ok := tt.Find(label)
-				if !ok || r.Y+r.H > 680 {
-					t.Errorf("small settings clips %s: %+v", label, r)
-				}
-			}
-			if err := tt.Click(m.BackToPrograms); err != nil {
-				t.Fatal(err)
-			}
-			for _, label := range []string{m.ManagedFrequencyRuns, m.ExitApp} {
-				r, ok := tt.Find(label)
-				if !ok || r.Y+r.H > 680 {
-					t.Errorf("small programs clips %s: %+v", label, r)
-				}
-			}
-		})
+		w := nativeProgramsFixture(10)
+		w.settings.Language = lang
+		w.settings.ManagedApps[0].Schedule.Enabled = true
+		w.settings.ManagedApps[0].Schedule.FrequencyEnabled = true
+		m := i18n.For(lang)
+		tt := native.NewTester(w.nativeView, 1200, 850)
+		if err := tt.Click("Program 000"); err != nil {
+			t.Fatal(err)
+		}
+		footer, _ := tt.Find(m.ExitApp)
+		tabs, _ := tt.Find(m.SettingsTab)
+		revealNativeControl(t, tt, m.FrequencyRunsLabel, 1000, 650)
+		if r, _ := tt.Find(m.ExitApp); r != footer {
+			t.Fatal("detail scroll moved footer")
+		}
+		if r, _ := tt.Find(m.SettingsTab); r != tabs {
+			t.Fatal("detail scroll moved page tabs")
+		}
+		captureNativeTest(t, tt, lang+"-timing-scrolled")
+		if err := tt.Click(m.SettingsTab); err != nil {
+			t.Fatal(err)
+		}
+		tt.SetSize(mainWindowMinWidth, mainWindowMinHeight)
+		revealNativeControl(t, tt, m.CleanupRestore, 950, 520)
+		captureNativeTest(t, tt, lang+"-startup-scrolled")
+		if err := tt.Click(m.ProgramsTab); err != nil {
+			t.Fatal(err)
+		}
+		if w.desktop.selected != 0 {
+			t.Fatal("page navigation lost selected program")
+		}
 	}
 }
 
-// A framework migration must still expose both pages and the actions on them.
 func TestNativePagesKeepExistingActions(t *testing.T) {
 	settings := config.DefaultSettings()
 	w := &MainWindow{settings: settings}
 	tt := native.NewTester(w.nativeView, 1200, 850)
 	m := i18n.For("zh-CN")
-	for _, label := range []string{m.AddProgram, m.OpenSettings, m.ExitApp, m.RunSilently} {
+	for _, label := range []string{m.AddProgram, m.SettingsTab, m.ExitApp, m.RunSilently} {
 		if !tt.HasText(label) {
 			t.Errorf("missing action %q", label)
 		}
 	}
-	if err := tt.Click(m.OpenSettings); err != nil {
+	if err := tt.Click(m.SettingsTab); err != nil {
 		t.Fatal(err)
 	}
-	for _, label := range []string{m.RunAtLogon, m.StartHidden, m.ExitOnDone, m.OpenLogs, m.RemoveLogonTask, m.CleanupRestore, m.BackToPrograms} {
+	for _, label := range []string{m.RunAtLogon, m.StartHidden, m.ExitOnDone, m.OpenLogs, m.RemoveLogonTask, m.CleanupRestore, m.ProgramsTab} {
 		if !tt.HasText(label) {
 			t.Errorf("missing setting %q", label)
 		}
 	}
-	if err := tt.Click(m.BackToPrograms); err != nil {
+	if err := tt.Click(m.ProgramsTab); err != nil {
 		t.Fatal(err)
 	}
 	if !tt.HasText(m.AddProgram) {

@@ -18,6 +18,9 @@ func TestNativeDeleteMenuKeepsProgramIdentityAcrossReorder(t *testing.T) {
 	w.settings.ManagedApps[1].Name = "Same name"
 	tt := native.NewTester(w.nativeView, 1200, 850)
 	m := i18n.For(w.settings.Language)
+	if err := tt.Click("Same name"); err != nil {
+		t.Fatal(err)
+	}
 	if err := tt.Click(m.ManagedColumnDelete + " Same name"); err != nil {
 		t.Fatal(err)
 	}
@@ -38,9 +41,14 @@ func TestNativeDeleteKeepsAnotherProgramsSelection(t *testing.T) {
 	if err := tt.Click("Program 002"); err != nil {
 		t.Fatal(err)
 	}
+	if err := tt.Click("Program 000"); err != nil {
+		t.Fatal(err)
+	}
 	if err := tt.Click(m.ManagedColumnDelete + " Program 000"); err != nil {
 		t.Fatal(err)
 	}
+	w.desktop.selected = 2
+	tt.Frame()
 	if err := tt.ChooseMenuItem(m.RemoveConfirmLabel); err != nil {
 		t.Fatal(err)
 	}
@@ -69,6 +77,9 @@ func TestNativeDeleteRestoresCollectedIconBeforeRemovingEntry(t *testing.T) {
 			w.callbacks.OnSave = func(config.Settings) { saves++ }
 			tt := native.NewTester(w.nativeView, 1200, 850)
 			m := i18n.For(w.settings.Language)
+			if err := tt.Click("Program 000"); err != nil {
+				t.Fatal(err)
+			}
 			if err := tt.Click(m.ManagedColumnDelete + " Program 000"); err != nil {
 				t.Fatal(err)
 			}
@@ -97,6 +108,9 @@ func TestNativeDeleteLastProgramShowsEmptyEditor(t *testing.T) {
 	w.callbacks.OnLaunchNow = func(config.ManagedAppEntry) { t.Error("empty editor launched a program") }
 	tt := native.NewTester(w.nativeView, 1200, 850)
 	m := i18n.For(w.settings.Language)
+	if err := tt.Click("Program 000"); err != nil {
+		t.Fatal(err)
+	}
 	if err := tt.Click("Program 000"); err != nil {
 		t.Fatal(err)
 	}

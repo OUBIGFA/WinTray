@@ -17,10 +17,12 @@ import (
 )
 
 func TestNativeCloseHonorsWindowCloseCapability(t *testing.T) {
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
 	for _, mode := range []string{"enabled", "disabled", "removed", "no menu", "disabled window"} {
 		t.Run(mode, func(t *testing.T) {
+			// t.Run uses a separate goroutine. Pin the window's actual owner,
+			// so PeekMessage and DestroyWindow run on the thread that created it.
+			runtime.LockOSThread()
+			defer runtime.UnlockOSThread()
 			style := uint32(win.WS_OVERLAPPEDWINDOW)
 			if mode == "no menu" {
 				style = win.WS_POPUP

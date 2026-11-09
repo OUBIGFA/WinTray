@@ -3,7 +3,6 @@
 package startup
 
 import (
-	"encoding/binary"
 	"os"
 	"path/filepath"
 	"slices"
@@ -13,25 +12,12 @@ import (
 )
 
 func TestRunHelperPreservesInheritedDirectoryAndOriginalArguments(t *testing.T) {
-	self, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	image, err := os.ReadFile(self)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The harmless report fixture has no console or persistent process.
-	pe := int(binary.LittleEndian.Uint32(image[0x3c:]))
-	binary.LittleEndian.PutUint16(image[pe+24+68:], 2)
 	dir := filepath.Join(t.TempDir(), "Legacy app with spaces")
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	target := filepath.Join(dir, "legacy.exe")
-	if err := os.WriteFile(target, image, 0700); err != nil {
-		t.Fatal(err)
-	}
+	buildLaunchReporter(t, target)
 	reportPath := filepath.Join(dir, "report.json")
 	wantArgs := []string{"/onboot", "--profile=original profile"}
 	// Match the logon task's working directory, deliberately different from

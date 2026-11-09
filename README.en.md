@@ -6,256 +6,184 @@
 
 **A Windows tool for startup window management and background launches**
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![Platform: Windows 10 / 11](https://img.shields.io/badge/platform-Windows%2010%2F11-lightgrey.svg)
-![Go 1.27.1](https://img.shields.io/badge/Go-1.27.1-00ADD8.svg)
-
 English | [简体中文](README.md)
 
 </div>
 
-## Introduction
-
-WinTray starts selected programs when you sign in to Windows. It can close their windows or run scripts in the background. In this guide, startup means startup after Windows sign-in.
-
-- **Close to tray**: Closes program windows. Programs that support closing to the tray keep running. WinTray provides tray icons for console programs.
-- **Run in background**: Starts with the console hidden. Use **Show Window** to view output and enter commands.
-- **Tray icon**: Moves selected programs' tray icons into the WinTray menu. This feature requires Windows 11.
-- **Tray icon recovery**: If WinTray is force-closed, restores the original icons of programs that are still running.
-- **Launch at boot**: Uses a scheduled task at sign-in, with the original startup arguments and privileges when available.
-- **Custom timing**: Sets a start delay, an automatic exit time, and a limit on automatic launches.
-- **Wait before closing**: Waits until the program has run for the specified time before closing its window.
-
-![WinTray program list and program settings](image/01.png)
-
-![WinTray settings page](image/02.png)
+WinTray starts programs, closes their windows, or runs background scripts when you sign in to Windows. In this guide, startup means startup after Windows sign-in.
 
 ## Download and use
 
-WinTray is available as a portable package. It does not need installation.
+Download one of these files from [Releases](../../releases).
 
-1. Download the latest `WinTray-Portable.zip` from [Releases](../../releases).
-2. Extract the archive to a folder you intend to keep.
-3. Run `WinTray.exe`.
-4. Select **Add Program**, or drag programs or scripts from File Explorer into the program list on the left; you can add several at once.
-5. Select a mode under **How it starts**, as described below. Scripts always use **Run in background**.
-6. Make sure **Start this program at sign-in** is selected for the program.
-7. Select **More Features** at the top right of the main window to open **Settings**.
-8. Make sure **Run WinTray at sign-in** is enabled.
+| Version | File | How to open |
+| --- | --- | --- |
+| Installed | `WinTray-Setup.exe` | Run the installer, then open WinTray from the Start menu |
+| Portable | `WinTray-Portable.zip` | Extract the complete archive, then run `WinTray.exe` |
 
-After the settings are saved, use **Launch Now** to check the launch behavior. WinTray does not start another instance if the program is already running. Check automatic startup at the next Windows sign-in.
+1. In **Programs**, select **Add Program**, or drag program files into the list. You can add several files at once.
+2. Select a program.
+3. In **Startup & schedule**, turn on **Start this program at sign-in**.
+4. Select a mode under **How it starts**.
+5. In **Settings**, turn on **Start at sign-in**.
+6. Use **Launch Now** to check the launch behavior. Check automatic startup at the next Windows sign-in.
 
-Click the delete icon at the end of a program's row, then select **Confirm** to remove it from the list. The program file is kept.
+Changes save automatically. For names, arguments, and numbers, press `Enter` or leave the field to save.
 
-Settings and logs are stored in your user data directory. Before deleting WinTray, follow [Stop using WinTray](#stop-using-wintray) to restore the original startup entries.
+## Program management
 
-## Supported program types
-
-| Type | File extension | Default mode when added | Requirements |
-| --- | --- | --- | --- |
-| Executable | `.exe` | Close to tray | You can select another mode. Graphical programs must support continued operation after their window closes |
-| Batch script | `.bat` / `.cmd` | Run in background | Uses Windows `cmd.exe` |
-| PowerShell script | `.ps1` | Run in background | Uses `powershell.exe` |
-| Python script | `.py` / `.pyw` | Run in background | `python.exe` / `pythonw.exe` must be available through `PATH` |
-| AutoHotkey script | `.ahk` | Run in background | Install AutoHotkey and check that double-clicking the script runs it |
-
-Scripts always use **Run in background** and cannot use tray collection. Install the interpreter and packages that each script requires.
-
-You can drag only the file types in the table into the list. If WinTray runs as administrator, use **Add Program**. To drag files, run WinTray without administrator rights.
-
-If an application has several `.exe` files, select the file that displays its main window. A launcher or updater might not match the main window.
-
-## Per-program settings
-
-### How it starts
-
-Select **Start this program at sign-in** to edit the launch mode and arguments.
-
-| Mode | Behavior and use |
+| Action | Method |
 | --- | --- |
-| Close to tray | Closes the window after launch. Use for programs that support closing to the tray, or console programs that need a tray icon |
-| Run in background | Starts with the console hidden. Use **Show Window** to open it. For scripts and command-line tools. Graphical windows created by the program can still appear |
-| Launch at boot | Uses a scheduled task at sign-in and preserves supported original startup settings. For `.exe` files only |
-| Start normally | Uses the program's original startup when available. Otherwise, WinTray starts the program. The window stays unchanged |
+| Edit the name or arguments | Select the program, then open **Program details** |
+| Change the program file | Click the folder icon in the **Change** column, or drag one file onto that icon |
+| Change the start order | Drag the icon on the left of the program row, or select an **Order** number. Press `Esc` to cancel a drag |
+| Stop a program | Select the running program, then select **Stop Program** |
+| Show or hide a window | Select the running program, then select **Show Window** or **Hide Window** |
+| Remove a program | Select the program, select **Delete**, then select **Confirm**. The program file is kept |
 
-**Arguments** are optional. WinTray uses these arguments when it starts the program directly. When it uses an original startup entry, that entry supplies the arguments.
+Drag the divider between the list and details to change their widths. In a narrow window, the list appears above the details.
 
-Clear **Start this program at sign-in** to stop normal startup scheduling. The program's original startup is kept or restored. **Launch Now** then uses normal launch behavior. An enabled **Custom timing** schedule still starts the program.
+## Supported files
 
-### Show or hide a window
+| File | Default mode | Requirement |
+| --- | --- | --- |
+| `.exe` | Close to tray | Select the file that displays the main window, not an updater |
+| `.bat` / `.cmd` | Run in background | Windows `cmd.exe` |
+| `.ps1` | Run in background | Windows PowerShell |
+| `.py` / `.pyw` | Run in background | `python.exe` / `pythonw.exe` available through `PATH` |
+| `.ahk` | Run in background | Install AutoHotkey and check that double-clicking the script runs it |
 
-1. Select a running program in the list on the left.
-2. Select **Show Window** below the program name on the right.
-3. Select **Hide Window** in the same position to hide it again.
+Scripts always use **Run in background**. Install the script dependencies first. If WinTray runs as administrator, use **Add Program** to select files.
 
-Use the native console to view output, scroll through its history, and enter commands. Showing or hiding the window does not change the startup mode. Closing the console window can end the program.
+## Launch modes
 
-The program must still be running and have a native window. For `.pyw`, only a graphical window created by the script can be shown. Console output is not retained after the program exits.
+Select a mode in **Startup & schedule**.
 
-Exit programs started in the background by an older WinTray, then launch them with the new version. Previously discarded output cannot be recovered.
+| Mode | Behavior |
+| --- | --- |
+| Close to tray | Closes the window after launch. Graphical programs must support closing to the tray, or they can exit |
+| Run in background | Hides the console window. Use for scripts and command-line tools. Graphical windows created by the program can still appear |
+| Launch at boot | Uses a scheduled task at sign-in. For `.exe` files only. Prefers the original startup arguments, privileges, and delay |
+| Start normally | Uses the program's original startup when available. Otherwise, WinTray starts it. The window stays unchanged |
 
-### Close to tray and wait before closing
+WinTray uses the arguments in **Program details** when it starts the program directly. An original startup entry supplies its own arguments.
 
-WinTray closes the program window after **Wait before closing** expires. Use the program's tray icon to open the window again.
+Turn off **Start this program at sign-in** to stop normal startup scheduling. Original startup is kept or restored. **Launch Now** then uses normal mode. An enabled **Custom timing** schedule still starts the program.
 
-- **Range**: 0–600 seconds. The default is 0 seconds, which closes the window immediately.
-- **Start of the wait**: The time when the target process was created. This also applies when the program starts through its own startup entry.
-- **Program sign-in**: Except when **WeChat auto login** is enabled for WeChat, set the wait longer than the actual sign-in time. Use **Start normally** if manual sign-in is required.
-- **Esc handling**: Tries `Esc` first. If the program disables **Close** and does not respond to `Esc`, the window stays open.
-- **Window limits**: A window can briefly appear or take focus during startup. Pinned taskbar shortcuts remain visible. Graphical programs that do not support closing to the tray can exit.
+### Close to tray
 
-Select **Close to tray** for console programs such as `syncthing.exe` and `frpc.exe` to give them a WinTray-hosted tray icon. Left-click the icon to show or hide the window. Right-click it to show the window, hide it, stop hosting and show it, or quit the program.
+**Wait before closing (sec)** accepts 0–600 seconds. The default is 0. The wait starts when the target process is created. A value of 0 closes the window immediately.
 
-### WeChat auto login
+- For programs with a sign-in window, such as QQ, set the wait longer than the sign-in process. Use **Start normally** if manual sign-in is required.
+- If the program disables **Close** and does not respond to `Esc`, the window stays open. A window can briefly appear or take focus during startup.
+- For console programs such as `syncthing.exe` and `frpc.exe`, WinTray provides a tray icon. Left-click it to show or hide the window. Use its right-click menu to quit the program.
 
-Select `Weixin.exe` or `WeChat.exe` to show **WeChat auto login**. The option is off by default and unavailable in **Run in background** mode.
+### Background windows
 
-WinTray clicks the login button automatically. With **Close to tray**, it waits for the WeChat main window before closing it. Scan the QR code or confirm on your phone when required. If login is not confirmed within 30 seconds, the login window stays open.
+Use **Show Window** to read console output and enter commands. Closing the console window can end the program. Output is not retained after the program exits.
 
-### Tray collection
-
-Select **Tray icon** in the program list to move the program's existing tray icons into WinTray's right-click menu. This feature requires Windows 11 and an `.exe` file.
-
-- Collected icons no longer appear in the system tray or its `^` panel.
-- Click a program icon in the WinTray menu to open the program window.
-- Right-click a program row to open the program's own tray menu.
-- Clear **Tray icon**, or exit WinTray normally, to restore the original icons.
+For `.pyw`, only a graphical window created by the script can be shown. Exit and relaunch programs started in the background by an older WinTray. Previously discarded output cannot be recovered.
 
 ### Launch at boot
 
-WinTray selects a scheduled task according to the program's existing startup entries:
+WinTray reuses an available scheduled task at sign-in. The task keeps its original privileges and delay.
 
-| Original startup | WinTray behavior |
+For a supported current-user registry entry or Startup-folder shortcut, WinTray temporarily disables the original entry to prevent duplicate launches. If no original entry exists, WinTray creates a task from the current settings. Windows requests confirmation when administrator privileges are required.
+
+New tasks start when WinTray and the desktop are ready. If a launch delay is set, new tasks use that delay.
+
+WinTray restores original startup when you disable this mode without a launch limit, remove the program, or disable WinTray startup. It also restores original startup when you turn off **Start this program at sign-in** without **Custom timing**.
+
+### WeChat auto login
+
+Select `Weixin.exe` or `WeChat.exe` to use **WeChat auto login**. It is off by default and unavailable in **Run in background** mode.
+
+WinTray clicks the login button. Scan the QR code or confirm on your phone when required. With **Close to tray**, WinTray waits for the main window before closing it. If login is not confirmed within 30 seconds, the login window stays open.
+
+## Timing
+
+In **Startup & schedule**, turn on **Custom timing**.
+
+| Setting | Range | Default |
+| --- | --- | --- |
+| Launch delay (min) | 0–1440 minutes from Windows sign-in | 0; start immediately |
+| Automatic exit (min) | 0–1440 minutes from process creation | 30; set to 0 to disable automatic exit |
+| Limit automatic launches | 1–1000 launches in the last 1–365 calendar days | Off; 1 launch in 1 day when enabled |
+
+Automatic startup requires **Start at sign-in**. **Custom timing** starts the program even when **Start this program at sign-in** is off. Turn off **Custom timing** to disable all three settings in the table.
+
+Automatic exit ends the program and its child processes. It also applies to manually started programs. Save your work before the time limit.
+
+The launch limit applies only to automatic startup. **Launch Now** and manual launches are not limited. Days use the computer's time zone and include today. One day starts at today's midnight. Restarting does not clear the history.
+
+When the limit is enabled, WinTray takes over the `.exe` program's original startup and checks the count before launch. When the limit is disabled, WinTray restores startup for the current launch mode. Scripts can use the limit, but WinTray cannot take over a script's external startup.
+
+## Tray collection
+
+Turn on **Tray** in the program list to move the program's existing tray icons into the WinTray menu. This requires Windows 11 and an `.exe` file.
+
+- In the WinTray tray menu, click a program icon to open its window. Right-click its row to open the program's own tray menu.
+- Turn off **Tray**, or exit WinTray normally, to restore the original icons.
+- If WinTray is force-closed, it restores the original icons of programs that are still running.
+
+## Settings
+
+| Group | Purpose |
 | --- | --- |
-| An available scheduled task at sign-in | Reuses the task with its original arguments, privileges, and delay |
-| A supported current-user registry entry or Startup-folder shortcut | Keeps the original startup settings and temporarily disables the original entry to prevent duplicate launches |
-| No original startup entry | Creates a task with the program path and arguments configured in WinTray |
+| Sign-in | Set WinTray startup, hide its main window at sign-in, or exit after sign-in tasks finish |
+| Timing | **Launch interval (seconds)**: default 3, range 0–120. **Window wait limit (seconds)**: default 10, range 0–120 |
+| Troubleshooting | Open logs, remove the WinTray sign-in task, or reset all data |
 
-New tasks start when WinTray and the desktop are ready and do not use the delay between programs. If **Custom timing** specifies a start delay, new tasks use that delay.
+The launch interval applies only to programs that WinTray starts automatically. A value of 0 means no wait. It does not apply to **Launch at boot**, original startup entries, or **Launch Now**.
 
-Windows requests confirmation when a new task requires administrator privileges. After the settings are saved successfully, **Launch Now** runs the same registered task so you can check its behavior.
+WinTray keeps running while tray collection, background windows, or console tray icons are in use. It also stays running while a program waits for automatic exit.
 
-If setup fails, follow the error message and save the settings again, or use **Start normally**.
+Select **Run silently** to hide the main window. WinTray keeps its own tray icon when tray collection or background windows are in use. Otherwise, it hides that icon. Run `WinTray.exe` again to open the main window.
 
-When this mode and the launch limit are both off, WinTray removes the replacement task and restores the original entry's state. This also happens when you disable the program's startup while **Custom timing** is off, remove it from the list, or disable WinTray startup.
+**Exit WinTray** attempts to restore hidden windows and waits up to 2 seconds. You may need to restart a program whose window cannot be restored.
 
-### Custom timing
+## User data
 
-Select **Custom timing** to use these settings.
+For the same Windows user, the installed and portable versions share `%LOCALAPPDATA%\WinTray`. Both read the existing settings without migration.
 
-| Setting | Range | Default | When it applies |
-| --- | --- | --- | --- |
-| Start delay (**Start…min after sign-in**) | 0–1440 minutes | 0 minutes | Requires **Run WinTray at sign-in** and **Custom timing**. 0 starts at sign-in |
-| Automatic exit (**Quit after…min**) | 0–1440 minutes | 30 minutes | Applies when **Custom timing** is on. 0 disables automatic exit |
-| Limit automatic launches | 1–1000 launches in the last 1–365 calendar days, including today | Off; 1 launch in 1 day when enabled | Requires **Run WinTray at sign-in** and **Custom timing** |
-
-The start delay begins at Windows sign-in. Original startup entries that WinTray has not taken over keep their own schedule. Tasks that WinTray reuses directly keep their original delay.
-
-The run time for automatic exit starts when the target process is created. At the configured time limit, WinTray ends the program and its child processes. This also applies to manually started programs. Clearing **Start this program at sign-in** does not disable an enabled **Custom timing** schedule.
-
-The launch limit applies only to automatic launches at sign-in. Manual launches and **Launch Now** are not limited. Days follow the computer's system time zone and include today: 1 day starts at today's local midnight, 2 days at yesterday's local midnight, and so on.
-
-Restarting does not clear the history; records from earlier versions are also counted by calendar day. Start delays and automatic exit still use elapsed minutes.
-
-When the limit is enabled, WinTray takes over the `.exe` program's original startup and checks the count before launch. When the limit is disabled, WinTray restores the startup arrangement for the current launch mode. If this change fails, WinTray reports an error. Windows requests confirmation when administrator privileges are required.
-
-Scripts started by WinTray can use the limit. WinTray cannot take over a script's external startup entry to apply the limit.
-
-Clear **Custom timing** to disable the start delay, automatic exit, and launch limit.
-
-### Launch interval
-
-**Launch interval (seconds)** in **Settings** sets the minimum interval between programs that WinTray starts automatically. The default is 3 seconds. The range is 0–120 seconds; 0 means no wait.
-
-Drag the grip on the left of a program row, or select a number in its **Order** list, to change the start order. Press `Esc` during a drag to cancel.
-
-This interval does not apply to **Launch at boot**, programs started by their own startup entries, or **Launch Now**.
-
-## Common use cases
-
-These examples require **Run WinTray at sign-in**. **Custom timing** can start a program without selecting **Start this program at sign-in**.
-
-| Scenario | Configuration |
-| --- | --- |
-| Close WeChat or DingTalk to the tray after launch | Add the main `.exe` and select **Close to tray**. Make sure the program supports closing to the tray |
-| Close the new QQ to the tray after sign-in | Add `QQ.exe` and select **Close to tray**. Set **Wait before closing** longer than the actual sign-in time |
-| Give console programs such as syncthing or frpc a tray icon | Add the `.exe` and select **Close to tray** |
-| Run tunnel or crawler scripts in the background | Add the script and use **Run in background**. Install its dependencies first |
-| Start an administrator tool through a scheduled task at sign-in | Add the `.exe` and select **Launch at boot**. Confirm task privileges when prompted |
-
-## Keep WinTray running or exit
-
-When **Exit WinTray when sign-in tasks finish** is off, WinTray keeps its own tray icon. **Don't show the WinTray window at sign-in** controls whether the main window appears after sign-in.
-
-When automatic exit is enabled, WinTray continues running while any of these conditions apply:
-
-- A program has tray collection enabled.
-- A program still uses a background window.
-- A console program still uses a tray icon provided by WinTray.
-- A running program is waiting for its automatic exit time.
-
-Select **Run silently** at the bottom of **Settings** or in the tray menu to hide the main window. WinTray keeps its own tray icon while tray collection or background windows are in use. Otherwise, it hides that icon. Hosted console icons remain available. Run `WinTray.exe` again to open the main window.
-
-Selecting **Exit WinTray** attempts to restore hidden windows and waits up to 2 seconds for cleanup. If a window cannot be restored, you may need to restart that program.
-
-## System requirements
-
-| Item | Requirement |
-| --- | --- |
-| Operating system | Windows 10 / 11; tray collection requires Windows 11 |
-| WinTray runtime | No additional runtime installation |
-| Script environment | The required interpreter and script dependencies |
-| Build from source | Windows and Go 1.27.1 or later; packaging also requires Visual Studio C++ Build Tools (x86/x64 tools and Windows SDK) |
-
-## Data directory
-
-| Data | Path |
+| Data | File |
 | --- | --- |
 | Configuration | `%LOCALAPPDATA%\WinTray\settings.json` |
 | Startup recovery backup | `%LOCALAPPDATA%\WinTray\startup-migrations.json` |
-| Runtime log | `%LOCALAPPDATA%\WinTray\wintray.log` |
+| Log | `%LOCALAPPDATA%\WinTray\wintray.log` |
 
-## Stop using WinTray
+The installer puts program files in `%LOCALAPPDATA%\Programs\WinTray` by default. Uninstalling keeps user data.
 
-To stop WinTray from starting at sign-in, disable **Run WinTray at sign-in** in **Settings**. WinTray removes its own startup entries and replacement program tasks. The programs' original startup entries are kept or restored.
+## Update and uninstall
 
-Before deleting WinTray, complete these steps. **Reset… clears WinTray settings and logs.**
+Before updating, select **Exit WinTray**. For the installed version, run the new installer. For the portable version, extract the complete new archive into the existing program folder and replace the files.
 
-1. Select **More Features** in the WinTray main window to open **Settings**.
-2. Under **Troubleshooting**, select **Reset…**.
-3. Confirm the reset.
-4. Wait for cleanup to finish and WinTray to exit.
-5. Move the WinTray program folder to the Recycle Bin.
+| Action | Steps |
+| --- | --- |
+| Stop WinTray startup | In **Settings**, turn off **Start at sign-in**. Original program startup is kept or restored |
+| Uninstall the installed version | Exit WinTray, then run **Uninstall** from the WinTray folder in the Start menu. Uninstalling restores original startup |
+| Delete the portable version | Disable WinTray startup, exit WinTray, then move the program folder to the Recycle Bin |
+| Clear user data | In **Settings → Troubleshooting**, select **Reset…**. Confirm, then wait for WinTray to exit. This clears settings and logs |
 
-If the original startup cannot be restored, follow the error message and try again. Keep the startup recovery backup in the data directory until restoration succeeds.
+If original startup cannot be restored, follow the error message and retry. Keep the startup recovery backup until restoration succeeds.
 
-## FAQ
+## Troubleshooting
 
-### How do I open settings when there is no main window?
+- **Main window is missing**: Left-click the WinTray tray icon, or run `WinTray.exe` again.
+- **Program is not closed to the tray**: Enable WinTray startup, the program's startup, and **Close to tray**. If the window appears slowly, increase **Window wait limit (seconds)**.
+- **QQ cannot sign in or exits**: Increase **Wait before closing (sec)**, or use **Start normally**.
+- **Problem continues**: In **Settings → Troubleshooting**, select **Open Logs**.
 
-Left-click the WinTray tray icon. If the icon is not visible, run `WinTray.exe` again.
+When WinTray detects original startup, it waits for Windows to start the program. It does not launch another instance after a timeout or when the program is already running. Detection covers registry `Run` entries, Startup-folder shortcuts, and supported scheduled tasks at sign-in.
 
-Select **More Features** in the main window to open **Settings**.
+## System requirements
 
-### What if the new QQ fails to sign in or exits?
-
-QQ can exit if its sign-in window receives a close request too early. Set **Wait before closing** longer than the actual sign-in time, then check the result. Use **Start normally** if manual sign-in is required.
-
-### Can original startup and WinTray start the same program twice?
-
-When WinTray identifies an enabled original startup entry, it waits for Windows to start the program. It does not start another instance if that wait times out. If the program is already running, WinTray does not start it again.
-
-Detection covers registry `Run` entries, including `HKCU`, `HKLM`, and 32-bit entries. It also covers Startup-folder shortcuts and supported scheduled tasks at sign-in.
-
-### What should I check if a program is not closed to the tray?
-
-1. Make sure **Run WinTray at sign-in** is enabled.
-2. Make sure **Start this program at sign-in** is selected for the program.
-3. Make sure **Close to tray** is selected.
-4. Make sure the selected `.exe` displays the main window.
-5. If the window appears slowly, increase **Window wait limit (seconds)**. The default is 10 seconds; the range is 0–120 seconds.
-6. If the problem continues, select **Open Logs** to check the cause.
+| Use | Requirement |
+| --- | --- |
+| Run WinTray | Windows 10 / 11; no additional runtime. Tray collection requires Windows 11 |
+| Run scripts | The required interpreter and script dependencies |
+| Build and package | Windows, Go 1.27.3 or later, Visual Studio C++ Build Tools (x86/x64 tools and Windows SDK), and NSIS 3 |
 
 ## License
 
-This project uses the [MIT License](LICENSE).
+[MIT License](LICENSE)

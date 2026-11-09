@@ -23,10 +23,6 @@ func TestFrequencyLiveRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(self)
-	if err != nil {
-		t.Fatal(err)
-	}
 	user, err := windows.GetCurrentProcessToken().GetTokenUser()
 	if err != nil {
 		t.Fatal(err)
@@ -35,9 +31,7 @@ func TestFrequencyLiveRoundTrip(t *testing.T) {
 		t.Run(fmt.Sprintf("native_%t", native), func(t *testing.T) {
 			dir := t.TempDir()
 			target := filepath.Join(dir, "frequency-helper.exe")
-			if err := os.WriteFile(target, data, 0o700); err != nil {
-				t.Fatal(err)
-			}
+			buildLaunchReporter(t, target)
 			name := fmt.Sprintf("WinTrayFrequencyTest-%d-%d", os.Getpid(), time.Now().UnixNano())
 			tasks := &AppTasks{userSID: user.User.Sid.String(), selfExe: self, namePrefix: name + "-", statePath: filepath.Join(dir, "migration.json"), run: runSchtasks, findEntries: func(string) ([]startupEntry, error) { return nil, nil }}
 			settings := frequencySettings(t, target)

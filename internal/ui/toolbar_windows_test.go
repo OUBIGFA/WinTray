@@ -20,14 +20,16 @@ func TestNativeToolbarKeepsTitleLeftAndActionsRight(t *testing.T) {
 					w.settings.Language = language
 					tt := native.NewTester(w.nativeView, size[0], size[1])
 					m := i18n.For(language)
-					settings, hasSettings := tt.Find(m.OpenSettings)
+					settingsTab, hasSettings := tt.Find(m.SettingsTab)
 					languageButton, hasLanguage := tt.Find(m.LanguageLabel)
 					title, hasTitle := tt.Find(m.ManagedListTitle)
-					if !hasTitle || !hasSettings || !hasLanguage || title.X > 32 || settings.X < title.X+title.W || languageButton.X < settings.X+settings.W {
-						t.Fatalf("header does not separate title and actions: title=%+v settings=%+v language=%+v", title, settings, languageButton)
+					// Settings is a page tab below the header, even when the tray
+					// action uses the same localized label.
+					if !hasTitle || !hasSettings || settingsTab.Y < title.Y+title.H || !hasLanguage || title.X > 32 || languageButton.X < title.X+title.W {
+						t.Fatalf("header does not separate title and actions: title=%+v language=%+v", title, languageButton)
 					}
-					if absFloat(settings.Y+settings.H/2-languageButton.Y-languageButton.H/2) > 1 || size[0]-int(languageButton.X+languageButton.W) > 32 {
-						t.Fatalf("language switch is not aligned at the right: settings=%+v language=%+v", settings, languageButton)
+					if absFloat(title.Y+title.H/2-languageButton.Y-languageButton.H/2) > 1 || size[0]-int(languageButton.X+languageButton.W) > 32 {
+						t.Fatalf("language switch is not aligned at the right: title=%+v language=%+v", title, languageButton)
 					}
 					tt.Move(-1, -1)
 					assertLanguageGlyphCentered(t, tt, languageButton)
@@ -82,16 +84,16 @@ func TestNativeToolbarSettingsAndLanguageActions(t *testing.T) {
 		}
 	}
 	m := i18n.For("zh-CN")
-	if err := tt.Click(m.OpenSettings); err != nil {
+	if err := tt.Click(m.SettingsTab); err != nil {
 		t.Fatal(err)
 	}
-	if !w.onSettingsPage {
+	if w.desktop.pageTab != 1 {
 		t.Fatal("settings button did not open settings")
 	}
-	if err := tt.Click(m.BackToPrograms); err != nil {
+	if err := tt.Click(m.ProgramsTab); err != nil {
 		t.Fatal(err)
 	}
-	if _, hasTitle := tt.Find(m.WindowTitle); hasTitle || !tt.HasText(m.OpenSettings) || w.onSettingsPage {
+	if _, hasTitle := tt.Find(m.WindowTitle); hasTitle || !tt.HasText(m.SettingsTab) || w.desktop.pageTab != 0 {
 		t.Fatal("returning from settings retained the removed toolbar title or lost the more-features action")
 	}
 }
