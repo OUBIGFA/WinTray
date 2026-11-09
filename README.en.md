@@ -12,6 +12,10 @@ English | [简体中文](README.md)
 
 WinTray starts programs, closes their windows, or runs background scripts when you sign in to Windows. In this guide, startup means startup after Windows sign-in.
 
+![WinTray program management](image/01.png)
+
+![WinTray settings page](image/02.png)
+
 ## Download and use
 
 Download one of these files from [Releases](../../releases).

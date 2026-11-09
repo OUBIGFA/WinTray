@@ -12,6 +12,10 @@
 
 WinTray 在登录 Windows 后启动程序、收起窗口或运行后台脚本。本文中的“开机启动”均指登录 Windows 后启动。
 
+![WinTray 程序管理界面](image/01.png)
+
+![WinTray 设置页](image/02.png)
+
 ## 下载与使用
 
 从 [Releases](../../releases) 下载以下文件之一。
