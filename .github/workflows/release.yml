@@ -43,6 +43,4 @@ jobs:
           fail_on_unmatched_files: true
           files: |
             publish/WinTray-Portable.zip
-            publish/WinTray-Portable.sha256
             publish/WinTray-Setup.exe
-            publish/WinTray-Setup.sha256
