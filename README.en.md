@@ -32,13 +32,13 @@ Download one of these files from [Releases](../../releases).
 5. In **Settings**, turn on **Start at sign-in**.
 6. Use **Launch Now** to check the launch behavior. Check automatic startup at the next Windows sign-in.
 
-Changes save automatically. For names, arguments, and numbers, press `Enter` or leave the field to save.
+Changes save automatically. For names, arguments, working directories, and numbers, press `Enter` or leave the field to save.
 
 ## Program management
 
 | Action | Method |
 | --- | --- |
-| Edit the name or arguments | Select the program, then open **Program details** |
+| Edit the name, arguments, or working directory | Select the program, then open **Program details** |
 | Change the program file | Click the folder icon in the **Change** column, or drag one file onto that icon |
 | Change the start order | Drag the icon on the left of the program row, or select an **Order** number. Press `Esc` to cancel a drag |
 | Stop a program | Select the running program, then select **Stop Program** |
@@ -70,7 +70,7 @@ Select a mode in **Startup & schedule**.
 | Launch at boot | Uses a scheduled task at sign-in. For `.exe` files only. Prefers the original startup arguments, privileges, and delay |
 | Start normally | Uses the program's original startup when available. Otherwise, WinTray starts it. The window stays unchanged |
 
-WinTray uses the arguments in **Program details** when it starts the program directly. An original startup entry supplies its own arguments.
+WinTray uses the arguments and working directory in **Program details** when it starts the program directly or creates a new sign-in task. Enter a working directory or choose a folder. Leave it blank to use the program folder. Relative paths start from that folder. An original startup entry supplies its own arguments and working directory.
 
 Turn off **Start this program at sign-in** to stop normal startup scheduling. Original startup is kept or restored. **Launch Now** then uses normal mode. An enabled **Custom timing** schedule still starts the program.
 

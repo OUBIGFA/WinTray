@@ -11,7 +11,14 @@ import (
 	"syscall"
 	"testing"
 	"time"
+	"wintray/internal/config"
 )
+
+// Existing process fixtures use the default directory unless a test explicitly
+// constructs an entry with launch settings.
+func startProcess(exePath, args string, mode launchMode) (*startedProcess, error) {
+	return startConfiguredProcess(config.ManagedAppEntry{ExePath: exePath, Args: args}, mode)
+}
 
 func TestStartProcess_PreservesWindowsArguments(t *testing.T) {
 	self, err := os.Executable()
@@ -117,6 +124,14 @@ func TestRunnerHelperProcess(t *testing.T) {
 		return
 	}
 	switch os.Args[4] {
+	case "directory":
+		directory, err := os.Getwd()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(os.Args[5], []byte(directory), 0600); err != nil {
+			t.Fatal(err)
+		}
 	case "args":
 		data, err := json.Marshal(os.Args[6:])
 		if err != nil {

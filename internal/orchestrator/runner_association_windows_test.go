@@ -33,7 +33,7 @@ func TestStartProcessAutoHotkeyAssociation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, mode := range []string{"normal", "hidden", "missing", "broken"} {
+	for _, mode := range []string{"normal", "hidden", "custom", "hidden-custom", "missing", "broken"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
@@ -108,7 +108,7 @@ func runAutoHotkeyAssociationTest(t *testing.T, mode string) {
 	}
 	isolatedScriptAssociation(t, command)
 	launch := launchVisible
-	if mode == "hidden" {
+	if strings.HasPrefix(mode, "hidden") {
 		launch = launchNoWindow
 	}
 	want := []string{script, "", "two words", "中文", `say "hello"`}
@@ -116,7 +116,16 @@ func runAutoHotkeyAssociationTest(t *testing.T, mode string) {
 	for _, arg := range want[1:] {
 		quoted = append(quoted, syscall.EscapeArg(arg))
 	}
-	process, err := startProcess(script, strings.Join(quoted, " "), launch)
+	entry := config.ManagedAppEntry{ExePath: script, Args: strings.Join(quoted, " ")}
+	wantDir := dir
+	if strings.Contains(mode, "custom") {
+		wantDir = filepath.Join(dir, "工作 data")
+		if err := os.Mkdir(wantDir, 0700); err != nil {
+			t.Fatal(err)
+		}
+		entry.WorkingDirectory = wantDir
+	}
+	process, err := startConfiguredProcess(entry, launch)
 	if mode == "missing" || mode == "broken" {
 		if process != nil {
 			_ = process.Process.Kill()
@@ -151,11 +160,11 @@ func runAutoHotkeyAssociationTest(t *testing.T, mode string) {
 		t.Fatal(err)
 	}
 	show := uint16(windows.SW_SHOWNORMAL)
-	if mode == "hidden" {
+	if strings.HasPrefix(mode, "hidden") {
 		show = windows.SW_HIDE
 	}
-	if !reflect.DeepEqual(probe.Args, want) || !strings.EqualFold(probe.Dir, dir) || probe.Show != show {
-		t.Fatalf("association lost parameters/directory/show mode: %+v; want args=%q dir=%s show=%d", probe, want, dir, show)
+	if !reflect.DeepEqual(probe.Args, want) || !strings.EqualFold(probe.Dir, wantDir) || probe.Show != show {
+		t.Fatalf("association lost parameters/directory/show mode: %+v; want args=%q dir=%s show=%d", probe, want, wantDir, show)
 	}
 }
 

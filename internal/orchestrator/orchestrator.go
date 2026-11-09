@@ -249,7 +249,7 @@ func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retry
 	var cmd *startedProcess
 	admitted, err := s.launchWithFrequency(entry, opts, func() error {
 		var err error
-		cmd, err = startProcess(entry.ExePath, entry.Args, opts.launchMode())
+		cmd, err = startConfiguredProcess(entry, opts.launchMode())
 		return err
 	})
 	opts.turn.finish(err == nil && admitted)

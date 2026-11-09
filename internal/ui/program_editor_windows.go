@@ -4,6 +4,7 @@ package ui
 
 import (
 	"fmt"
+	"github.com/egoist/mygo"
 	native "github.com/egoist/mygo/ui"
 	"strconv"
 	"strings"
@@ -52,11 +53,37 @@ func (w *MainWindow) nativeEditor(c *native.Context, m i18n.Messages) {
 							}
 							if input.Submitted() {
 								w.commitNativeEdits()
-							} else if !input.Focused() {
+							} else if !input.Focused() && w.desktop.argsDirty {
 								w.desktop.frameBlurCommits = append(w.desktop.frameBlurCommits, w.commitNativeEdits)
 							}
 							if startModeOf(*entry) == startTask {
 								kit.Help(c, m.ManagedTaskArgsHint)
+							}
+						})
+						nativeInputField(c, m.ManagedWorkingDirectory, m.ManagedWorkingDirectoryHint, true, func(handle *native.Handle) {
+							native.Row(c).FillWidth().Gap(8).Children(func() {
+								input := native.TextInput(c, &entry.WorkingDirectory).Grow(1).Shrink(1).MinWidth(0).Label(m.ManagedWorkingDirectory).Bind(handle)
+								if input.Changed() {
+									w.desktop.workingDirectoryDirty = true
+								}
+								if input.Submitted() {
+									w.commitNativeEdits()
+								} else if !input.Focused() && w.desktop.workingDirectoryDirty {
+									w.desktop.frameBlurCommits = append(w.desktop.frameBlurCommits, w.commitNativeEdits)
+								}
+								if kit.Button(c, m.BrowseWorkingDirectory, icons.FolderOpen, false).Shrink(0).Clicked() {
+									w.commitNativeEdits()
+									paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{Parent: w.desktop.window, Title: m.ManagedWorkingDirectory, Directory: true, DefaultPath: entry.LaunchDirectory()})
+									if err != nil {
+										w.ShowError(m.ManagedWorkingDirectory, err.Error())
+									} else if len(paths) > 0 {
+										entry.WorkingDirectory = paths[0]
+										w.save()
+									}
+								}
+							})
+							if startModeOf(*entry) == startTask {
+								kit.Help(c, m.ManagedTaskDirectoryHint)
 							}
 						})
 					})

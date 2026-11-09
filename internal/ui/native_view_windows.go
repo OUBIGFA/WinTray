@@ -22,22 +22,23 @@ import (
 )
 
 type desktopState struct {
-	window             *mygo.Window
-	initialized        bool
-	selected           int
-	list               native.ListState
-	icons              map[string]*native.Bitmap
-	argsDirty          bool
-	numberCommits      []func()
-	frameNumberCommits []func()
-	frameBlurCommits   []func()
-	exitPressed        bool
-	orderOptions       []string
-	pageTab            int
-	detailTab          int
-	detailFor          string
-	split              kit.SplitState
-	removeID           string
+	window                *mygo.Window
+	initialized           bool
+	selected              int
+	list                  native.ListState
+	icons                 map[string]*native.Bitmap
+	argsDirty             bool
+	workingDirectoryDirty bool
+	numberCommits         []func()
+	frameNumberCommits    []func()
+	frameBlurCommits      []func()
+	exitPressed           bool
+	orderOptions          []string
+	pageTab               int
+	detailTab             int
+	detailFor             string
+	split                 kit.SplitState
+	removeID              string
 }
 
 func nativeAction(c *native.Context, label string, icon *native.SVG) native.Element {
@@ -279,8 +280,9 @@ func (w *MainWindow) commitNativeEdits() {
 	for _, commit := range w.desktop.frameNumberCommits {
 		commit()
 	}
-	if w.desktop.argsDirty {
+	if w.desktop.argsDirty || w.desktop.workingDirectoryDirty {
 		w.desktop.argsDirty = false
+		w.desktop.workingDirectoryDirty = false
 		w.save()
 	}
 }

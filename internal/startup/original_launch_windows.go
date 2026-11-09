@@ -29,7 +29,7 @@ func LaunchHiddenStartup(mode, source, exePath string) error {
 		if !filepath.IsAbs(exePath) || !strings.EqualFold(filepath.Ext(exePath), ".exe") {
 			return errors.New("configured startup requires an absolute .exe path")
 		}
-		return shellLaunchOriginal(exePath, source, filepath.Dir(exePath), 0)
+		return shellLaunchOriginal(exePath, source, "", 0)
 	case AppTaskHelperShortcut:
 		link, err := readStartupShortcut(source)
 		if err != nil {
@@ -47,13 +47,13 @@ func LaunchHiddenStartup(mode, source, exePath string) error {
 	return errors.New("unknown startup helper mode")
 }
 
-// LaunchConfigured starts exePath with args from its own folder, as the task
-// did when it launched the program directly.
+// LaunchConfigured inherits the working directory set on the logon task.
+// Old tasks already use the program folder; new ones may select another folder.
 func LaunchConfigured(args, exePath string) error {
 	if !filepath.IsAbs(exePath) || !strings.EqualFold(filepath.Ext(exePath), ".exe") {
 		return errors.New("configured startup requires an absolute .exe path")
 	}
-	return shellLaunchOriginal(exePath, args, filepath.Dir(exePath), 1)
+	return shellLaunchOriginal(exePath, args, "", 1)
 }
 
 // Read the original value at launch, so changes made by the program (including

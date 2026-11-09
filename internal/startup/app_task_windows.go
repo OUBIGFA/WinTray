@@ -198,7 +198,7 @@ func (t *AppTasks) spec(app config.LogonTaskApp) appTaskSpec {
 		appName:    app.Entry.Name,
 		exePath:    app.Entry.ExePath,
 		args:       app.Entry.Args,
-		workingDir: filepath.Dir(app.Entry.ExePath),
+		workingDir: app.Entry.LaunchDirectory(),
 		delay:      app.DelaySeconds,
 		highest:    requiresElevationForLaunch(app.Entry.ExePath),
 		demandOnly: config.StartupFrequencyEnabled(app.Entry),

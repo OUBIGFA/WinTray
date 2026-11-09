@@ -129,12 +129,13 @@ func ScheduledRunLimit(entry ManagedAppEntry) int {
 }
 
 type ManagedAppEntry struct {
-	ID              string `json:"id"`
-	Name            string `json:"name"`
-	ExePath         string `json:"exePath"`
-	Args            string `json:"args"`
-	RunOnStartup    bool   `json:"runOnStartup"`
-	CollectTrayIcon bool   `json:"collectTrayIcon"`
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	ExePath          string `json:"exePath"`
+	Args             string `json:"args"`
+	WorkingDirectory string `json:"workingDirectory,omitempty"`
+	RunOnStartup     bool   `json:"runOnStartup"`
+	CollectTrayIcon  bool   `json:"collectTrayIcon"`
 	// WeChatAutoLogin clicks only a recognized WeChat login button. It is
 	// opt-in; old settings leave it off and other executables ignore it.
 	WeChatAutoLogin bool `json:"wechatAutoLogin"`
@@ -148,6 +149,19 @@ type ManagedAppEntry struct {
 	LaunchHiddenInBackground bool         `json:"launchHiddenInBackground"`
 	TrayBehavior             TrayBehavior `json:"trayBehavior"`
 	Schedule                 Schedule     `json:"schedule"`
+}
+
+// LaunchDirectory keeps old entries in the program folder. Relative paths are
+// anchored there too, so manual launches and logon tasks resolve them alike.
+func (e ManagedAppEntry) LaunchDirectory() string {
+	directory := strings.Trim(strings.TrimSpace(e.WorkingDirectory), `"`)
+	if directory == "" {
+		return filepath.Dir(e.ExePath)
+	}
+	if !filepath.IsAbs(directory) {
+		return filepath.Join(filepath.Dir(e.ExePath), directory)
+	}
+	return filepath.Clean(directory)
 }
 
 // UnmarshalJSON gives entries saved before schedules existed the default run

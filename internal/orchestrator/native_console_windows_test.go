@@ -171,7 +171,13 @@ func TestNativeConsolePreservesOutputInputAndSameWindow(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			entry := config.ManagedAppEntry{ID: kind, Name: kind, ExePath: path, Args: args, RunOnStartup: true, LaunchHiddenInBackground: true}
+			// The service must pass the configured folder to every interpreter,
+			// while preserving native console input, output and window ownership.
+			workingDirectory := filepath.Join(dir, "working data")
+			if err := os.Mkdir(workingDirectory, 0700); err != nil {
+				t.Fatal(err)
+			}
+			entry := config.ManagedAppEntry{ID: kind, Name: kind, ExePath: path, Args: args, WorkingDirectory: workingDirectory, RunOnStartup: true, LaunchHiddenInBackground: true}
 			svc := NewService(NewWin32WindowEnumerator(), NewWin32WindowManager(), &testLogger{})
 			result := svc.StartNow(context.Background(), entry, 0)
 			if result.Hidden == nil || !result.Managed {
@@ -197,7 +203,7 @@ func TestNativeConsolePreservesOutputInputAndSameWindow(t *testing.T) {
 			if !before.InputConsole || !before.OutputConsole || !before.ErrorConsole || !strings.Contains(before.Text, "native stdout before show") || !strings.Contains(before.Text, "native stderr before show") {
 				t.Fatalf("native streams/output lost: %+v", before)
 			}
-			if before.Environment != "inherited environment" || !strings.EqualFold(before.Directory, filepath.Dir(path)) {
+			if before.Environment != "inherited environment" || !strings.EqualFold(before.Directory, workingDirectory) {
 				t.Fatalf("native launch changed directory/environment: %+v", before)
 			}
 			// A fresh service represents reopening WinTray: scripts must resolve

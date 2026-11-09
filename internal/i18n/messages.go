@@ -75,6 +75,10 @@ type Messages struct {
 	ManagedAppArgs                 string
 	ManagedArgsHint                string
 	ManagedArgsPlaceholder         string
+	ManagedWorkingDirectory        string
+	ManagedWorkingDirectoryHint    string
+	BrowseWorkingDirectory         string
+	ManagedTaskDirectoryHint       string
 	ManagedEnabled                 string
 	ManagedEnabledHint             string
 	ManagedModeLabel               string
@@ -256,6 +260,10 @@ var zhCN = Messages{
 	ManagedAppArgs:                 "启动参数（可选）",
 	ManagedArgsHint:                "含空格的参数请用双引号括起",
 	ManagedArgsPlaceholder:         "例如 --minimized",
+	ManagedWorkingDirectory:        "工作目录（可选）",
+	ManagedWorkingDirectoryHint:    "留空使用程序所在目录；相对路径以程序所在目录为起点",
+	BrowseWorkingDirectory:         "选择文件夹…",
+	ManagedTaskDirectoryHint:       "沿用原自启入口时，使用该入口的工作目录",
 	ManagedEnabled:                 "开机启动此程序",
 	ManagedEnabledHint:             "关闭后停止普通开机启动；“自定义时间”和程序原有自启仍可生效",
 	ManagedModeLabel:               "启动方式",
@@ -439,6 +447,10 @@ var enUS = Messages{
 	ManagedAppArgs:                 "Arguments (optional)",
 	ManagedArgsHint:                "Put arguments that contain spaces in double quotes",
 	ManagedArgsPlaceholder:         "Example: --minimized",
+	ManagedWorkingDirectory:        "Working directory (optional)",
+	ManagedWorkingDirectoryHint:    "Leave blank to use the program folder; relative paths start from that folder",
+	BrowseWorkingDirectory:         "Choose folder…",
+	ManagedTaskDirectoryHint:       "An original startup entry supplies its own working directory",
 	ManagedEnabled:                 "Start this program at sign-in",
 	ManagedEnabledHint:             "When off, stops normal sign-in starts; Custom timing and the program's original startup can still run",
 	ManagedModeLabel:               "How it starts",

@@ -49,6 +49,18 @@ func TestProgramWithoutNativeStartupGetsItsOwnLogonTask(t *testing.T) {
 	if err := tasks.Sync(settings, false); err != nil || len(fake.callNames("/Create")) != 1 {
 		t.Fatalf("new arguments were not applied: %v", err)
 	}
+	fake.reset()
+	settings.ManagedApps[0].WorkingDirectory = `D:\工作 data & profile`
+	if err := tasks.Sync(settings, false); err != nil || len(fake.callNames("/Create")) != 1 {
+		t.Fatalf("new working directory was not applied: %v", err)
+	}
+	task = taskDefinition{}
+	if err := decodeTaskXML([]byte(fake.tasks[tasks.namePrefix+"1"]), &task); err != nil {
+		t.Fatal(err)
+	}
+	if task.Actions.Exec[0].WorkingDirectory != `D:\工作 data & profile` {
+		t.Fatalf("task working directory = %q", task.Actions.Exec[0].WorkingDirectory)
+	}
 	if err := tasks.Sync(config.Settings{}, false); err != nil || len(fake.tasks) != 0 {
 		t.Fatalf("disabled startup left a task: %v", err)
 	}

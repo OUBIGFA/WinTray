@@ -45,6 +45,12 @@ func TestDesktopFullEditorAndSingleLineRowsFit(t *testing.T) {
 						t.Fatal(err)
 					}
 					revealNativeControl(t, tt, m.ManagedAppArgs, x, y)
+					for _, label := range []string{m.ManagedWorkingDirectory, m.BrowseWorkingDirectory} {
+						r, ok := tt.Find(label)
+						if !ok || r.W == 0 || r.H == 0 || r.X+r.W > float32(size[0])+1 || r.Y+r.H > footer.Y {
+							t.Fatalf("clipped working directory control %s: %+v", label, r)
+						}
+					}
 					if r, _ := tt.Find(m.ExitApp); r != footer {
 						t.Fatal("editor moved footer")
 					}

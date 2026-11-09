@@ -38,7 +38,7 @@ func isAutoHotkeyScript(path string) bool {
 // Use the user's file association, not a guessed AutoHotkey.exe on PATH. In
 // particular, the v2 launcher selects v1/v2 from the script's requirements.
 // This is an explicit script path, never a fallback for a failed .exe launch.
-func startAssociatedScript(path, args string, hidden bool) (*startedProcess, error) {
+func startAssociatedScript(path, args, workingDirectory string, hidden bool) (*startedProcess, error) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	if hr := win.CoInitializeEx(nil, win.COINIT_APARTMENTTHREADED|win.COINIT_DISABLE_OLE1DDE); hr < 0 {
@@ -53,7 +53,7 @@ func startAssociatedScript(path, args string, hidden bool) (*startedProcess, err
 	if err != nil {
 		return nil, err
 	}
-	directory, err := windows.UTF16PtrFromString(filepath.Dir(path))
+	directory, err := windows.UTF16PtrFromString(workingDirectory)
 	if err != nil {
 		return nil, err
 	}
