@@ -3,7 +3,6 @@
 package traybox
 
 import (
-	"os"
 	"runtime"
 	"slices"
 	"sync"
@@ -216,11 +215,8 @@ func isShown(d trayData) bool {
 	return d.Message == nimModify && d.Flags&nifState != 0 && d.StateMask&nisHidden != 0 && d.State&nisHidden == 0
 }
 
-func TestListenerCollectsSelectedProgramsIcons(t *testing.T) {
-	self, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestListenerCollectsSelectedProgramsIconsThroughJunction(t *testing.T) {
+	self, _ := junctionExecutable(t)
 	f := startFakeShell(t)
 	cfg := listenerConfig{className: "WinTrayTestTray", target: func(win.HWND) win.HWND { return f.target }}
 	l, err := startListener(cfg, "", []string{self}, quietLogger{})

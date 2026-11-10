@@ -75,8 +75,27 @@ func canonicalIconPath(path string) string {
 	if path == "" {
 		return ""
 	}
-	if resolved, err := filepath.EvalSymlinks(path); err == nil {
-		path = resolved
+	// Resolve the opened file, including directory junctions. EvalSymlinks
+	// does not follow mount-point reparse tags on current Go versions, so a
+	// configured junction alias otherwise never matches the process image.
+	// Zero access and full sharing avoid requiring file-read privileges or
+	// blocking an application update while querying its identity.
+	if name, err := windows.UTF16PtrFromString(path); err == nil {
+		h, err := windows.CreateFile(name, 0, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+			nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
+		if err == nil {
+			buf := make([]uint16, windows.MAX_LONG_PATH+1)
+			n, err := windows.GetFinalPathNameByHandle(h, &buf[0], uint32(len(buf)), 0)
+			windows.CloseHandle(h)
+			if err == nil && n < uint32(len(buf)) {
+				path = windows.UTF16ToString(buf[:n])
+				if strings.HasPrefix(path, `\\?\UNC\`) {
+					path = `\\` + path[len(`\\?\UNC\`):]
+				} else {
+					path = strings.TrimPrefix(path, `\\?\`)
+				}
+			}
+		}
 	}
 	return strings.ToLower(filepath.Clean(path))
 }

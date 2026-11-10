@@ -22,6 +22,7 @@ func TestShellBridgeIsolatedReceivingEndpoint(t *testing.T) {
 		t.Run(arch, func(t *testing.T) {
 			shell := startNativeClient(t, nativeClientPath(t, arch), "--shell")
 			client := startNativeClient(t, nativeClientPath(t, arch), "--target", strconv.FormatUint(uint64(shell.hwnd), 10))
+			selected := canonicalIconPath(junctionPath(t, client.path))
 			l, err := startListener(listenerConfig{className: brokerWindowClass, target: func(win.HWND) win.HWND { return shell.hwnd }, native: true}, "", nil, quietLogger{})
 			if err != nil {
 				t.Fatal(err)
@@ -58,10 +59,10 @@ func TestShellBridgeIsolatedReceivingEndpoint(t *testing.T) {
 			if err == nil {
 				t.Fatal("duplicate accepted")
 			}
-			if err := lease.selectPaths([]string{client.path}); err != nil {
+			if err := lease.selectPaths([]string{selected}); err != nil {
 				t.Fatal(err)
 			}
-			if err := l.updatePaths([]string{client.path}); err != nil {
+			if err := l.updatePaths([]string{selected}); err != nil {
 				t.Fatal(err)
 			}
 			if result := client.request(t, win.WM_APP+110, 0, 0); result != 73 || len(l.snapshot()) != 1 {
