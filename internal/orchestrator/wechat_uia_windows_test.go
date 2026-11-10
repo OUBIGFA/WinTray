@@ -25,6 +25,8 @@ var weChatFixtureRendered bool
 var weChatFixtureClicks int
 var weChatFixtureButton win.HWND
 var weChatFixturePressed bool
+var weChatFixtureQQ bool
+var weChatFixtureCloseRequests int
 var weChatFixtureProc = syscall.NewCallback(func(hwnd win.HWND, msg uint32, w, l uintptr) uintptr {
 	switch msg {
 	case win.WM_COMMAND:
@@ -61,14 +63,21 @@ var weChatFixtureProc = syscall.NewCallback(func(hwnd win.HWND, msg uint32, w, l
 		}
 	case win.WM_SYSCOMMAND:
 		if w&0xfff0 == scClose {
+			weChatFixtureCloseRequests++
+			if weChatFixtureQQ && weChatFixtureMode == "retry" && weChatFixtureCloseRequests < 2 {
+				return 0
+			}
 			win.ShowWindow(hwnd, win.SW_HIDE)
 			return 0
 		}
 	case win.WM_APP + 20:
 		return uintptr(weChatFixtureClicks)
 	case win.WM_APP + 21:
+		win.ShowWindow(win.HWND(weChatFixtureWindows.Forms[0]), win.SW_HIDE)
 		win.ShowWindow(win.HWND(weChatFixtureWindows.Forms[1]), win.SW_SHOWNOACTIVATE)
 		return 1
+	case win.WM_APP + 22:
+		return uintptr(weChatFixtureCloseRequests)
 	}
 	return win.DefWindowProc(hwnd, msg, w, l)
 })
@@ -81,11 +90,13 @@ func TestWeChatUIAProcess(t *testing.T) {
 	}
 	runtime.LockOSThread()
 	weChatFixtureMode = os.Args[4]
+	weChatFixtureQQ = strings.HasPrefix(weChatFixtureMode, "qq-")
+	weChatFixtureMode = strings.TrimPrefix(weChatFixtureMode, "qq-")
 	weChatFixtureQt = strings.HasPrefix(weChatFixtureMode, "qt-")
 	weChatFixtureMode = strings.TrimPrefix(weChatFixtureMode, "qt-")
 	weChatFixtureRendered = strings.HasPrefix(weChatFixtureMode, "rendered-")
 	weChatFixtureMode = strings.TrimPrefix(weChatFixtureMode, "rendered-")
-	for _, name := range []string{"WeChatLoginWnd", "mmui::LoginWindow", "WeChatMainWndForPC", "QtTestQWindowIcon", "MMUIRenderSubWindowHW", "WinTrayWeChatPanel"} {
+	for _, name := range []string{"WeChatLoginWnd", "mmui::LoginWindow", "WeChatMainWndForPC", "QtTestQWindowIcon", "MMUIRenderSubWindowHW", "WinTrayWeChatPanel", "Chrome_WidgetWin_1", "narrow-toggler"} {
 		wc := win.WNDCLASSEX{LpfnWndProc: weChatFixtureProc, HInstance: win.GetModuleHandle(nil), LpszClassName: syscall.StringToUTF16Ptr(name)}
 		wc.CbSize = uint32(unsafe.Sizeof(wc))
 		if win.RegisterClassEx(&wc) == 0 {
@@ -99,8 +110,18 @@ func TestWeChatUIAProcess(t *testing.T) {
 	if weChatFixtureQt {
 		loginClass = "mmui::LoginWindow"
 	}
-	login := create(loginClass, "WinTray login test", 0, win.WS_OVERLAPPEDWINDOW)
+	loginTitle := "WinTray login test"
+	if weChatFixtureQQ {
+		loginClass, loginTitle = "Chrome_WidgetWin_1", "QQ"
+	}
+	login := create(loginClass, loginTitle, 0, win.WS_OVERLAPPEDWINDOW)
 	mainClass, mainTitle := "WeChatMainWndForPC", "WinTray main test"
+	if weChatFixtureQQ {
+		mainClass, mainTitle = "Chrome_WidgetWin_1", "QQ"
+		if weChatFixtureMode == "unknown-title" {
+			mainTitle = "QQ login"
+		}
+	}
 	if weChatFixtureRendered {
 		mainClass, mainTitle = "QtTestQWindowIcon", "微信"
 		if weChatFixtureMode == "unknown-title" {
@@ -108,6 +129,13 @@ func TestWeChatUIAProcess(t *testing.T) {
 		}
 	}
 	main := create(mainClass, mainTitle, 0, win.WS_OVERLAPPEDWINDOW)
+	if weChatFixtureQQ && weChatFixtureMode != "unknown" {
+		label := "切换为经典模式"
+		if weChatFixtureMode == "unknown-label" {
+			label = "登录"
+		}
+		create("narrow-toggler", label, main, win.WS_CHILD|win.WS_VISIBLE)
+	}
 	// New clients can expose only a native render surface after login. It
 	// already exists under the hidden main window before login completes.
 	if weChatFixtureRendered && weChatFixtureMode != "no-surface" {
@@ -185,7 +213,7 @@ func TestWeChatNativeLoginAndDismissal(t *testing.T) {
 func testWeChatNativeLoginAndDismissal(t *testing.T, mode string) {
 	t.Helper()
 	entry, file := weChatFixtureEntry(t, mode)
-	svc := NewService(NewWin32WindowEnumerator(), NewWin32WindowManager(), &testLogger{})
+	svc := NewService(NewWin32WindowEnumerator(), NewWin32WindowManager(), &liveEscapeLogger{t})
 	svc.externalStartupLookup = func(string) (string, error) { return "", nil }
 	svc.wechatLogin = func(ctx context.Context, path string) (HiddenWindow, error) {
 		state := awaitStartupFixture(t, file)
@@ -249,6 +277,36 @@ func TestWeChatNativeIncompleteLoginStaysVisible(t *testing.T) {
 func TestWeChatNativeTaskLaunchLogin(t *testing.T) {
 	for _, mode := range []string{"qt-ready", "qt-rendered-ready"} {
 		t.Run(mode, func(t *testing.T) { testWeChatNativeTaskLaunchLogin(t, mode) })
+	}
+}
+
+// Phone confirmation can take longer than the old 30-second deadline. Tray
+// startup must still finish afterward, without the saved 600-second delay.
+func TestWeChatTrayWaitsBeyondLoginDeadline(t *testing.T) {
+	entry, file := weChatFixtureEntry(t, "phone")
+	entry.TrayBehavior.CloseDelaySeconds = 600
+	svc := NewService(NewWin32WindowEnumerator(), NewWin32WindowManager(), &testLogger{})
+	svc.externalStartupLookup = func(string) (string, error) { return "", nil }
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+	defer cancel()
+	done := make(chan Result, 1)
+	go func() { done <- svc.StartAndManage(ctx, entry, 0) }()
+	state := awaitStartupFixture(t, file)
+	select {
+	case result := <-done:
+		t.Fatalf("login observation stopped before confirmation: %+v", result)
+	case <-time.After(31 * time.Second):
+	}
+	if !isWindowVisible(state.Forms[0]) || visibilityOwner(state.Forms[0]) != 0 {
+		t.Fatal("slow login was hidden")
+	}
+	win.SendMessage(win.HWND(state.Owner), win.WM_APP+21, 0, 0)
+	result := <-done
+	if !result.Managed || isWindowVisible(state.Forms[1]) || !svc.IsProgramRunning(entry) {
+		t.Fatalf("late confirmation not dismissed: %+v", result)
+	}
+	if clicks := win.SendMessage(win.HWND(state.Owner), win.WM_APP+20, 0, 0); clicks != 1 {
+		t.Fatalf("slow confirmation caused %d login clicks", clicks)
 	}
 }
 

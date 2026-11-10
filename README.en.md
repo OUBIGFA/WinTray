@@ -78,7 +78,8 @@ Turn off **Start this program at sign-in** to stop normal startup scheduling. Or
 
 **Wait before closing (sec)** accepts 0–600 seconds. The default is 0. The wait starts when the target process is created. A value of 0 closes the window immediately.
 
-- For programs with a sign-in window, such as QQ, set the wait longer than the sign-in process. Use **Start normally** if manual sign-in is required.
+- For QQ, enable **Close after login**. It is off by default and only applies to **Close to tray**. WinTray keeps the login window open, then retries closing the recognized main window to tray. No wait time is required, and WinTray does not click Log in.
+- Other programs continue to use the wait time. For programs that require login, set the wait longer than the login process or select **Start normally**.
 - If the program disables **Close** and does not respond to `Esc`, the window stays open. A window can briefly appear or take focus during startup.
 - For console programs such as `syncthing.exe` and `frpc.exe`, WinTray provides a tray icon. Left-click it to show or hide the window. Use its right-click menu to quit the program.
 
@@ -102,7 +103,9 @@ WinTray restores original startup when you disable this mode without a launch li
 
 Select `Weixin.exe` or `WeChat.exe` to use **WeChat auto login**. It is off by default and unavailable in **Run in background** mode.
 
-WinTray clicks the login button. Scan the QR code or confirm on your phone when required. With **Close to tray**, WinTray waits for the main window before closing it. If login is not confirmed within 30 seconds, the login window stays open.
+WinTray clicks the login button. Scan the QR code or confirm on your phone when required. With **Close to tray**, WinTray keeps waiting for the main window and retries closing it to tray. No wait time is required. Other startup modes wait up to 30 seconds for login.
+
+If the QQ or WeChat main window cannot be recognized, it stays open. Waiting stops after successful closing, program exit, or WinTray exit. Windows you reopen afterward stay open. The program must support closing to its tray.
 
 ## Timing
 

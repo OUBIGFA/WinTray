@@ -102,6 +102,8 @@ type Messages struct {
 	ManagedCloseDelayInvalid       string
 	ManagedWeChatAutoLogin         string
 	ManagedWeChatAutoLoginHint     string
+	ManagedQQWaitForLogin          string
+	ManagedQQWaitForLoginHint      string
 	ManagedSchedule                string
 	ManagedScheduleEnabled         string
 	ManagedScheduleStart           string
@@ -283,10 +285,12 @@ var zhCN = Messages{
 	ManagedAutoHideTip:             "部分程序仍可能短暂闪现界面；没有托盘图标的普通程序可能退出",
 	ManagedAutoHideDelayed:         "收进托盘（等 %d 秒）",
 	ManagedCloseDelay:              "收起前等待（秒）",
-	ManagedCloseDelayHint:          "范围 0–600 秒，从程序启动时计时；QQ 等登录窗口建议 10–15 秒",
+	ManagedCloseDelayHint:          "范围 0–600 秒，从程序启动时计时",
 	ManagedCloseDelayInvalid:       "收起前等待时间必须是 0 到 600 之间的整数",
 	ManagedWeChatAutoLogin:         "微信自动登录",
 	ManagedWeChatAutoLoginHint:     "自动点击登录按钮；需要扫码或手机确认时，请手动完成",
+	ManagedQQWaitForLogin:          "登录成功后收起",
+	ManagedQQWaitForLoginHint:      "等待 QQ 登录成功后收进托盘；不自动点击登录",
 	ManagedSchedule:                "自定义时间",
 	ManagedScheduleEnabled:         "启用",
 	ManagedScheduleStart:           "启动延迟（分钟）",
@@ -470,10 +474,12 @@ var enUS = Messages{
 	ManagedAutoHideTip:             "Some programs may briefly show a window; GUI apps without a tray icon may exit",
 	ManagedAutoHideDelayed:         "Close to tray (after %d s)",
 	ManagedCloseDelay:              "Wait before closing (sec)",
-	ManagedCloseDelayHint:          "Range: 0–600 seconds from program start; use 10–15 seconds for login windows such as QQ",
+	ManagedCloseDelayHint:          "Range: 0–600 seconds from program start",
 	ManagedCloseDelayInvalid:       "The wait must be a whole number from 0 to 600",
 	ManagedWeChatAutoLogin:         "WeChat auto login",
 	ManagedWeChatAutoLoginHint:     "Clicks the login button automatically; scan the QR code or confirm on your phone when required",
+	ManagedQQWaitForLogin:          "Close after login",
+	ManagedQQWaitForLoginHint:      "Waits for QQ to log in, then closes to tray; does not click Log in",
 	ManagedSchedule:                "Custom timing",
 	ManagedScheduleEnabled:         "On",
 	ManagedScheduleStart:           "Launch delay (min)",
@@ -616,7 +622,7 @@ func formatManagedMode(language string, app config.ManagedAppEntry) string {
 		return msg.ManagedLaunchHidden
 	}
 	if app.TrayBehavior.AutoMinimizeAndHideOnLaunch {
-		if delay := app.TrayBehavior.CloseDelaySeconds; delay > 0 {
+		if delay := app.TrayBehavior.CloseDelaySeconds; delay > 0 && !config.WaitForLoginBeforeTray(app) {
 			return fmt.Sprintf(msg.ManagedAutoHideDelayed, delay)
 		}
 		return msg.ManagedAutoHide
@@ -643,6 +649,7 @@ func TranslateResultCode(language, code string) string {
 		"startup_frequency_check_failed": "automatic startup limit check failed",
 		"external_startup_timeout":       "external startup timeout",
 		"wechat_login_incomplete":        "wechat login incomplete",
+		"qq_login_incomplete":            "qq login incomplete",
 		"cancelled":                      "cancelled",
 		"started_only":                   "started only",
 		"started_hidden":                 "started hidden",
@@ -710,6 +717,11 @@ func TranslateResultMessage(language, message string) string {
 			return "cancelled before launch"
 		}
 		return "已取消启动"
+	case "qq login incomplete":
+		if Resolve(language) == LangEnUS {
+			return "QQ login is incomplete; complete login in the QQ window"
+		}
+		return "QQ 尚未完成登录，请在 QQ 窗口中完成登录"
 	case "wechat login incomplete":
 		if Resolve(language) == LangEnUS {
 			return "WeChat login is incomplete; complete login in the WeChat window"

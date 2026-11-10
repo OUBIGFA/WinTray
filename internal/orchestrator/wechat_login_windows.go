@@ -65,6 +65,13 @@ func (s *Service) completeWeChatLogin(ctx context.Context, entry config.ManagedA
 		return HiddenWindow{}, ctx.Err()
 	}
 	defer unlock()
+	// Normal auto-login keeps its original deadline. Tray startup waits for
+	// the user's QR/phone confirmation for as long as the launch is active.
+	if !opts.manageWindow {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, weChatLoginTimeout)
+		defer cancel()
+	}
 	window, err := s.wechatLogin(ctx, entry.ExePath)
 	if err != nil {
 		s.logger.Warn(fmt.Sprintf("WeChat login not confirmed: %s: %v", entry.Name, err))
@@ -89,8 +96,6 @@ func loginWeChat(ctx context.Context, path string) (HiddenWindow, error) {
 	if !config.IsWeChatExecutable(path) {
 		return HiddenWindow{}, errors.New("not a WeChat executable")
 	}
-	ctx, cancel := context.WithTimeout(ctx, weChatLoginTimeout)
-	defer cancel()
 	// UIA objects stay on this MTA thread and are released before COM teardown.
 	// Provider calls have their own timeout; cancellation cannot leak a worker.
 	runtime.LockOSThread()
@@ -101,6 +106,9 @@ func loginWeChat(ctx context.Context, path string) (HiddenWindow, error) {
 	}
 	defer a.close()
 	return waitWeChatLogin(ctx, 500*time.Millisecond, func() ([]weChatObservation, error) {
+		if !hasRunningProcessByIdentity(path, "") {
+			return nil, errLoginProcessExited
+		}
 		var observations []weChatObservation
 		for _, window := range enumerateTopLevelWindows(true) {
 			// Never use a process-name fallback for an action that logs in an account.
@@ -133,10 +141,13 @@ func waitWeChatLogin(ctx context.Context, interval time.Duration, scan func() ([
 	for ctx.Err() == nil {
 		observations, err := scan()
 		if err != nil {
+			if errors.Is(err, errLoginProcessExited) {
+				return HiddenWindow{}, err
+			}
 			lastErr = err // a provider can disappear while login rebuilds the window
 		} else {
 			if len(observations) > 1 {
-				return HiddenWindow{}, errors.New("multiple WeChat windows; choose an account manually")
+				lastErr = errors.New("multiple WeChat windows; choose an account manually")
 			}
 			if len(observations) == 1 {
 				current := observations[0]

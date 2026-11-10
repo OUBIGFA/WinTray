@@ -59,9 +59,13 @@ func TestWeChatLoginPrecedesWindowDismissal(t *testing.T) {
 				t.Fatal(err)
 			}
 			entry := config.ManagedAppEntry{Name: "WeChat", ExePath: path, RunOnStartup: true, WeChatAutoLogin: true, TrayBehavior: config.TrayBehavior{AutoMinimizeAndHideOnLaunch: true}}
-			enum := &testEnumerator{windows: []ManagedWindowInfo{{Handle: 0x101, ProcessID: 1234, ProcessPath: path, ProcessName: "Weixin", Title: "Login", ClassName: "WeChatLoginWnd"}}}
+			pid := uint32(os.Getpid())
+			enum := &testEnumerator{windows: []ManagedWindowInfo{{Handle: 0x101, ProcessID: pid, ProcessPath: path, ProcessName: "Weixin", Title: "Login", ClassName: "WeChatLoginWnd"}}}
 			mgr := &testManager{}
 			svc := NewService(enum, mgr, &testLogger{})
+			svc.loginMain = func(_ context.Context, _ string, window HiddenWindow) (bool, error) {
+				return window.Handle == 0x102 && window.ProcessID == pid, nil
+			}
 			svc.wechatLogin = func(context.Context, string) (HiddenWindow, error) {
 				if len(mgr.closeCalls)+len(mgr.escapeCalls)+len(mgr.hideCalls) != 0 {
 					t.Fatal("window dismissed before login")
@@ -69,8 +73,8 @@ func TestWeChatLoginPrecedesWindowDismissal(t *testing.T) {
 				if !success {
 					return HiddenWindow{}, context.DeadlineExceeded
 				}
-				enum.windows = append(enum.windows, ManagedWindowInfo{Handle: 0x102, ProcessID: 1234, ProcessPath: path, ProcessName: "Weixin", Title: "WeChat", ClassName: "WeChatMainWndForPC"})
-				return HiddenWindow{Handle: 0x102, ProcessID: 1234}, nil
+				enum.windows = append(enum.windows, ManagedWindowInfo{Handle: 0x102, ProcessID: pid, ProcessPath: path, ProcessName: "Weixin", Title: "WeChat", ClassName: "WeChatMainWndForPC"})
+				return HiddenWindow{Handle: 0x102, ProcessID: pid}, nil
 			}
 			result := svc.StartAndManage(context.Background(), entry, 0)
 			if !success {

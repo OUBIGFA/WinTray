@@ -139,6 +139,9 @@ type ManagedAppEntry struct {
 	// WeChatAutoLogin clicks only a recognized WeChat login button. It is
 	// opt-in; old settings leave it off and other executables ignore it.
 	WeChatAutoLogin bool `json:"wechatAutoLogin"`
+	// QQWaitForLogin observes the main window without entering credentials or
+	// pressing login. It is opt-in and only applies to close-to-tray startup.
+	QQWaitForLogin bool `json:"qqWaitForLogin"`
 	// LaunchViaLogonTask replaces only the sign-in trigger. It reuses an app's
 	// native task, or migrates its original user startup entry without changing
 	// arguments, window behaviour or privileges. If no original entry exists,
@@ -186,6 +189,18 @@ func IsWeChatExecutable(path string) bool {
 // WeChatAutoLoginEnabled excludes background mode, which may not expose login UI.
 func WeChatAutoLoginEnabled(entry ManagedAppEntry) bool {
 	return entry.WeChatAutoLogin && IsWeChatExecutable(entry.ExePath) && !entry.LaunchHiddenInBackground
+}
+
+// IsQQExecutable excludes QQ helpers from the optional login observation.
+func IsQQExecutable(path string) bool {
+	return strings.EqualFold(filepath.Base(path), "QQ.exe")
+}
+
+// Login-aware tray startup replaces only the timing of these opted-in entries.
+// Saved delays remain available when the option is switched off again.
+func WaitForLoginBeforeTray(entry ManagedAppEntry) bool {
+	return entry.TrayBehavior.AutoMinimizeAndHideOnLaunch && !entry.LaunchHiddenInBackground && !entry.LaunchViaLogonTask &&
+		(WeChatAutoLoginEnabled(entry) || (entry.QQWaitForLogin && IsQQExecutable(entry.ExePath)))
 }
 
 type Settings struct {

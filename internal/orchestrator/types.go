@@ -52,6 +52,7 @@ const (
 	ResultFrequencyCheckFailed    ResultCode = "startup_frequency_check_failed"
 	ResultExternalStartupTimeout  ResultCode = "external_startup_timeout"
 	ResultWeChatLoginIncomplete   ResultCode = "wechat_login_incomplete"
+	ResultQQLoginIncomplete       ResultCode = "qq_login_incomplete"
 	ResultCancelled               ResultCode = "cancelled"
 	ResultAlreadyRunningManaged   ResultCode = "already_running_managed"
 	ResultAlreadyRunningSkipped   ResultCode = "already_running_skipped"
@@ -80,6 +81,7 @@ type Service struct {
 	logonTaskLaunch       func(config.ManagedAppEntry) error
 	logonTaskLaunchWait   time.Duration
 	wechatLogin           func(context.Context, string) (HiddenWindow, error)
+	loginMain             func(context.Context, string, HiddenWindow) (bool, error)
 	// Process termination is best effort; the run-limit worker must separately
 	// observe survivors before allowing the session to exit.
 	terminateProcesses func([]uint32) int
@@ -98,6 +100,7 @@ func NewService(enumerator WindowEnumerator, manager WindowManager, logger Logge
 		logonTaskLaunch:       startup.LaunchAppTaskNow,
 		logonTaskLaunchWait:   30 * time.Second,
 		wechatLogin:           loginWeChat,
+		loginMain:             observeLoginMain,
 		terminateProcesses:    terminateProcessTrees,
 		// WinTray's logon task runs before Explorer works through its Run
 		// queue one entry at a time, so a late entry may take minutes.

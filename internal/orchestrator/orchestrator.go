@@ -30,6 +30,7 @@ type startOptions struct {
 	hideConsoleWindow      bool
 	manageWindow           bool
 	autoLogin              bool
+	waitQQLogin            bool
 	windowOptional         bool
 	respectExternalStartup bool
 	externalOwned          bool
@@ -57,6 +58,7 @@ func managedStartOptions(entry config.ManagedAppEntry) startOptions {
 		manageWindow:           !entry.LaunchHiddenInBackground && entry.TrayBehavior.AutoMinimizeAndHideOnLaunch,
 		externalOwned:          entry.LaunchViaLogonTask,
 		autoLogin:              config.WeChatAutoLoginEnabled(entry),
+		waitQQLogin:            entry.QQWaitForLogin && config.IsQQExecutable(entry.ExePath),
 	}
 	// A task-launched program runs outside WinTray: no launch mode of
 	// WinTray's own can apply to it, and its window is left alone.
@@ -94,6 +96,7 @@ func (s *Service) StartNow(ctx context.Context, entry config.ManagedAppEntry, re
 		hideProcessWindow: entry.LaunchHiddenInBackground,
 		manageWindow:      !entry.LaunchHiddenInBackground && entry.TrayBehavior.AutoMinimizeAndHideOnLaunch,
 		autoLogin:         config.WeChatAutoLoginEnabled(entry),
+		waitQQLogin:       entry.QQWaitForLogin && config.IsQQExecutable(entry.ExePath),
 		windowOptional:    true,
 	})
 }
@@ -144,7 +147,7 @@ func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retry
 	consoleProgram := (opts.manageWindow || opts.hideProcessWindow) && hasNativeConsole(entry.ExePath)
 	// Authentication may need a QR code or phone confirmation. Keep its UI
 	// visible throughout login instead of applying the startup window shield.
-	if opts.manageWindow && !consoleProgram && !opts.autoLogin {
+	if opts.manageWindow && !consoleProgram && !opts.autoLogin && !opts.waitQQLogin {
 		var err error
 		s, err = s.withStartupVisibility(entry.ExePath)
 		if err != nil {
@@ -280,6 +283,9 @@ func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retry
 	if !opts.manageWindow {
 		return startedResult(entry, opts)
 	}
+	if opts.autoLogin || opts.waitQQLogin {
+		return s.finishLoginToTray(ctx, entry, opts, loginWindow, ResultManaged)
+	}
 
 	if !s.waitQuietPeriod(ctx, entry, &pid, expectedPath, expectedName) {
 		return windowNotManagedResult(entry, opts)
@@ -360,6 +366,9 @@ func (s *Service) manageRunning(ctx context.Context, entry config.ManagedAppEntr
 		}
 	}
 	if opts.manageWindow {
+		if opts.autoLogin || opts.waitQQLogin {
+			return s.finishLoginToTray(ctx, entry, opts, loginWindow, ResultAlreadyRunningManaged)
+		}
 		// A self-started process gets the same login-window protection.
 		if !s.waitQuietPeriod(ctx, entry, nil, expectedPath, expectedName) {
 			return cancelledResult(entry)

@@ -210,13 +210,18 @@ func (w *MainWindow) nativeStartMode(c *native.Context, m i18n.Messages, entry *
 			})
 		})
 	}).Padding(6, 16)
-	if mode == startToTray {
+	if mode == startToTray && !config.WaitForLoginBeforeTray(*entry) {
 		kit.Indented(c, func() {
 			w.nativeNumberRow(c, m.ManagedCloseDelay, m.ManagedCloseDelayHint, &entry.TrayBehavior.CloseDelaySeconds, 0, 600)
 		})
 	}
 	if config.IsWeChatExecutable(entry.ExePath) {
 		if kit.Toggle(c, &entry.WeChatAutoLogin, m.ManagedWeChatAutoLogin, m.ManagedWeChatAutoLoginHint).MinHeight(40).Padding(6, 16).Disabled(mode == startHidden).Changed() {
+			w.save()
+		}
+	}
+	if config.IsQQExecutable(entry.ExePath) {
+		if kit.Toggle(c, &entry.QQWaitForLogin, m.ManagedQQWaitForLogin, m.ManagedQQWaitForLoginHint).MinHeight(40).Padding(6, 16).Disabled(mode != startToTray).Changed() {
 			w.save()
 		}
 	}

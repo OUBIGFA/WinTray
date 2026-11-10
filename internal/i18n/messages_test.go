@@ -17,10 +17,20 @@ func TestScriptAssociationErrorGivesNextStep(t *testing.T) {
 	}
 }
 
-func TestCloseDelayRecommendation(t *testing.T) {
+func TestLoginAwareModeDoesNotAdvertiseSavedDelay(t *testing.T) {
 	for _, language := range []string{"zh-CN", "en-US"} {
-		if hint := For(language).ManagedCloseDelayHint; !strings.Contains(hint, "10–15") || strings.Contains(hint, "20–30") {
-			t.Errorf("%s close-delay hint = %q, want 10–15 seconds", language, hint)
+		entry := config.ManagedAppEntry{ExePath: "QQ.exe", RunOnStartup: true, QQWaitForLogin: true, TrayBehavior: config.TrayBehavior{AutoMinimizeAndHideOnLaunch: true, CloseDelaySeconds: 45}}
+		if got := formatManagedMode(language, entry); strings.Contains(got, "45") {
+			t.Fatalf("inactive delay advertised: %q", got)
+		}
+		entry.QQWaitForLogin = false
+		if got := formatManagedMode(language, entry); !strings.Contains(got, "45") {
+			t.Fatalf("normal delay omitted: %q", got)
+		}
+		entry.QQWaitForLogin = true
+		entry.ExePath = "other.exe"
+		if got := formatManagedMode(language, entry); !strings.Contains(got, "45") {
+			t.Fatalf("unrelated program's delay changed: %q", got)
 		}
 	}
 }
