@@ -4,7 +4,7 @@
 package version
 
 // Number is the released version of this build.
-var Number = "3.6.0"
+var Number = "3.7.0"
 
 const (
 	// RepositoryURL is the upstream project page, also used as the download
