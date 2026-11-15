@@ -79,7 +79,7 @@ func TestNativeProgramListFileDrops(t *testing.T) {
 						width, height := int(float32(client.Right)/scale), int(float32(client.Bottom)/scale)
 						x, y := float32(150), float32(250)
 						switch where {
-						case "empty list", "row control":
+						case "empty list", "row control", "file location":
 							// Resolve the target's DIP bounds from the same layout
 							// without changing the live window's widget state.
 							layout, _ := NewMainWindow(w.Settings(), Callbacks{})
@@ -88,6 +88,11 @@ func TestNativeProgramListFileDrops(t *testing.T) {
 							label := m.ManagedListEmpty
 							if where == "row control" {
 								label = m.ManagedColumnOrder + " " + w.settings.ManagedApps[0].Name
+							} else if where == "file location" {
+								if err := tt.Click(w.settings.ManagedApps[w.desktop.selected].Name); err != nil {
+									return err
+								}
+								label = m.ManagedOpenLocation
 							}
 							r, ok := tt.Find(label)
 							if !ok {
@@ -111,7 +116,9 @@ func TestNativeProgramListFileDrops(t *testing.T) {
 						return false
 					}
 					if accept {
-						count += len(files)
+						if where != "file location" {
+							count += len(files)
+						}
 						wantSaves++
 					}
 					return step(func() error {
@@ -121,10 +128,13 @@ func TestNativeProgramListFileDrops(t *testing.T) {
 						if accept && w.desktop.selected != count-1 {
 							return fmt.Errorf("%s did not select the added program", where)
 						}
+						if where == "file location" && w.settings.ManagedApps[count-1].ExePath != files[0] {
+							return fmt.Errorf("file location drop did not replace the selected program")
+						}
 						return nil
 					})
 				}
-				if !drop("empty list", paths, true) || !drop("row control", paths[:1], true) || !drop("blank list", paths[1:], true) || !drop("editor", paths, false) {
+				if !drop("empty list", paths, true) || !drop("row control", paths[:1], true) || !drop("blank list", paths[1:], true) || !drop("file location", paths[:1], true) || !drop("editor", paths, false) {
 					return
 				}
 				if !step(func() error { w.desktop.pageTab = 1; return nil }) || !drop("settings page", paths, false) {

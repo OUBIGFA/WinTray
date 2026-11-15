@@ -318,7 +318,7 @@ func TestNativeProgramColumnsAndControlsFit(t *testing.T) {
 				// Check actual horizontal geometry, not text traversal order.
 				editor, _ := tt.Find(m.ManagedModeLabel)
 				lastRight := float32(0)
-				for _, title := range []string{m.ManagedColumnName, m.TrayColumn, m.ReplaceColumn, m.ManagedColumnOrder} {
+				for _, title := range []string{m.ManagedColumnName, m.TrayColumn, m.ManagedColumnOrder} {
 					header, ok := tt.Find(title)
 					if !ok || header.X < lastRight || header.W < 16 || header.X+header.W >= editor.X {
 						t.Fatalf("column %q overlaps or is out of order: %+v, previous right=%v editor=%+v", title, header, lastRight, editor)

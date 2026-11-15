@@ -66,10 +66,10 @@ func (w *MainWindow) nativeView(c *native.Context) {
 		}
 	}
 	m := i18n.For(w.settings.Language)
-	var dropped []string
+	var dropped, replacement []string
 	native.Column(c).Fill().Children(func() {
 		w.nativeHeader(c, m)
-		dropped = w.nativePrograms(c, m)
+		dropped, replacement = w.nativePrograms(c, m)
 		native.Divider(c)
 		w.nativeFooter(c, m)
 	})
@@ -82,8 +82,10 @@ func (w *MainWindow) nativeView(c *native.Context) {
 			commit()
 		}
 	}
-	if len(dropped) > 0 {
-		// Finish rows and editor before changing their identities.
+	// Finish rows and editor before changing their identities.
+	if len(replacement) > 0 {
+		w.nativeReplacePaths(replacement)
+	} else if len(dropped) > 0 {
 		w.nativeDropPaths(dropped)
 	}
 	if id := w.desktop.removeID; id != "" {
@@ -133,8 +135,8 @@ func (w *MainWindow) resetNativeList(first int) {
 
 // Only the program list scrolls. Page tabs, Add and the application footer
 // stay fixed.
-func (w *MainWindow) nativePrograms(c *native.Context, m i18n.Messages) []string {
-	var dropped []string
+func (w *MainWindow) nativePrograms(c *native.Context, m i18n.Messages) ([]string, []string) {
+	var dropped, replacement []string
 	native.Column(c).Grow(1).MinHeight(0).Padding(0, 24, 16, 24).Gap(16).Children(func() {
 		kit.Tabs(c, &w.desktop.pageTab, []kit.Tab{{Label: m.ProgramsTab, Icon: icons.List}, {Label: m.SettingsTab, Icon: icons.Settings2}}, func(apply func()) { w.commitNativeEdits(); apply() })
 		if w.desktop.pageTab == 1 {
@@ -163,15 +165,15 @@ func (w *MainWindow) nativePrograms(c *native.Context, m i18n.Messages) []string
 			width, _ := c.Size()
 			if width < 908 {
 				native.Column(c).FillWidth().Height(180).Shrink(0).Children(func() { dropped = w.nativeProgramTable(c, m) })
-				native.Column(c).Grow(1).MinHeight(0).BorderWidth(1, 0, 0, 0).BorderColor(kit.Colors(c).Hairline).Children(func() { w.nativeEditor(c, m) })
+				native.Column(c).Grow(1).MinHeight(0).BorderWidth(1, 0, 0, 0).BorderColor(kit.Colors(c).Hairline).Children(func() { replacement = w.nativeEditor(c, m) })
 			} else {
 				// Let startup choices wrap while retaining room for the paired
 				// schedule fields when the user narrows the editor.
-				kit.Split(c, &w.desktop.split, kit.SplitOptions{Label: m.ResizePanels, MinFirst: 35, MinSecond: max(30, 560/(width-48)*100)}, func() { dropped = w.nativeProgramTable(c, m) }, func() { w.nativeEditor(c, m) }).Grow(1).MinHeight(0)
+				kit.Split(c, &w.desktop.split, kit.SplitOptions{Label: m.ResizePanels, MinFirst: 35, MinSecond: max(30, 560/(width-48)*100)}, func() { dropped = w.nativeProgramTable(c, m) }, func() { replacement = w.nativeEditor(c, m) }).Grow(1).MinHeight(0)
 			}
 		})
 	})
-	return dropped
+	return dropped, replacement
 }
 
 func (w *MainWindow) nativeSelected() (*config.ManagedAppEntry, bool) {
@@ -411,7 +413,7 @@ func (w *MainWindow) nativeDropPaths(paths []string) {
 	}
 }
 
-// A file dropped on Change replaces only that row and never launches it.
+// A file dropped on the location icon replaces only the selected program.
 func (w *MainWindow) nativeReplacePaths(paths []string) {
 	if len(paths) == 0 {
 		return

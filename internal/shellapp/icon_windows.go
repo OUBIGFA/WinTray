@@ -46,12 +46,12 @@ func iconFromItem(item *shellItem, size int) (*image.RGBA, error) {
 	}
 	defer release(unsafe.Pointer(factory))
 	var bitmap win.HBITMAP
-	const iconOnly, registeredBackground = 0x4, 0x80
+	const iconOnly = 0x4
 	if unsafe.Sizeof(uintptr(0)) == 8 {
 		dimensions := uint64(uint32(size)) | uint64(uint32(size))<<32
-		result, _, _ = syscall.SyscallN(factory.vtbl.GetImage, uintptr(unsafe.Pointer(factory)), uintptr(dimensions), iconOnly|registeredBackground, uintptr(unsafe.Pointer(&bitmap)))
+		result, _, _ = syscall.SyscallN(factory.vtbl.GetImage, uintptr(unsafe.Pointer(factory)), uintptr(dimensions), iconOnly, uintptr(unsafe.Pointer(&bitmap)))
 	} else {
-		result, _, _ = syscall.SyscallN(factory.vtbl.GetImage, uintptr(unsafe.Pointer(factory)), uintptr(size), uintptr(size), iconOnly|registeredBackground, uintptr(unsafe.Pointer(&bitmap)))
+		result, _, _ = syscall.SyscallN(factory.vtbl.GetImage, uintptr(unsafe.Pointer(factory)), uintptr(size), uintptr(size), iconOnly, uintptr(unsafe.Pointer(&bitmap)))
 	}
 	if err := hresult(result, "read application icon"); err != nil {
 		return nil, err

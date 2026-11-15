@@ -161,7 +161,7 @@ func TestNativeEmptyDropIsNoOp(t *testing.T) {
 	}
 }
 
-func TestNativeDropOnChangeReplacesOnlyTargetProgram(t *testing.T) {
+func TestNativeDropOnFileLocationReplacesOnlySelectedProgram(t *testing.T) {
 	w := nativeProgramsFixture(2)
 	tt := native.NewTester(w.nativeView, 1200, 850)
 	if err := tt.Click("Program 001"); err != nil {
@@ -172,7 +172,7 @@ func TestNativeDropOnChangeReplacesOnlyTargetProgram(t *testing.T) {
 	}
 	first := w.settings.ManagedApps[0]
 	secondID := w.settings.ManagedApps[1].ID
-	label := i18n.For("zh-CN").BrowseProgram + " Program 001"
+	label := i18n.For("zh-CN").ManagedOpenLocation
 	button, ok := tt.Find(label)
 	if !ok {
 		t.Fatal("change control is missing")
@@ -184,5 +184,44 @@ func TestNativeDropOnChangeReplacesOnlyTargetProgram(t *testing.T) {
 	apps := w.settings.ManagedApps
 	if len(apps) != 2 || apps[0] != first || apps[1].ID != secondID || apps[1].ExePath != path || apps[1].Name != "replacement" || !apps[1].LaunchHiddenInBackground {
 		t.Fatalf("drop did not replace only the target: %+v", apps)
+	}
+}
+
+func TestNativeFileLocationDropCommitsPendingArguments(t *testing.T) {
+	w := nativeProgramsFixture(2)
+	w.settings.ManagedApps[1].WorkingDirectory = "C:/keep-directory"
+	store := config.NewStore(filepath.Join(t.TempDir(), "settings.json"))
+	w.callbacks.OnSave = func(settings config.Settings) {
+		if err := store.Save(settings); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w.callbacks.OnOpenProgramLocation = func(config.ManagedAppEntry) { t.Fatal("dropping a file opened a folder") }
+	w.callbacks.OnLaunchNow = func(config.ManagedAppEntry) { t.Fatal("dropping a file launched its program") }
+	tester := native.NewTester(w.nativeView, 1200, 850)
+	messages := i18n.For("zh-CN")
+	for _, label := range []string{"Program 001", messages.MoreSettings, messages.ManagedAppArgs} {
+		if err := tester.Click(label); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tester.Type("--keep-pending")
+	if !tester.Focused(messages.ManagedAppArgs) || !w.desktop.argsDirty {
+		t.Fatal("test did not leave the arguments edit pending")
+	}
+	button, found := tester.Find(messages.ManagedOpenLocation)
+	if !found {
+		t.Fatal("file location button is missing")
+	}
+	path := droppedTestFile(t, t.TempDir(), "replacement.exe")
+	if !tester.DropFiles(button.X+button.W/2, button.Y+button.H/2, path) {
+		t.Fatal("file location button did not accept the replacement")
+	}
+	saved, err := store.LoadWithError()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(saved.ManagedApps) != 2 || saved.ManagedApps[0].Name != "Program 000" || saved.ManagedApps[1].ExePath != path || saved.ManagedApps[1].Args != "--keep-pending" || saved.ManagedApps[1].WorkingDirectory != "C:/keep-directory" || w.desktop.argsDirty {
+		t.Fatalf("replacement lost or transferred pending settings: %+v", saved.ManagedApps)
 	}
 }

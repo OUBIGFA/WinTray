@@ -12,12 +12,10 @@ import (
 
 // Column widths, icon size and row spacing are shared across the interface.
 // MyGo's virtual list retains WinTray's keyboard navigation and drag reorder.
-const collectWidth, replaceWidth, orderWidth, controlGap = 36, 56, 80, 16
+const collectWidth, orderWidth, controlGap = 36, 80, 16
 
 func (w *MainWindow) nativeProgramTable(c *native.Context, m i18n.Messages) []string {
 	moveFrom, moveTo := -1, -1
-	replaceRow := -1
-	var replacement []string
 	listArea := native.Column(c).Fill().Padding(12, 12, 12, 0).Gap(2)
 	dropped := listArea.DroppedFiles()
 	if listArea.FileDragOver() {
@@ -31,7 +29,7 @@ func (w *MainWindow) nativeProgramTable(c *native.Context, m i18n.Messages) []st
 				for _, column := range []struct {
 					label string
 					width float32
-				}{{m.TrayColumn, collectWidth}, {m.ReplaceColumn, replaceWidth}, {m.ManagedColumnOrder, orderWidth}} {
+				}{{m.TrayColumn, collectWidth}, {m.ManagedColumnOrder, orderWidth}} {
 					kit.Caption(c, column.label).Width(column.width).SingleLine().TextAlign(native.Center)
 				}
 			})
@@ -65,16 +63,6 @@ func (w *MainWindow) nativeProgramTable(c *native.Context, m i18n.Messages) []st
 							w.nativeCollect(index, on)
 						}
 					})
-					native.Row(c).Width(replaceWidth).Justify(native.Center).Children(func() {
-						button := kit.IconButton(c, icons.FolderOpen, m.BrowseProgram+" "+app.Name).Tooltip(m.BrowseProgramHint)
-						if button.Clicked() {
-							replaceRow = index
-						}
-						if paths := button.DroppedFiles(); len(paths) > 0 {
-							replaceRow = index
-							replacement = paths
-						}
-					})
 					native.Box(c).Width(orderWidth).Shrink(0).Children(func() {
 						order := strconv.Itoa(index + 1)
 						if nativeOrderSelect(c, &order, w.desktop.orderOptions, m.ManagedColumnOrder+" "+app.Name).Changed() {
@@ -98,15 +86,6 @@ func (w *MainWindow) nativeProgramTable(c *native.Context, m i18n.Messages) []st
 	// Mutate identities only after the virtual list finished building.
 	if moveFrom >= 0 {
 		w.nativeSetOrder(moveFrom, moveTo)
-	}
-	if replaceRow >= 0 {
-		w.commitNativeEdits()
-		w.desktop.selected = replaceRow
-		if len(replacement) > 0 {
-			w.nativeReplacePaths(replacement)
-		} else {
-			w.nativeChooseProgram(true)
-		}
 	}
 	return dropped
 }

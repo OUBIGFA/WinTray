@@ -30,6 +30,28 @@ func TestApplicationIconLoadsWindowsExecutable(t *testing.T) {
 	}
 }
 
+func TestApplicationIconPreservesTransparentPixels(t *testing.T) {
+	path := os.Getenv("WINTRAY_TEST_TRANSPARENT_ICON_APP")
+	if path == "" {
+		t.Skip("requires an installed app with a transparent source icon")
+	}
+	icon, err := Icon(path, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transparent, visible := 0, 0
+	for offset := 3; offset < len(icon.Pix); offset += 4 {
+		if icon.Pix[offset] == 0 {
+			transparent++
+		} else {
+			visible++
+		}
+	}
+	if transparent < 16 || visible < 16 {
+		t.Fatalf("original icon transparency was lost: transparent=%d visible=%d", transparent, visible)
+	}
+}
+
 func TestApplicationIconRejectsMissingApplication(t *testing.T) {
 	for _, path := range []string{
 		filepath.Join(t.TempDir(), "missing.exe"),

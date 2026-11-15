@@ -17,7 +17,8 @@ import (
 
 // The editor groups settings by purpose. Each selected identity owns its
 // input state; switching tabs commits pending values first.
-func (w *MainWindow) nativeEditor(c *native.Context, m i18n.Messages) {
+func (w *MainWindow) nativeEditor(c *native.Context, m i18n.Messages) []string {
+	var replacement []string
 	native.Column(c).Fill().Padding(12, 4, 12, 20).Children(func() {
 		entry, ok := w.nativeSelected()
 		if !ok {
@@ -31,7 +32,14 @@ func (w *MainWindow) nativeEditor(c *native.Context, m i18n.Messages) {
 		native.Column(c).Key(entry.ID).FillWidth().Gap(10).Children(func() {
 			native.Column(c).FillWidth().Gap(4).Children(func() {
 				kit.Heading(c, entry.Name).Role(native.RoleHeading).Level(2).SingleLine().Ellipsis("…").Tooltip(entry.Name).Selectable()
-				kit.Mono(c, entry.ExePath).TextColor(c.Theme().TextMuted).SingleLine().Ellipsis("…").Tooltip(entry.ExePath).Selectable()
+				native.Row(c).FillWidth().Gap(6).AlignItems(native.Center).Children(func() {
+					button := kit.IconButton(c, icons.FolderOpen, m.ManagedOpenLocation).Tooltip(m.ManagedOpenLocation+"\n"+m.BrowseProgramHint).Size(24, 24).Shrink(0)
+					if button.Clicked() && w.callbacks.OnOpenProgramLocation != nil {
+						w.callbacks.OnOpenProgramLocation(*entry)
+					}
+					replacement = button.DroppedFiles()
+					kit.Mono(c, entry.ExePath).Grow(1).Shrink(1).MinWidth(0).TextColor(c.Theme().TextMuted).SingleLine().Ellipsis("…").Tooltip(entry.ExePath).Selectable()
+				})
 			})
 			w.nativeProgramActions(c, m, entry)
 			kit.SubTabs(c, &w.desktop.detailTab, []string{m.CommonSettings, m.MoreSettings}, func(apply func()) { w.commitNativeEdits(); apply() })
@@ -96,6 +104,7 @@ func (w *MainWindow) nativeEditor(c *native.Context, m i18n.Messages) {
 			})
 		})
 	})
+	return replacement
 }
 
 type programNameEditor struct {
@@ -184,9 +193,6 @@ func (w *MainWindow) nativeProgramActions(c *native.Context, m i18n.Messages, en
 			}
 			w.programWindowBusy[entry.ID] = true
 			w.callbacks.OnSetProgramWindowVisible(*entry, !visible)
-		}
-		if kit.IconButton(c, icons.FolderOpen, m.ManagedOpenLocation).Clicked() && w.callbacks.OnOpenProgramLocation != nil {
-			w.callbacks.OnOpenProgramLocation(*entry)
 		}
 		// Keep confirmation bound to the selected ID even if the list reorders.
 		id := entry.ID
