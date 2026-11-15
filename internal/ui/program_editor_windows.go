@@ -185,6 +185,9 @@ func (w *MainWindow) nativeProgramActions(c *native.Context, m i18n.Messages, en
 			w.programWindowBusy[entry.ID] = true
 			w.callbacks.OnSetProgramWindowVisible(*entry, !visible)
 		}
+		if kit.IconButton(c, icons.FolderOpen, m.ManagedOpenLocation).Clicked() && w.callbacks.OnOpenProgramLocation != nil {
+			w.callbacks.OnOpenProgramLocation(*entry)
+		}
 		// Keep confirmation bound to the selected ID even if the list reorders.
 		id := entry.ID
 		kit.Button(c, m.ManagedColumnDelete, icons.Trash2, false).Label(m.ManagedColumnDelete + " " + entry.Name).Menu(func(menu *native.Menu) {

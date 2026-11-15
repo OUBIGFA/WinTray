@@ -20,6 +20,7 @@ import (
 	"wintray/internal/branding"
 	"wintray/internal/config"
 	"wintray/internal/i18n"
+	"wintray/internal/shellapp"
 )
 
 type Callbacks struct {
@@ -34,6 +35,7 @@ type Callbacks struct {
 	OnProgramRunning          func(config.ManagedAppEntry) bool
 	OnProgramWindowVisible    func(config.ManagedAppEntry) bool
 	OnSetProgramWindowVisible func(config.ManagedAppEntry, bool)
+	OnOpenProgramLocation     func(config.ManagedAppEntry)
 	OnCheckUpdate             func()
 	OnOpenRepository          func()
 	OnExit                    func()
@@ -431,11 +433,14 @@ func (w *MainWindow) loadNativeIcons() {
 	w.iconsCancel = cancel
 	window := w.desktop.window
 	paths := make([]string, 0, len(w.settings.ManagedApps))
+	icons := make(map[string]*native.Bitmap)
 	for _, entry := range w.settings.ManagedApps {
 		paths = append(paths, entry.ExePath)
+		if icon := w.desktop.icons[entry.ExePath]; icon != nil {
+			icons[entry.ExePath] = icon
+		}
 	}
 	go func() {
-		icons := make(map[string]*native.Bitmap)
 		for _, path := range paths {
 			if ctx.Err() != nil {
 				return
@@ -443,20 +448,12 @@ func (w *MainWindow) loadNativeIcons() {
 			if _, ok := icons[path]; ok {
 				continue
 			}
-			icon, err := walk.NewIconExtractedFromFileWithSize(path, 0, 24)
+			icon, err := shellapp.Icon(path, 64)
 			if err != nil {
+				log.Printf("read program icon %q: %v", path, err)
 				continue
 			}
-			bmp, err := walk.NewBitmapFromIconForDPI(icon, walk.Size{Width: 24, Height: 24}, 96)
-			icon.Dispose()
-			if err != nil {
-				continue
-			}
-			img, err := bmp.ToImage()
-			bmp.Dispose()
-			if err == nil {
-				icons[path] = native.NewBitmap(img)
-			}
+			icons[path] = native.NewBitmap(icon)
 		}
 		w.Synchronize(func() {
 			defer cancel()

@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/egoist/mygo"
 	"github.com/lxn/walk"
 	"wintray/internal/config"
 	"wintray/internal/i18n"
@@ -499,6 +500,15 @@ func runMainSession(args []string, settings config.Settings, services sessionSer
 				m := i18n.For(lang)
 				mainWindow.ShowError(m.WindowTitle, fmt.Sprintf("%s: %v", m.StatusOpenLogsFailed, openErr))
 			}
+		},
+		OnOpenProgramLocation: func(entry config.ManagedAppEntry) {
+			messages := i18n.For(mainWindow.Settings().Language)
+			go func() {
+				if err := openProgramLocation(entry, mygo.Shell.OpenPath); err != nil {
+					logger.Warn(fmt.Sprintf("open program location %q: %v", entry.ExePath, err))
+					mainWindow.ShowError(messages.ManagedOpenLocation, messages.ManagedOpenLocationFailed)
+				}
+			}()
 		},
 		OnCleanupRestore: cleanupAndRestore,
 		OnRemoveLogon:    removeLogon,

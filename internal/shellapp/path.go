@@ -1,6 +1,9 @@
 package shellapp
 
-import "strings"
+import (
+	"image"
+	"strings"
+)
 
 const PathPrefix = "shell:AppsFolder\\"
 
@@ -25,6 +28,7 @@ type Application struct {
 	Path             string
 	Args             string
 	WorkingDirectory string
+	Icon             image.Image
 }
 
 func (app Application) Key() string {

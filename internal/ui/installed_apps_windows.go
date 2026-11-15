@@ -26,6 +26,7 @@ type installedAppPicker struct {
 	query    string
 	kind     string
 	apps     []shellapp.Application
+	icons    map[string]*native.Bitmap
 	selected map[string]bool
 	list     native.ListState
 	cancel   context.CancelFunc
@@ -42,6 +43,17 @@ func (w *MainWindow) nativeOpenInstalledApps() {
 	}
 	if !picker.loaded && !picker.loading {
 		w.nativeLoadInstalledApps(picker)
+	} else if picker.loaded && picker.icons == nil {
+		picker.cacheIcons()
+	}
+}
+
+func (picker *installedAppPicker) cacheIcons() {
+	picker.icons = make(map[string]*native.Bitmap, len(picker.apps))
+	for _, app := range picker.apps {
+		if app.Icon != nil {
+			picker.icons[app.Key()] = native.NewBitmap(app.Icon)
+		}
 	}
 }
 
@@ -65,6 +77,7 @@ func (w *MainWindow) nativeLoadInstalledApps(picker *installedAppPicker) {
 			}
 			picker.loading, picker.failed, picker.loaded = false, err != nil, err == nil
 			picker.apps = applications
+			picker.cacheIcons()
 			picker.list = native.ListState{}
 			picker.cancel = nil
 		})
@@ -118,24 +131,29 @@ func (w *MainWindow) nativeInstalledApps(c *native.Context, m i18n.Messages) {
 					native.List(c, &picker.list, len(filtered), func(index int) {
 						app := filtered[index]
 						key := app.Key()
-						native.Column(c).Key(key).FillWidth().Padding(8).Gap(4).Children(func() {
-							native.Row(c).FillWidth().Gap(12).AlignItems(native.Center).Children(func() {
-								selected := picker.selected[key]
-								if native.Checkbox(c, &selected, app.Name).Grow(1).Shrink(1).MinWidth(0).Tooltip(app.Name).Changed() {
-									if selected {
-										picker.selected[key] = true
-									} else {
-										delete(picker.selected, key)
-									}
+						native.Row(c).Key(key).FillWidth().Padding(6, 8).Gap(12).AlignItems(native.Center).Children(func() {
+							selected := picker.selected[key]
+							choice := native.Checkbox(c, &selected, "").Label(app.Name).Grow(1).Shrink(1).MinWidth(0).Tooltip(strings.TrimSpace(app.Path + " " + app.Args))
+							choice.Children(func() {
+								if icon := picker.icons[key]; icon != nil {
+									native.Image(c, icon).Size(32, 32).Shrink(0)
+								} else {
+									native.Icon(c, icons.AppWindow).Size(32, 32).Shrink(0).TextColor(c.Theme().TextMuted)
 								}
-								kind := m.InstalledAppsDesktop
-								if shellapp.IsPath(app.Path) {
-									kind = m.InstalledAppsStore
-								}
-								kit.Caption(c, kind).Shrink(0)
+								native.Text(c, app.Name).SingleLine().Ellipsis("…").Grow(1).Shrink(1).MinWidth(0)
 							})
-							detail := strings.TrimSpace(app.Path + " " + app.Args)
-							kit.Mono(c, detail).FillWidth().SingleLine().Ellipsis("…").Tooltip(detail)
+							if choice.Changed() {
+								if selected {
+									picker.selected[key] = true
+								} else {
+									delete(picker.selected, key)
+								}
+							}
+							kind := m.InstalledAppsDesktop
+							if shellapp.IsPath(app.Path) {
+								kind = m.InstalledAppsStore
+							}
+							kit.Caption(c, kind).Shrink(0)
 						})
 					}).Fill().MinHeight(0).Label(m.InstalledAppsTitle)
 				}
@@ -171,8 +189,14 @@ func (w *MainWindow) nativeAddApplications(applications []shellapp.Application) 
 		return
 	}
 	w.commitNativeEdits()
+	if w.desktop.icons == nil {
+		w.desktop.icons = make(map[string]*native.Bitmap)
+	}
 	base := time.Now().UnixNano()
 	for index, app := range applications {
+		if app.Icon != nil {
+			w.desktop.icons[app.Path] = native.NewBitmap(app.Icon)
+		}
 		w.settings.ManagedApps = append(w.settings.ManagedApps, config.ManagedAppEntry{
 			ID: strconv.FormatInt(base+int64(index), 10), Name: app.Name, ExePath: app.Path,
 			Args: app.Args, WorkingDirectory: app.WorkingDirectory,

@@ -133,6 +133,8 @@ type Messages struct {
 	ManagedWindowUnavailable       string
 	ManagedWindowFailed            string
 	ManagedWindowActivation        string
+	ManagedOpenLocation            string
+	ManagedOpenLocationFailed      string
 	AddProgram                     string
 	AddProgramHint                 string
 	AddInstalledApps               string
@@ -336,6 +338,8 @@ var zhCN = Messages{
 	ManagedWindowFailed:            "无法切换窗口，请确认程序仍在响应后重试",
 	ManagedWindowActivation:        "窗口已显示，请在任务栏选中它",
 	AddProgram:                     "添加程序",
+	ManagedOpenLocation:            "打开文件位置",
+	ManagedOpenLocationFailed:      "无法打开文件位置，请确认程序仍已安装且文件夹可访问",
 	AddProgramHint:                 "选择程序或脚本，可以一次选多个",
 	AddInstalledApps:               "已安装应用",
 	InstalledAppsTitle:             "添加已安装应用",
@@ -540,6 +544,8 @@ var enUS = Messages{
 	ManagedWindowFailed:            "Could not change window visibility; check that the program is responding and try again",
 	ManagedWindowActivation:        "The window is visible; select it on the taskbar",
 	AddProgram:                     "Add Program",
+	ManagedOpenLocation:            "Open file location",
+	ManagedOpenLocationFailed:      "Cannot open the file location; check that the app is installed and its folder is accessible",
 	AddProgramHint:                 "Pick programs or scripts; you can select several at once",
 	AddInstalledApps:               "Installed apps",
 	InstalledAppsTitle:             "Add installed apps",

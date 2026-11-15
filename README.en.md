@@ -42,6 +42,7 @@ Changes save automatically. For names, arguments, working directories, and numbe
 | Change the start order | Drag the icon on the left of the program row, or select an **Order** number. Press `Esc` to cancel a drag |
 | Stop a program | Select the running program, then select **Stop Program** |
 | Show or hide a window | Select the running program, then select **Show Window** or **Hide Window** |
+| Open the program folder | Select the **Open file location** folder icon to the right of **Show Window** |
 | Remove a program | Select the program, select **Delete**, then select **Confirm**. The program file is kept |
 
 Drag the divider between the list and details to change their widths. In a narrow window, the list appears above the details.

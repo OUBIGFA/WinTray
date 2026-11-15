@@ -4,6 +4,7 @@ package shellapp
 
 import (
 	"context"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -95,11 +96,17 @@ func Enumerate(ctx context.Context) ([]Application, error) {
 			break
 		}
 		app := applicationFromItem(item, keys)
-		release(unsafe.Pointer(item))
 		if app.Path != "" && !seen[app.Key()] {
+			icon, err := iconFromItem(item, 64)
+			if err != nil {
+				log.Printf("read installed application icon %q: %v", app.Name, err)
+			} else {
+				app.Icon = icon
+			}
 			seen[app.Key()] = true
 			apps = append(apps, app)
 		}
+		release(unsafe.Pointer(item))
 	}
 	sort.SliceStable(apps, func(first, second int) bool {
 		left, right := strings.ToLower(apps[first].Name), strings.ToLower(apps[second].Name)
