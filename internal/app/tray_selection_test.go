@@ -44,3 +44,12 @@ func TestTraySelectionChangeRejectsUnknownOrNonExecutable(t *testing.T) {
 		}
 	}
 }
+
+func TestTraySelectionChangeAcceptsPackagedApplication(t *testing.T) {
+	settings := config.DefaultSettings()
+	settings.ManagedApps = []config.ManagedAppEntry{{ID: "store", ExePath: "shell:AppsFolder\\Example.App_123456789abcd!Reader"}}
+	next, err := traySelectionChange(settings, "store", true)
+	if err != nil || !next.ManagedApps[0].CollectTrayIcon || settings.ManagedApps[0].CollectTrayIcon {
+		t.Fatalf("cannot select the packaged application without mutating the original: %+v, %v", next, err)
+	}
+}

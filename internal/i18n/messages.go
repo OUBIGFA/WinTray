@@ -135,6 +135,21 @@ type Messages struct {
 	ManagedWindowActivation        string
 	AddProgram                     string
 	AddProgramHint                 string
+	AddInstalledApps               string
+	InstalledAppsTitle             string
+	InstalledAppsSearch            string
+	InstalledAppsAll               string
+	InstalledAppsDesktop           string
+	InstalledAppsStore             string
+	InstalledAppsLoading           string
+	InstalledAppsFailed            string
+	InstalledAppsEmpty             string
+	InstalledAppsAdd               string
+	InstalledAppsSelection         string
+	InstalledAppsRefresh           string
+	InstalledAppsCancel            string
+	ManagedPackagedDirectory       string
+	ManagedPackagedArgsHint        string
 	RemoveConfirmPrompt            string
 	RemoveConfirmLabel             string
 	OpenLogs                       string
@@ -270,10 +285,10 @@ var zhCN = Messages{
 	ManagedEnabledHint:             "关闭后停止普通开机启动；“自定义时间”和程序原有自启仍可生效",
 	ManagedModeLabel:               "启动方式",
 	ManagedLaunchOnly:              "正常启动",
-	ManagedLaunchOnlyHint:          "优先使用程序原有自启；没有原有自启时，由 WinTray 启动",
+	ManagedLaunchOnlyHint:          "保留程序原有开机启动设置；启用“自定义时间”后，WinTray 按设置启动",
 	ManagedTaskLaunch:              "开机即启动",
 	ManagedTaskLaunchHint:          "登录 Windows 时启动；保留原有自启的参数和权限，没有原有自启时使用本页设置",
-	ManagedTaskLaunchTip:           "仅支持 .exe，不受启动间隔限制；首次创建管理员任务需要确认，原任务的延迟保持不变",
+	ManagedTaskLaunchTip:           "支持 EXE 和商店应用，不受启动间隔限制；首次创建管理员任务需要确认，原任务的延迟保持不变",
 	ManagedTaskArgsHint:            "有原有自启时使用原参数；否则使用此处参数",
 	ManagedTaskLaunchNowHint:       "设置保存后，运行登录任务；程序已运行时跳过",
 	ManagedTaskFailedTitle:         "开机即启动未完成",
@@ -297,7 +312,7 @@ var zhCN = Messages{
 	ManagedScheduleStartUnit:       "分钟启动",
 	ManagedScheduleExit:            "自动退出（分钟）",
 	ManagedScheduleExitUnit:        "分钟后退出",
-	ManagedScheduleHint:            "范围 0–1440 分钟，自动退出填 0 表示不退出；关闭“开机启动此程序”后，此计划仍生效",
+	ManagedScheduleHint:            "范围 0–1440 分钟，自动退出填 0 表示不退出；选择“正常启动”时，此计划仍生效",
 	ManagedFrequency:               "限制自动运行次数",
 	ManagedFrequencyDays:           "天内",
 	ManagedFrequencyRuns:           "次",
@@ -308,7 +323,7 @@ var zhCN = Messages{
 	ManagedLaunchHidden:            "后台启动",
 	ManagedLaunchHiddenHint:        "隐藏控制台启动；选择“显示窗口”可查看输出和输入命令",
 	ManagedLaunchNow:               "立即启动",
-	ManagedLaunchNowHint:           "启动一次；关闭“开机启动此程序”时，使用正常启动方式",
+	ManagedLaunchNowHint:           "按当前启动方式启动一次",
 	ManagedLaunchNowBusy:           "启动中…",
 	ManagedStopProgram:             "停止程序",
 	ManagedStopProgramBusy:         "停止中…",
@@ -321,7 +336,22 @@ var zhCN = Messages{
 	ManagedWindowFailed:            "无法切换窗口，请确认程序仍在响应后重试",
 	ManagedWindowActivation:        "窗口已显示，请在任务栏选中它",
 	AddProgram:                     "添加程序",
-	AddProgramHint:                 "选择要开机启动的程序或脚本，可以一次选多个",
+	AddProgramHint:                 "选择程序或脚本，可以一次选多个",
+	AddInstalledApps:               "已安装应用",
+	InstalledAppsTitle:             "添加已安装应用",
+	InstalledAppsSearch:            "搜索名称或路径",
+	InstalledAppsAll:               "全部应用",
+	InstalledAppsDesktop:           "桌面程序",
+	InstalledAppsStore:             "商店应用",
+	InstalledAppsLoading:           "正在读取应用列表…",
+	InstalledAppsFailed:            "无法读取应用列表，请重新读取",
+	InstalledAppsEmpty:             "未找到匹配的应用",
+	InstalledAppsAdd:               "添加所选应用",
+	InstalledAppsSelection:         "已选 %d 个应用",
+	InstalledAppsRefresh:           "重新读取",
+	InstalledAppsCancel:            "取消",
+	ManagedPackagedDirectory:       "商店应用的工作目录由 Windows 决定",
+	ManagedPackagedArgsHint:        "参数是否生效取决于应用是否支持",
 	RemoveConfirmPrompt:            "从列表删除“%s”？",
 	RemoveConfirmLabel:             "删除",
 	OpenLogs:                       "打开",
@@ -459,10 +489,10 @@ var enUS = Messages{
 	ManagedEnabledHint:             "When off, stops normal sign-in starts; Custom timing and the program's original startup can still run",
 	ManagedModeLabel:               "How it starts",
 	ManagedLaunchOnly:              "Start normally",
-	ManagedLaunchOnlyHint:          "Uses the program's original startup; if there is none, WinTray starts the program",
+	ManagedLaunchOnlyHint:          "Keeps the program's own startup settings; Custom timing can schedule a separate launch",
 	ManagedTaskLaunch:              "Launch at boot",
 	ManagedTaskLaunchHint:          "Starts at Windows sign-in with the original startup arguments and permissions; uses these settings if no original startup exists",
-	ManagedTaskLaunchTip:           "Requires an .exe file; ignores the launch interval; new administrator tasks need confirmation; existing task delays stay unchanged",
+	ManagedTaskLaunchTip:           "Supports EXE files and Store apps; ignores the launch interval; new administrator tasks need confirmation; existing task delays stay unchanged",
 	ManagedTaskArgsHint:            "Uses the original startup arguments when available; otherwise uses these arguments",
 	ManagedTaskLaunchNowHint:       "Runs the sign-in task after settings are saved; skips programs that are already running",
 	ManagedTaskFailedTitle:         "Launch at boot not applied",
@@ -486,7 +516,7 @@ var enUS = Messages{
 	ManagedScheduleStartUnit:       "min after sign-in",
 	ManagedScheduleExit:            "Automatic exit (min)",
 	ManagedScheduleExitUnit:        "min",
-	ManagedScheduleHint:            "Range: 0–1440 minutes; automatic exit set to 0 keeps the program running; this schedule still runs when sign-in startup is off",
+	ManagedScheduleHint:            "Range: 0–1440 minutes; automatic exit set to 0 keeps the program running; this schedule also applies in Start normally mode",
 	ManagedFrequency:               "Limit automatic launches",
 	ManagedFrequencyDays:           "days:",
 	ManagedFrequencyRuns:           "runs",
@@ -497,7 +527,7 @@ var enUS = Messages{
 	ManagedLaunchHidden:            "Run in background",
 	ManagedLaunchHiddenHint:        "Starts with the console hidden; select Show Window to read output and enter commands",
 	ManagedLaunchNow:               "Launch Now",
-	ManagedLaunchNowHint:           "Starts once; uses normal mode when Start this program at sign-in is off",
+	ManagedLaunchNowHint:           "Starts once using the selected launch mode",
 	ManagedLaunchNowBusy:           "Starting…",
 	ManagedStopProgram:             "Stop Program",
 	ManagedStopProgramBusy:         "Stopping…",
@@ -510,7 +540,22 @@ var enUS = Messages{
 	ManagedWindowFailed:            "Could not change window visibility; check that the program is responding and try again",
 	ManagedWindowActivation:        "The window is visible; select it on the taskbar",
 	AddProgram:                     "Add Program",
-	AddProgramHint:                 "Pick programs or scripts to start at sign-in; you can select several at once",
+	AddProgramHint:                 "Pick programs or scripts; you can select several at once",
+	AddInstalledApps:               "Installed apps",
+	InstalledAppsTitle:             "Add installed apps",
+	InstalledAppsSearch:            "Search by name or path",
+	InstalledAppsAll:               "All apps",
+	InstalledAppsDesktop:           "Desktop apps",
+	InstalledAppsStore:             "Store apps",
+	InstalledAppsLoading:           "Reading the app list…",
+	InstalledAppsFailed:            "Cannot read the app list; select Reload",
+	InstalledAppsEmpty:             "No matching apps",
+	InstalledAppsAdd:               "Add selected apps",
+	InstalledAppsSelection:         "%d apps selected",
+	InstalledAppsRefresh:           "Reload",
+	InstalledAppsCancel:            "Cancel",
+	ManagedPackagedDirectory:       "Windows sets the working directory for Store apps",
+	ManagedPackagedArgsHint:        "Arguments take effect only if the app supports them",
 	RemoveConfirmPrompt:            "Remove \"%s\" from the list?",
 	RemoveConfirmLabel:             "Delete",
 	OpenLogs:                       "Open",
@@ -612,9 +657,6 @@ func FormatManagedParam(language string, app config.ManagedAppEntry) string {
 
 func formatManagedMode(language string, app config.ManagedAppEntry) string {
 	msg := For(language)
-	if !app.RunOnStartup {
-		return msg.ManagedListParamPausedTemplate
-	}
 	if app.LaunchViaLogonTask {
 		return msg.ManagedTaskLaunch
 	}

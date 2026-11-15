@@ -19,6 +19,7 @@ import (
 
 	"github.com/lxn/win"
 	"golang.org/x/sys/windows"
+	"wintray/internal/shellapp"
 )
 
 var (
@@ -748,7 +749,17 @@ func (l *listener) iconPath(d trayData) string {
 			return owner.(hostedIconOwner).path
 		}
 	}
-	return windowProcessPath(d.HWnd)
+	path := windowProcessPath(d.HWnd)
+	if l.selected(path) {
+		return path
+	}
+	var processID uint32
+	win.GetWindowThreadProcessId(win.HWND(d.HWnd), &processID)
+	applicationPath := strings.ToLower(shellapp.ProcessPath(processID))
+	if l.selected(applicationPath) {
+		return applicationPath
+	}
+	return path
 }
 
 func (l *listener) selected(path string) bool {
@@ -779,9 +790,9 @@ func (l *listener) record(path string, d trayData, raw []byte, img *image.NRGBA)
 	if !known {
 		t = &trackedIcon{seq: l.seq}
 		t.key = id
-		t.ExePath = path
 		l.icons[id] = t
 	}
+	t.ExePath = path
 	t.revision = l.seq
 	if d.HWnd != 0 {
 		t.owner, t.uid = d.HWnd, d.UID

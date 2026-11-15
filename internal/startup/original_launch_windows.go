@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"wintray/internal/shellapp"
+
 	"golang.org/x/sys/windows/registry"
 )
 
@@ -22,6 +24,9 @@ const (
 // LaunchHiddenStartup retains the original command/shortcut while requesting
 // its initial window hidden for a frequency-controlled background launch.
 func LaunchHiddenStartup(mode, source, exePath string) error {
+	if mode == AppTaskHelperConfigured && shellapp.IsPath(exePath) {
+		return LaunchConfigured(source, exePath)
+	}
 	switch mode {
 	case AppTaskHelperRun:
 		return launchStartupRunFrom(runKeyPath, source, exePath, func(path, args, dir string, _ int32) error { return shellLaunchOriginal(path, args, dir, 0) })
@@ -50,6 +55,10 @@ func LaunchHiddenStartup(mode, source, exePath string) error {
 // LaunchConfigured inherits the working directory set on the logon task.
 // Old tasks already use the program folder; new ones may select another folder.
 func LaunchConfigured(args, exePath string) error {
+	if shellapp.IsPath(exePath) {
+		_, err := shellapp.Activate(exePath, args)
+		return err
+	}
 	if !filepath.IsAbs(exePath) || !strings.EqualFold(filepath.Ext(exePath), ".exe") {
 		return errors.New("configured startup requires an absolute .exe path")
 	}

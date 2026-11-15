@@ -231,7 +231,7 @@ func TestAppTasksSyncReconcilesWantedSet(t *testing.T) {
 		ManagedApps: []config.ManagedAppEntry{
 			{ID: "1", Name: "First", ExePath: `C:\Apps\One.exe`, RunOnStartup: true, LaunchViaLogonTask: true, Args: "--a"},
 			{ID: "2", Name: "Second", ExePath: `C:\Apps\Two.exe`, RunOnStartup: true, LaunchViaLogonTask: true},
-			{ID: "3", Name: "Paused", ExePath: `C:\Apps\Three.exe`, RunOnStartup: false, LaunchViaLogonTask: true},
+			{ID: "3", Name: "Normal", ExePath: `C:\Apps\Three.exe`},
 		},
 	}
 

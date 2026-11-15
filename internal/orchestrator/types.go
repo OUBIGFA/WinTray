@@ -11,17 +11,18 @@ import (
 )
 
 type ManagedWindowInfo struct {
-	Handle       uintptr
-	ProcessID    uint32
-	ProcessName  string
-	ProcessPath  string
-	Title        string
-	ClassName    string
-	IsVisible    bool
-	IsMinimized  bool
-	IsForeground bool
-	OwnerHandle  uintptr
-	IsToolWindow bool
+	Handle        uintptr
+	ProcessID     uint32
+	ProcessName   string
+	ProcessPath   string
+	ApplicationID string
+	Title         string
+	ClassName     string
+	IsVisible     bool
+	IsMinimized   bool
+	IsForeground  bool
+	OwnerHandle   uintptr
+	IsToolWindow  bool
 }
 
 type WindowEnumerator interface {

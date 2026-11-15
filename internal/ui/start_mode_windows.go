@@ -6,16 +6,17 @@ import (
 	"path/filepath"
 	"strings"
 	"wintray/internal/config"
+	"wintray/internal/shellapp"
 )
 
 // A mode maps to the existing flags, keeping old configuration files valid.
 type startMode int
 
 const (
-	startToTray startMode = iota
+	startNormal startMode = iota
+	startToTray
 	startHidden
 	startTask
-	startNormal
 )
 
 func startModeOf(app config.ManagedAppEntry) startMode {
@@ -31,10 +32,11 @@ func startModeOf(app config.ManagedAppEntry) startMode {
 	}
 }
 func (m startMode) applyTo(app *config.ManagedAppEntry) {
+	app.RunOnStartup = m != startNormal
 	app.LaunchViaLogonTask = m == startTask
 	app.LaunchHiddenInBackground = m == startHidden
 	app.TrayBehavior.AutoMinimizeAndHideOnLaunch = m == startToTray
 }
 func shouldDefaultLaunchHidden(path string) bool {
-	return !strings.EqualFold(filepath.Ext(path), ".exe")
+	return !shellapp.IsPath(path) && !strings.EqualFold(filepath.Ext(path), ".exe")
 }

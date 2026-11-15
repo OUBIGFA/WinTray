@@ -9,12 +9,12 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/egoist/mygo"
 	native "github.com/egoist/mygo/ui"
 	"wintray/internal/config"
 	"wintray/internal/i18n"
+	"wintray/internal/shellapp"
 	"wintray/internal/stringutil"
 	"wintray/internal/ui/kit"
 	"wintray/internal/ui/kit/icons"
@@ -39,6 +39,7 @@ type desktopState struct {
 	detailFor             string
 	split                 kit.SplitState
 	removeID              string
+	installedApps         *installedAppPicker
 }
 
 func nativeAction(c *native.Context, label string, icon *native.SVG) native.Element {
@@ -72,6 +73,7 @@ func (w *MainWindow) nativeView(c *native.Context) {
 		native.Divider(c)
 		w.nativeFooter(c, m)
 	})
+	w.nativeInstalledApps(c, m)
 	w.desktop.numberCommits = w.desktop.frameNumberCommits
 	// Read the footer's exit gesture before blur saves. Pointer-down moves
 	// focus first; do not block its matching click in a save/validation call.
@@ -142,6 +144,9 @@ func (w *MainWindow) nativePrograms(c *native.Context, m i18n.Messages) []string
 		native.Row(c).Gap(16).Children(func() {
 			if nativePrimaryAction(c, m.AddProgram, icons.Plus).Clicked() {
 				w.nativeChooseProgram(false)
+			}
+			if nativeAction(c, m.AddInstalledApps, icons.AppWindow).Clicked() {
+				w.nativeOpenInstalledApps()
 			}
 			if !w.settings.RunAtLogon {
 				kit.Help(c, m.LogonOffNotice).Grow(1)
@@ -430,31 +435,25 @@ func (w *MainWindow) nativeAddPaths(paths []string, replace bool) {
 	if len(paths) == 0 {
 		return
 	}
+	if !replace {
+		applications := make([]shellapp.Application, 0, len(paths))
+		for _, path := range paths {
+			applications = append(applications, shellapp.Application{Name: stringutil.TrimExt(filepath.Base(path)), Path: path})
+		}
+		w.nativeAddApplications(applications)
+		return
+	}
 	w.commitNativeEdits()
-	if replace {
-		entry, ok := w.nativeSelected()
-		if !ok {
-			return
-		}
-		if entry.CollectTrayIcon && !w.nativeCollect(w.desktop.selected, false) {
-			return
-		}
-		entry.ExePath, entry.Name = paths[0], stringutil.TrimExt(filepath.Base(paths[0]))
-		if shouldDefaultLaunchHidden(entry.ExePath) {
-			startHidden.applyTo(entry)
-		}
-	} else {
-		base := time.Now().UnixNano()
-		for i, path := range paths {
-			hidden := shouldDefaultLaunchHidden(path)
-			w.settings.ManagedApps = append(w.settings.ManagedApps, config.ManagedAppEntry{
-				ID: strconv.FormatInt(base+int64(i), 10), Name: stringutil.TrimExt(filepath.Base(path)), ExePath: path, RunOnStartup: true,
-				LaunchHiddenInBackground: hidden, TrayBehavior: config.TrayBehavior{AutoMinimizeAndHideOnLaunch: !hidden},
-				Schedule: config.Schedule{AutoExitMinutes: 30, FrequencyDays: 1, FrequencyRuns: 1},
-			})
-		}
-		w.desktop.selected = len(w.settings.ManagedApps) - 1
-		w.desktop.list.ScrollIntoView(w.desktop.selected)
+	entry, ok := w.nativeSelected()
+	if !ok {
+		return
+	}
+	if entry.CollectTrayIcon && !w.nativeCollect(w.desktop.selected, false) {
+		return
+	}
+	entry.ExePath, entry.Name = paths[0], stringutil.TrimExt(filepath.Base(paths[0]))
+	if shouldDefaultLaunchHidden(entry.ExePath) && startModeOf(*entry) != startNormal {
+		startHidden.applyTo(entry)
 	}
 	w.save()
 	if w.desktop.window != nil {

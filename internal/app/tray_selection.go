@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"wintray/internal/config"
+	"wintray/internal/shellapp"
 )
 
 // traySelectionChange returns the settings with one program's tray icon
@@ -19,8 +20,8 @@ func traySelectionChange(current config.Settings, id string, on bool) (config.Se
 		if app.ID != id {
 			continue
 		}
-		if on && !strings.EqualFold(filepath.Ext(app.ExePath), ".exe") {
-			return current, fmt.Errorf("tray icon collection requires an .exe program")
+		if on && !shellapp.IsPath(app.ExePath) && !strings.EqualFold(filepath.Ext(app.ExePath), ".exe") {
+			return current, fmt.Errorf("tray icon collection requires an EXE or packaged application")
 		}
 		app.CollectTrayIcon = on
 		return next, nil

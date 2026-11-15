@@ -9,6 +9,8 @@ import (
 	"runtime"
 	"time"
 	"unsafe"
+
+	"wintray/internal/shellapp"
 )
 
 var (
@@ -58,9 +60,7 @@ func escapeTargetBelongsTo(hwnd, target uintptr) bool {
 }
 
 func windowIdentity(hwnd uintptr) HiddenWindow {
-	var pid uint32
-	procGetWindowThreadProcess.Call(hwnd, uintptr(unsafe.Pointer(&pid)))
-	return HiddenWindow{Handle: hwnd, ProcessID: pid}
+	return HiddenWindow{Handle: hwnd, ProcessID: shellapp.WindowProcessID(hwnd)}
 }
 
 // SendEscape posts a key pair to the program's own input queue, never global

@@ -13,6 +13,7 @@ import (
 
 	"github.com/lxn/win"
 	"golang.org/x/sys/windows"
+	"wintray/internal/shellapp"
 )
 
 // startupVisibility is a short-lived, non-injected visual shield, not a
@@ -218,21 +219,20 @@ func (g *startupVisibility) track(hwnd uintptr) {
 		}
 		delete(g.windows, hwnd) // the HWND was destroyed/reused
 	}
-	var pid uint32
-	procGetWindowThreadProcess.Call(hwnd, uintptr(unsafe.Pointer(&pid)))
+	pid := shellapp.WindowProcessID(hwnd)
 	if pid == 0 || pid == uint32(syscall.Getpid()) {
 		return
 	}
 	path, known := g.paths[pid]
 	if !known {
-		_, path = processInfo(pid)
+		path = processManagedPath(pid, g.path)
 		g.paths[pid] = path
 	}
 	if !executablePathsMatch(path, g.path) {
 		return
 	}
 	// Revalidate a positive cache hit before changing another process's UI.
-	if _, currentPath := processInfo(pid); !executablePathsMatch(currentPath, g.path) {
+	if currentPath := processManagedPath(pid, g.path); !executablePathsMatch(currentPath, g.path) {
 		return
 	}
 	style := win.GetWindowLong(win.HWND(hwnd), win.GWL_STYLE)

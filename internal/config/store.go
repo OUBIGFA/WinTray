@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"wintray/internal/shellapp"
 )
 
 type Store struct {
@@ -124,6 +126,17 @@ func migrate(settings Settings) Settings {
 		}
 		settings.SchemaVersion = 3
 	}
+	if settings.SchemaVersion < 4 {
+		for index := range settings.ManagedApps {
+			entry := &settings.ManagedApps[index]
+			if !entry.RunOnStartup && !entry.Schedule.Enabled {
+				entry.LaunchViaLogonTask = false
+				entry.LaunchHiddenInBackground = false
+				entry.TrayBehavior.AutoMinimizeAndHideOnLaunch = false
+			}
+		}
+		settings.SchemaVersion = 4
+	}
 	settings.StartupIntervalSeconds = ClampStartupIntervalSeconds(settings.StartupIntervalSeconds)
 	if settings.CloseWindowRetrySeconds < 0 {
 		settings.CloseWindowRetrySeconds = 0
@@ -145,7 +158,7 @@ func migrate(settings Settings) Settings {
 		// WinTray's hidden/close-to-tray launch modes must not override it.
 		// Scripts still use the explicit script launch modes, not migration.
 		if settings.ManagedApps[i].LaunchViaLogonTask {
-			if !strings.EqualFold(filepath.Ext(settings.ManagedApps[i].ExePath), ".exe") {
+			if !shellapp.IsPath(settings.ManagedApps[i].ExePath) && !strings.EqualFold(filepath.Ext(settings.ManagedApps[i].ExePath), ".exe") {
 				settings.ManagedApps[i].LaunchViaLogonTask = false
 			}
 			settings.ManagedApps[i].LaunchHiddenInBackground = false
@@ -154,6 +167,7 @@ func migrate(settings Settings) Settings {
 		if settings.ManagedApps[i].LaunchHiddenInBackground {
 			settings.ManagedApps[i].TrayBehavior.AutoMinimizeAndHideOnLaunch = false
 		}
+		settings.ManagedApps[i].RunOnStartup = settings.ManagedApps[i].LaunchViaLogonTask || settings.ManagedApps[i].LaunchHiddenInBackground || settings.ManagedApps[i].TrayBehavior.AutoMinimizeAndHideOnLaunch
 		settings.ManagedApps[i].TrayBehavior.CloseDelaySeconds = ClampCloseDelaySeconds(settings.ManagedApps[i].TrayBehavior.CloseDelaySeconds)
 		schedule := &settings.ManagedApps[i].Schedule
 		schedule.StartDelayMinutes = ClampScheduleMinutes(schedule.StartDelayMinutes)

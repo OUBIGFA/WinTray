@@ -9,6 +9,7 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+	"wintray/internal/shellapp"
 )
 
 func hasRunningProcessByIdentity(expectedPath, expectedName string) bool {
@@ -88,16 +89,21 @@ func runningProcessStartsByPath(paths []string) map[string]time.Time {
 		return nil
 	}
 	wanted := make(map[string][]string)
+	packaged := make(map[string]string)
 	for _, path := range paths {
 		path = strings.ToLower(normalizePath(path))
 		if path == "" {
+			continue
+		}
+		if identifier := shellapp.ID(path); identifier != "" {
+			packaged[identifier] = path
 			continue
 		}
 		base := filepath.Base(path)
 		name := normalizeIdentity(strings.TrimSuffix(base, filepath.Ext(base)))
 		wanted[name] = append(wanted[name], path)
 	}
-	if len(wanted) == 0 {
+	if len(wanted) == 0 && len(packaged) == 0 {
 		return nil
 	}
 	starts := make(map[string]time.Time)
@@ -105,7 +111,7 @@ func runningProcessStartsByPath(paths []string) map[string]time.Time {
 	visitRunningProcesses(func(pid uint32, name string) bool {
 		name = strings.TrimSpace(name)
 		candidates := wanted[normalizeIdentity(strings.TrimSuffix(name, filepath.Ext(name)))]
-		if pid == 0 || len(candidates) == 0 {
+		if pid == 0 || (len(candidates) == 0 && len(packaged) == 0) {
 			return true
 		}
 		h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
@@ -113,11 +119,20 @@ func runningProcessStartsByPath(paths []string) map[string]time.Time {
 			return true
 		}
 		defer windows.CloseHandle(h)
-		size := uint32(len(buf))
-		if windows.QueryFullProcessImageName(h, 0, &buf[0], &size) != nil {
+		path := ""
+		if len(candidates) > 0 {
+			size := uint32(len(buf))
+			if windows.QueryFullProcessImageName(h, 0, &buf[0], &size) == nil {
+				path = normalizePath(windows.UTF16ToString(buf[:size]))
+			}
+		}
+		packagedPath := ""
+		if len(packaged) > 0 {
+			packagedPath = packaged[strings.ToLower(shellapp.ProcessID(h))]
+		}
+		if path == "" && packagedPath == "" {
 			return true
 		}
-		path := normalizePath(windows.UTF16ToString(buf[:size]))
 		// Read identity and creation time from the same handle so a PID reused
 		// during the scan cannot lend its age to a different executable.
 		var creation, exit, kernel, user windows.Filetime
@@ -125,6 +140,11 @@ func runningProcessStartsByPath(paths []string) map[string]time.Time {
 			return true
 		}
 		started := time.Unix(0, creation.Nanoseconds())
+		if packagedPath != "" {
+			if previous, ok := starts[packagedPath]; !ok || started.Before(previous) {
+				starts[packagedPath] = started
+			}
+		}
 		for _, expectedPath := range candidates {
 			// Preserve EqualFold semantics for Unicode directory names;
 			// lower-case map equality alone is not equivalent.
@@ -143,6 +163,9 @@ func runningProcessStartsByPath(paths []string) map[string]time.Time {
 func processIdentityMatches(pid uint32, exeName, expectedPath, targetIdentity string) bool {
 	if pid == 0 {
 		return false
+	}
+	if shellapp.IsPath(expectedPath) {
+		return strings.EqualFold(shellapp.ProcessPath(pid), expectedPath)
 	}
 	if scriptInterpreter(expectedPath) != "" {
 		return scriptProcessMatches(pid, exeName, expectedPath)
@@ -170,6 +193,13 @@ func processIdentityMatches(pid uint32, exeName, expectedPath, targetIdentity st
 		return false
 	}
 	return executablePathsMatch(fullPath, expectedPath)
+}
+
+func processManagedPath(pid uint32, expectedPath string) string {
+	if shellapp.IsPath(expectedPath) {
+		return shellapp.ProcessPath(pid)
+	}
+	return processExecutablePath(pid)
 }
 
 func processExecutablePath(pid uint32) string {

@@ -77,22 +77,21 @@ func TestStoreLoadWithError_ReadFailureDoesNotLookLikeMissingFile(t *testing.T) 
 	}
 }
 
-func TestShouldLaunchViaWinTray_StartupOrCustomScheduleEnablesLaunch(t *testing.T) {
+func TestShouldLaunchViaWinTray_ModeOrCustomScheduleEnablesLaunch(t *testing.T) {
 	tests := []struct {
 		name  string
 		entry ManagedAppEntry
 		want  bool
 	}{
 		{
-			name: "paused without schedule does not launch",
+			name: "normal without schedule does not launch",
 			entry: ManagedAppEntry{
-				RunOnStartup:             false,
-				LaunchHiddenInBackground: true,
+				RunOnStartup: false,
 			},
 			want: false,
 		},
 		{
-			name: "custom schedule launches while startup switch is off",
+			name: "custom schedule launches in normal mode",
 			entry: ManagedAppEntry{
 				RunOnStartup: false,
 				Schedule:     Schedule{Enabled: true, StartDelayMinutes: 30},
@@ -100,11 +99,11 @@ func TestShouldLaunchViaWinTray_StartupOrCustomScheduleEnablesLaunch(t *testing.
 			want: true,
 		},
 		{
-			name: "enabled launch only task launches",
+			name: "legacy switch does not launch a normal-mode app",
 			entry: ManagedAppEntry{
 				RunOnStartup: true,
 			},
-			want: true,
+			want: false,
 		},
 	}
 
@@ -159,15 +158,15 @@ func TestMigrate_LegacySchemaEnablesRunOnStartup(t *testing.T) {
 		SchemaVersion: 1,
 		Language:      "en-US",
 		ManagedApps: []ManagedAppEntry{
-			{Name: "App A", RunOnStartup: false},
-			{Name: "App B"},
+			{Name: "App A", ExePath: "C:/Apps/A.exe", RunOnStartup: false},
+			{Name: "App B", ExePath: "C:/Apps/B.exe"},
 		},
 	}
 
 	got := migrate(input)
 
-	if got.SchemaVersion != 3 {
-		t.Fatalf("migrate schema version = %d, want 3", got.SchemaVersion)
+	if got.SchemaVersion != 4 {
+		t.Fatalf("migrate schema version = %d, want 4", got.SchemaVersion)
 	}
 	for i, app := range got.ManagedApps {
 		if !app.RunOnStartup {
@@ -181,15 +180,15 @@ func TestMigrate_SchemaV2PreservesRunOnStartupFalse(t *testing.T) {
 		SchemaVersion: 2,
 		Language:      "en-US",
 		ManagedApps: []ManagedAppEntry{
-			{Name: "App A", RunOnStartup: false},
-			{Name: "App B", RunOnStartup: true},
+			{Name: "App A", ExePath: "C:/Apps/A.exe", RunOnStartup: false},
+			{Name: "App B", ExePath: "C:/Apps/B.exe", RunOnStartup: true},
 		},
 	}
 
 	got := migrate(input)
 
-	if got.SchemaVersion != 3 {
-		t.Fatalf("migrate schema version = %d, want 3", got.SchemaVersion)
+	if got.SchemaVersion != 4 {
+		t.Fatalf("migrate schema version = %d, want 4", got.SchemaVersion)
 	}
 	if got.ManagedApps[0].RunOnStartup {
 		t.Fatalf("managed app 0 RunOnStartup = true, want false")
@@ -222,8 +221,8 @@ func TestMigrate_SchemaV2DefaultsExeToAutoHide(t *testing.T) {
 	}
 
 	got := migrate(input)
-	if got.SchemaVersion != 3 {
-		t.Fatalf("migrate schema version = %d, want 3", got.SchemaVersion)
+	if got.SchemaVersion != 4 {
+		t.Fatalf("migrate schema version = %d, want 4", got.SchemaVersion)
 	}
 	if !got.ManagedApps[0].TrayBehavior.AutoMinimizeAndHideOnLaunch {
 		t.Fatalf("exe managed app auto minimize = false, want true")
@@ -320,7 +319,7 @@ func TestLogonTaskAppsOrderAndDelays(t *testing.T) {
 		ManagedApps: []ManagedAppEntry{
 			{ID: "1", Name: "First", ExePath: `C:\Apps\One.exe`, RunOnStartup: true, LaunchViaLogonTask: true},
 			{ID: "2", Name: "WinTray launched", ExePath: `C:\Apps\Other.exe`, RunOnStartup: true},
-			{ID: "3", Name: "Paused", ExePath: `C:\Apps\Paused.exe`, RunOnStartup: false, LaunchViaLogonTask: true},
+			{ID: "3", Name: "Normal", ExePath: `C:\Apps\Paused.exe`},
 			{ID: "4", Name: "Second", ExePath: `C:\Apps\Two.exe`, RunOnStartup: true, LaunchViaLogonTask: true},
 			{ID: "5", Name: "Scheduled", ExePath: `C:\Apps\Three.exe`, RunOnStartup: false, LaunchViaLogonTask: true,
 				Schedule: Schedule{Enabled: true, StartDelayMinutes: 2}},
@@ -329,7 +328,7 @@ func TestLogonTaskAppsOrderAndDelays(t *testing.T) {
 
 	got := LogonTaskApps(settings)
 	if len(got) != 3 {
-		t.Fatalf("task apps = %d, want 3 (paused entries get no task)", len(got))
+		t.Fatalf("task apps = %d, want 3 (normal entries get no task)", len(got))
 	}
 	if got[0].Entry.ID != "1" || got[1].Entry.ID != "4" || got[2].Entry.ID != "5" {
 		t.Fatalf("task app order = %q, %q, %q; want list order", got[0].Entry.ID, got[1].Entry.ID, got[2].Entry.ID)

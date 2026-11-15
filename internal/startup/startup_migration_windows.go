@@ -17,6 +17,7 @@ import (
 	"golang.org/x/sys/windows/registry"
 
 	"wintray/internal/config"
+	"wintray/internal/shellapp"
 )
 
 var errApprovalChanged = errors.New("startup enable state changed outside WinTray; not overwriting it")
@@ -59,7 +60,7 @@ func loadMigrationState(path string) (*migrationState, error) {
 		return nil, fmt.Errorf("invalid original startup backup %s (left untouched): version=%d err=%v", path, decoded.Version, err)
 	}
 	for name, app := range decoded.Apps {
-		if name == "" || !filepath.IsAbs(app.ExePath) {
+		if name == "" || (!shellapp.IsPath(app.ExePath) && !filepath.IsAbs(app.ExePath)) {
 			return nil, fmt.Errorf("invalid startup backup entry %q (left untouched)", name)
 		}
 		if app.NativeTask != nil {
@@ -215,6 +216,23 @@ func usableStartupEntries(entries []startupEntry, previous appMigration) ([]star
 	return usable, nil
 }
 
+func (t *AppTasks) syncConfiguredStartup(app config.LogonTaskApp, spec appTaskSpec, state *migrationState, allowElevated bool) error {
+	spec.args = windows.ComposeCommandLine([]string{AppTaskHelperConfigured, app.Entry.Args, app.Entry.ExePath})
+	if spec.demandOnly && app.Entry.LaunchHiddenInBackground {
+		spec.args = AppTaskHelperHidden + " " + spec.args
+	}
+	spec.exePath = t.selfExe
+	if err := t.syncOne(spec, allowElevated); err != nil {
+		return err
+	}
+	if spec.demandOnly {
+		state.Apps[spec.name] = appMigration{ExePath: app.Entry.ExePath, Frequency: true}
+		return t.saveMigrationState(state)
+	}
+	t.report("registered configured logon startup: " + app.Entry.Name)
+	return nil
+}
+
 func (t *AppTasks) syncPreservingStartup(app config.LogonTaskApp, inventory []taskDefinition, state *migrationState, allowElevated bool) error {
 	spec := t.spec(app)
 	previous := state.Apps[spec.name]
@@ -239,6 +257,9 @@ func (t *AppTasks) syncPreservingStartup(app config.LogonTaskApp, inventory []ta
 		// This also heals old, parameterless replacement tasks on ambiguous
 		// discovery. Keeping such a task enabled would keep the bug alive.
 		return errors.Join(cause, t.releaseMigration(spec.name, state, allowElevated))
+	}
+	if shellapp.IsPath(app.Entry.ExePath) {
+		return t.syncConfiguredStartup(app, spec, state, allowElevated)
 	}
 	if !filepath.IsAbs(app.Entry.ExePath) || !strings.EqualFold(filepath.Ext(app.Entry.ExePath), ".exe") {
 		return fail(errors.New("logon startup requires an absolute .exe path"))
@@ -299,22 +320,7 @@ func (t *AppTasks) syncPreservingStartup(app config.LogonTaskApp, inventory []ta
 	// Do not mistake an unreadable, disabled, or removed migrated source for
 	// this case (those retain the fail-closed paths below).
 	if native == "" && len(entries) == 0 && len(previous.Approvals) == 0 {
-		// Launched through WinTray's helper like a migrated entry, so the
-		// program waits until WinTray itself is up at sign-in.
-		spec.args = windows.ComposeCommandLine([]string{AppTaskHelperConfigured, app.Entry.Args, app.Entry.ExePath})
-		if spec.demandOnly && app.Entry.LaunchHiddenInBackground {
-			spec.args = AppTaskHelperHidden + " " + spec.args
-		}
-		spec.exePath = t.selfExe
-		if err := t.syncOne(spec, allowElevated); err != nil {
-			return err
-		}
-		if spec.demandOnly {
-			state.Apps[spec.name] = appMigration{ExePath: app.Entry.ExePath, Frequency: true}
-			return t.saveMigrationState(state)
-		}
-		t.report("registered configured logon startup: " + app.Entry.Name)
-		return nil
+		return t.syncConfiguredStartup(app, spec, state, allowElevated)
 	}
 	usable, err := usableStartupEntries(entries, previous)
 	if err != nil {

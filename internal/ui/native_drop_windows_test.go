@@ -62,12 +62,11 @@ func TestNativeDroppedProgramsAppendAndPersist(t *testing.T) {
 				entry := apps[count+i]
 				name := filepath.Base(path)
 				name = name[:len(name)-len(filepath.Ext(path))]
-				if entry.ID == "" || ids[entry.ID] || entry.Name != name || entry.ExePath != path || !entry.RunOnStartup {
+				if entry.ID == "" || ids[entry.ID] || entry.Name != name || entry.ExePath != path || entry.RunOnStartup {
 					t.Errorf("wrong dropped entry: %+v", entry)
 				}
 				ids[entry.ID] = true
-				hidden := i != 0
-				if entry.LaunchHiddenInBackground != hidden || entry.TrayBehavior.AutoMinimizeAndHideOnLaunch == hidden || entry.LaunchViaLogonTask || entry.CollectTrayIcon {
+				if startModeOf(entry) != startNormal || entry.CollectTrayIcon {
 					t.Errorf("drop changed default launch mode: %+v", entry)
 				}
 				wantSchedule := config.Schedule{AutoExitMinutes: config.DefaultAutoExitMinutes, FrequencyDays: 1, FrequencyRuns: 1}

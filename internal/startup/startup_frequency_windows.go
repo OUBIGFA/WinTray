@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"wintray/internal/config"
+	"wintray/internal/shellapp"
 )
 
 // Native tasks keep their actions, conditions, other triggers and privileges.
@@ -239,6 +240,9 @@ func (t *AppTasks) frequencyTaskName(entry config.ManagedAppEntry) (string, erro
 		if !matchesStartupHelper(task.Actions.Exec[0].Arguments, entry.ExePath) {
 			return "", errors.New("frequency task targets another program")
 		}
+	}
+	if shellapp.IsPath(entry.ExePath) {
+		return name, nil
 	}
 	entries, err := t.findEntries(entry.ExePath)
 	if err != nil {

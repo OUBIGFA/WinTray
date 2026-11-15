@@ -75,23 +75,22 @@ func captureNativeTest(t *testing.T, tt *native.Tester, name string) {
 	}
 }
 
-func TestNativePausedProgramKeepsIndependentAutoExit(t *testing.T) {
+func TestNativeNormalProgramKeepsIndependentAutoExit(t *testing.T) {
 	w := nativeProgramsFixture(1)
 	tt := native.NewTester(w.nativeView, 1200, 850)
 	m := i18n.For("zh-CN")
-	for _, label := range []string{"Program 000", m.ManagedEnabled, m.ManagedSchedule, m.ManagedLaunchHidden} {
+	for _, label := range []string{"Program 000", m.ManagedLaunchHidden, m.ManagedSchedule, m.ManagedLaunchOnly} {
 		if err := tt.Click(label); err != nil {
 			t.Fatal(err)
 		}
 	}
 	entry := w.settings.ManagedApps[0]
-	if entry.RunOnStartup || !entry.Schedule.Enabled || entry.Schedule.AutoExitMinutes != 30 || !entry.TrayBehavior.AutoMinimizeAndHideOnLaunch {
-		t.Fatalf("paused settings changed incorrectly: %+v", entry)
+	if startModeOf(entry) != startNormal || entry.RunOnStartup || !entry.Schedule.Enabled || entry.Schedule.AutoExitMinutes != 30 {
+		t.Fatalf("normal mode changed the independent schedule: %+v", entry)
 	}
 }
 
-// Turning off sign-in startup must not prevent preparing any schedule field.
-func TestNativePausedProgramCanEditFullSchedule(t *testing.T) {
+func TestNativeNormalProgramCanEditFullSchedule(t *testing.T) {
 	w := nativeProgramsFixture(1)
 	store := config.NewStore(filepath.Join(t.TempDir(), "settings.json"))
 	w.callbacks.OnSave = func(s config.Settings) {
@@ -101,7 +100,7 @@ func TestNativePausedProgramCanEditFullSchedule(t *testing.T) {
 	}
 	tt := native.NewTester(w.nativeView, 1200, 850)
 	m := i18n.For("zh-CN")
-	for _, label := range []string{"Program 000", m.ManagedEnabled, m.ManagedSchedule, m.ManagedFrequency} {
+	for _, label := range []string{"Program 000", m.ManagedLaunchOnly, m.ManagedSchedule, m.ManagedFrequency} {
 		if err := tt.Click(label); err != nil {
 			t.Fatal(err)
 		}
@@ -225,7 +224,7 @@ func TestNativeUnselectedEditorShowsSelectionPrompt(t *testing.T) {
 					if !tt.HasText(before[0].ExePath) || tt.HasText(m.ManagedExampleName) {
 						t.Fatal("selecting a program did not replace the example")
 					}
-					if err := tt.Click(m.ManagedEnabled); err != nil {
+					if err := tt.Click(m.ManagedLaunchOnly); err != nil {
 						t.Fatal(err)
 					}
 					if w.settings.ManagedApps[0].RunOnStartup || saves != 1 {
@@ -317,7 +316,7 @@ func TestNativeProgramColumnsAndControlsFit(t *testing.T) {
 					t.Fatalf("row is not reachable: selected=%d", w.desktop.selected)
 				}
 				// Check actual horizontal geometry, not text traversal order.
-				editor, _ := tt.Find(m.ManagedEnabled)
+				editor, _ := tt.Find(m.ManagedModeLabel)
 				lastRight := float32(0)
 				for _, title := range []string{m.ManagedColumnName, m.TrayColumn, m.ReplaceColumn, m.ManagedColumnOrder} {
 					header, ok := tt.Find(title)

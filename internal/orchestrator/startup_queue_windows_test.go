@@ -65,10 +65,11 @@ func TestStartupQueueSpacesActualLaunchesInListOrder(t *testing.T) {
 	}
 }
 
-func TestStartupQueueSkipsPausedInvalidAndExistingWithoutConsumingInterval(t *testing.T) {
+func TestStartupQueueSkipsNormalInvalidAndExistingWithoutConsumingInterval(t *testing.T) {
 	paused := queueTestEntry(t, "paused")
 	paused.RunOnStartup = false
-	invalid := config.ManagedAppEntry{Name: "invalid", ExePath: filepath.Join(t.TempDir(), "invalid.exe"), RunOnStartup: true}
+	paused.LaunchHiddenInBackground = false
+	invalid := config.ManagedAppEntry{Name: "invalid", ExePath: filepath.Join(t.TempDir(), "invalid.exe"), LaunchHiddenInBackground: true}
 	if err := os.WriteFile(invalid.ExePath, []byte("invalid PE"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +82,7 @@ func TestStartupQueueSkipsPausedInvalidAndExistingWithoutConsumingInterval(t *te
 	fresh := queueTestEntry(t, "fresh")
 	settings := config.DefaultSettings()
 	settings.StartupIntervalSeconds = 120
-	settings.ManagedApps = []config.ManagedAppEntry{paused, {Name: "empty", RunOnStartup: true}, invalid, existing, fresh, fresh}
+	settings.ManagedApps = []config.ManagedAppEntry{paused, {Name: "empty", LaunchHiddenInBackground: true}, invalid, existing, fresh, fresh}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	results := queueTestService().StartManagedApps(ctx, settings, nil)

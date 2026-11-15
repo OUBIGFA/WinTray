@@ -9,6 +9,7 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+	"wintray/internal/shellapp"
 )
 
 var (
@@ -50,7 +51,7 @@ func enumerateTopLevelWindows(includeHidden bool) []ManagedWindowInfo {
 	handles := enumerateTopLevelHandles()
 	result := make([]ManagedWindowInfo, 0, len(handles))
 	foreground, _, _ := procGetForegroundWindow.Call()
-	processes := make(map[uint32][2]string)
+	processes := make(map[uint32][3]string)
 	for _, hwnd := range handles {
 		if !includeHidden && !isWindowVisible(hwnd) {
 			continue
@@ -78,7 +79,7 @@ func enumWindowsProc(hwnd uintptr, _ uintptr) uintptr {
 
 // windowInfo also describes hidden UI while a startup shield is active.
 // The ordinary desktop enumerator above deliberately remains visible-only.
-func windowInfo(hwnd, foreground uintptr, processes map[uint32][2]string) ManagedWindowInfo {
+func windowInfo(hwnd, foreground uintptr, processes map[uint32][3]string) ManagedWindowInfo {
 	titleLen, _, _ := procGetWindowTextLengthW.Call(hwnd)
 	titleBuf := make([]uint16, titleLen+1)
 	_, _, _ = procGetWindowTextW.Call(hwnd, uintptr(unsafe.Pointer(&titleBuf[0])), uintptr(len(titleBuf)))
@@ -91,13 +92,13 @@ func windowInfo(hwnd, foreground uintptr, processes map[uint32][2]string) Manage
 	isTool := (exStyle & wsExToolWindow) != 0
 	isMin, _, _ := procIsIconic.Call(hwnd)
 
-	var pid uint32
-	_, _, _ = procGetWindowThreadProcess.Call(hwnd, uintptr(unsafe.Pointer(&pid)))
+	pid := shellapp.WindowProcessID(hwnd)
 	info, ok := processes[pid]
 	if !ok {
-		info = [2]string{}
+		info = [3]string{}
 		if pid != 0 {
 			info[0], info[1] = processInfo(pid)
+			info[2] = shellapp.ID(shellapp.ProcessPath(pid))
 		}
 		if processes != nil {
 			processes[pid] = info
@@ -105,17 +106,18 @@ func windowInfo(hwnd, foreground uintptr, processes map[uint32][2]string) Manage
 	}
 
 	return ManagedWindowInfo{
-		Handle:       hwnd,
-		ProcessID:    pid,
-		ProcessName:  info[0],
-		ProcessPath:  info[1],
-		Title:        windows.UTF16ToString(titleBuf),
-		ClassName:    windows.UTF16ToString(classBuf),
-		IsVisible:    isWindowVisible(hwnd),
-		IsMinimized:  isMin != 0,
-		IsForeground: hwnd == foreground,
-		OwnerHandle:  owner,
-		IsToolWindow: isTool,
+		Handle:        hwnd,
+		ProcessID:     pid,
+		ProcessName:   info[0],
+		ProcessPath:   info[1],
+		ApplicationID: info[2],
+		Title:         windows.UTF16ToString(titleBuf),
+		ClassName:     windows.UTF16ToString(classBuf),
+		IsVisible:     isWindowVisible(hwnd),
+		IsMinimized:   isMin != 0,
+		IsForeground:  hwnd == foreground,
+		OwnerHandle:   owner,
+		IsToolWindow:  isTool,
 	}
 }
 

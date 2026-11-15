@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"strings"
 	"unicode"
+
+	"wintray/internal/shellapp"
 )
 
 // closeAllowedScoreThreshold is the minimum confidence score required before
@@ -29,6 +31,9 @@ func normalizePath(path string) string {
 	p := strings.Trim(path, " \t\r\n\"")
 	if p == "" {
 		return ""
+	}
+	if shellapp.IsPath(p) {
+		return shellapp.PathPrefix + shellapp.ID(p)
 	}
 	full, err := filepath.Abs(p)
 	if err != nil {
@@ -70,6 +75,9 @@ func containsNormalizedIdentity(haystack, needle string) bool {
 
 func matchesExecutable(window ManagedWindowInfo, expectedExePath, expectedProcessName string) bool {
 	norm := normalizePath(window.ProcessPath)
+	if shellapp.IsPath(expectedExePath) {
+		return strings.EqualFold(window.ApplicationID, shellapp.ID(expectedExePath)) || strings.EqualFold(norm, expectedExePath)
+	}
 	if norm != "" && expectedExePath != "" {
 		return executablePathsMatch(norm, expectedExePath)
 	}
@@ -80,13 +88,15 @@ func hasTrustedWindowIdentity(window ManagedWindowInfo, expectedExePath string, 
 	if launchedPID != nil && *launchedPID != 0 && window.ProcessID == *launchedPID {
 		return true
 	}
-	path := normalizePath(window.ProcessPath)
-	return executablePathsMatch(path, expectedExePath)
+	return matchesExecutable(window, expectedExePath, "")
 }
 
 func matchesExecutableWithIdentityFallback(window ManagedWindowInfo, expectedExePath, expectedProcessName string) bool {
 	if matchesExecutable(window, expectedExePath, expectedProcessName) {
 		return true
+	}
+	if shellapp.IsPath(expectedExePath) {
+		return false
 	}
 	if containsNormalizedIdentity(window.ProcessName, expectedProcessName) {
 		return true
@@ -106,7 +116,7 @@ func computeCandidateScore(window ManagedWindowInfo, expectedExePath, expectedPr
 	if launchedPID != nil && window.ProcessID == *launchedPID {
 		score += 1000
 	}
-	if executablePathsMatch(window.ProcessPath, expectedExePath) {
+	if matchesExecutable(window, expectedExePath, "") {
 		score += 500
 	}
 	if expectedProcessName != "" && normalizeIdentity(window.ProcessName) == normalizeIdentity(expectedProcessName) {

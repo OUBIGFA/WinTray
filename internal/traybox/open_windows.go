@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/lxn/win"
+	"wintray/internal/shellapp"
 )
 
 // OpenIcon is the user-facing open gesture, distinct from raw native delivery.
@@ -22,7 +23,7 @@ func OpenIcon(ctx context.Context, icon Icon, latest func() (Icon, error)) error
 	}
 	var ownerPID uint32
 	win.GetWindowThreadProcessId(win.HWND(icon.owner), &ownerPID)
-	matching := map[uint32]bool{ownerPID: Contains([]string{icon.ExePath}, processPath(ownerPID))}
+	matching := map[uint32]bool{ownerPID: processMatchesPath(ownerPID, icon.ExePath)}
 	deadline := time.NewTimer(650 * time.Millisecond)
 	defer deadline.Stop()
 	tick := time.NewTicker(40 * time.Millisecond)
@@ -69,11 +70,10 @@ func iconHasVisibleWindow(icon Icon, matching map[uint32]bool) bool {
 		if !win.GetWindowRect(hwnd, &rect) || rect.Right-rect.Left < 32 || rect.Bottom-rect.Top < 32 {
 			continue
 		}
-		var pid uint32
-		win.GetWindowThreadProcessId(hwnd, &pid)
+		pid := shellapp.WindowProcessID(uintptr(hwnd))
 		match, known := matching[pid]
 		if !known {
-			match = Contains([]string{icon.ExePath}, processPath(pid))
+			match = processMatchesPath(pid, icon.ExePath)
 			matching[pid] = match
 		}
 		if match {

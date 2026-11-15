@@ -20,6 +20,9 @@ func TestNativeDisablingSchedulePersistsWithoutClearingValues(t *testing.T) {
 				w := nativeProgramsFixture(2)
 				w.settings.Language = language
 				w.settings.ManagedApps[0].RunOnStartup = runOnStartup
+				if !runOnStartup {
+					startNormal.applyTo(&w.settings.ManagedApps[0])
+				}
 				schedule := config.Schedule{
 					Enabled: true, StartDelayMinutes: 10, AutoExitMinutes: 30,
 					FrequencyEnabled: true, FrequencyDays: 7, FrequencyRuns: 2,

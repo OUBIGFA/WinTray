@@ -9,6 +9,7 @@ import (
 	"strings"
 	"syscall"
 	"wintray/internal/config"
+	"wintray/internal/shellapp"
 )
 
 // launchMode selects how the new process gets (or does not get) a window.
@@ -40,6 +41,17 @@ func (p *startedProcess) Wait() error {
 
 func startConfiguredProcess(entry config.ManagedAppEntry, mode launchMode) (*startedProcess, error) {
 	exePath, args := entry.ExePath, entry.Args
+	if shellapp.IsPath(exePath) {
+		processID, err := shellapp.Activate(exePath, args)
+		if err != nil {
+			return nil, err
+		}
+		process, err := os.FindProcess(int(processID))
+		if err != nil {
+			return nil, err
+		}
+		return &startedProcess{Process: process}, nil
+	}
 	dir := entry.LaunchDirectory()
 	// Reject an invalid directory before any launch path; never silently run
 	// a program against a different set of relative files.

@@ -1,0 +1,48 @@
+package config
+
+import "testing"
+
+func TestNormalStartupLeavesOriginalStartupAlone(t *testing.T) {
+	entry := ManagedAppEntry{RunOnStartup: true}
+	if ShouldLaunchViaWinTray(entry) {
+		t.Fatal("normal startup must not launch an app automatically")
+	}
+	entry.Schedule.Enabled = true
+	if !ShouldLaunchViaWinTray(entry) {
+		t.Fatal("an explicit custom schedule must remain independent")
+	}
+}
+
+func TestStartupModesReplaceLegacySwitch(t *testing.T) {
+	for _, entry := range []ManagedAppEntry{
+		{LaunchHiddenInBackground: true},
+		{LaunchViaLogonTask: true},
+		{TrayBehavior: TrayBehavior{AutoMinimizeAndHideOnLaunch: true}},
+	} {
+		if !ShouldLaunchViaWinTray(entry) {
+			t.Fatalf("configured startup mode was blocked by the removed switch: %+v", entry)
+		}
+	}
+}
+
+func TestLegacyPausedStartupMigratesToNormal(t *testing.T) {
+	settings := Settings{SchemaVersion: 3, ManagedApps: []ManagedAppEntry{
+		{ExePath: "C:/Apps/paused.exe", LaunchHiddenInBackground: true},
+		{ExePath: "C:/Apps/active.exe", RunOnStartup: true, TrayBehavior: TrayBehavior{AutoMinimizeAndHideOnLaunch: true}},
+		{ExePath: "C:/Apps/scheduled.exe", LaunchHiddenInBackground: true, Schedule: Schedule{Enabled: true}},
+	}}
+	got := migrate(settings)
+	if got.SchemaVersion < 4 {
+		t.Fatalf("schema version = %d, want at least 4", got.SchemaVersion)
+	}
+	paused, active, scheduled := got.ManagedApps[0], got.ManagedApps[1], got.ManagedApps[2]
+	if ShouldLaunchViaWinTray(paused) || paused.LaunchHiddenInBackground || paused.LaunchViaLogonTask || paused.TrayBehavior.AutoMinimizeAndHideOnLaunch {
+		t.Fatalf("paused app was re-enabled or kept a stale mode: %+v", paused)
+	}
+	if !ShouldLaunchViaWinTray(active) || !active.TrayBehavior.AutoMinimizeAndHideOnLaunch {
+		t.Fatalf("active startup behavior changed: %+v", active)
+	}
+	if !ShouldLaunchViaWinTray(scheduled) || !scheduled.LaunchHiddenInBackground {
+		t.Fatalf("explicit scheduled behavior changed: %+v", scheduled)
+	}
+}

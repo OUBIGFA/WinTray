@@ -272,6 +272,12 @@ func (w *MainWindow) ShowMainWindow() {
 
 func (w *MainWindow) HideMainWindow() {
 	w.commitNativeEdits()
+	if picker := w.desktop.installedApps; picker != nil {
+		if picker.cancel != nil {
+			picker.cancel()
+		}
+		w.desktop.installedApps = nil
+	}
 	w.programStatuses = nil
 	if w.iconsCancel != nil {
 		w.iconsCancel()

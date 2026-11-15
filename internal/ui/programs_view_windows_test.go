@@ -37,12 +37,12 @@ func TestStartModeTaskReplacesEveryOtherLaunchFlag(t *testing.T) {
 	}
 }
 
-func TestStartModesPreservePausedStartup(t *testing.T) {
+func TestStartModesReplaceLegacyStartupSwitch(t *testing.T) {
 	for _, mode := range []startMode{startToTray, startHidden, startNormal, startTask} {
 		app := config.ManagedAppEntry{}
 		mode.applyTo(&app)
-		if app.RunOnStartup {
-			t.Fatalf("mode %v unexpectedly enabled startup", mode)
+		if app.RunOnStartup != (mode != startNormal) || config.ShouldLaunchViaWinTray(app) != (mode != startNormal) {
+			t.Fatalf("mode %v did not determine automatic startup: %+v", mode, app)
 		}
 	}
 }

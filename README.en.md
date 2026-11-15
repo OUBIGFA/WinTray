@@ -25,12 +25,11 @@ Download one of these files from [Releases](../../releases).
 | Installed | `WinTray-Setup.exe` | Run the installer, then open WinTray from the Start menu |
 | Portable | `WinTray-Portable.zip` | Extract the complete archive, then run `WinTray.exe` |
 
-1. In **Programs**, select **Add Program**, or drag program files into the list. You can add several files at once.
+1. In **Programs**, select **Add Program** to add files, or **Installed apps** to select apps installed on the computer.
 2. Select a program.
-3. In **Startup & schedule**, turn on **Start this program at sign-in**.
-4. Select a mode under **How it starts**.
-5. In **Settings**, turn on **Start at sign-in**.
-6. Use **Launch Now** to check the launch behavior. Check automatic startup at the next Windows sign-in.
+3. In **Startup & schedule**, select a mode under **How it starts**.
+4. For automatic launches through WinTray, turn on **Start at sign-in** in **Settings**.
+5. Use **Launch Now** to check the launch behavior. Check automatic startup at the next Windows sign-in.
 
 Changes save automatically. For names, arguments, working directories, and numbers, press `Enter` or leave the field to save.
 
@@ -47,17 +46,22 @@ Changes save automatically. For names, arguments, working directories, and numbe
 
 Drag the divider between the list and details to change their widths. In a narrow window, the list appears above the details.
 
-## Supported files
+## Add programs and apps
 
-| File | Default mode | Requirement |
-| --- | --- | --- |
-| `.exe` | Close to tray | Select the file that displays the main window, not an updater |
-| `.bat` / `.cmd` | Run in background | Windows `cmd.exe` |
-| `.ps1` | Run in background | Windows PowerShell |
-| `.py` / `.pyw` | Run in background | `python.exe` / `pythonw.exe` available through `PATH` |
-| `.ahk` | Run in background | Install AutoHotkey and check that double-clicking the script runs it |
+| Type | Requirement |
+| --- | --- |
+| `.exe` | Select the file that displays the main window, not an updater |
+| `.bat` / `.cmd` | Windows `cmd.exe` |
+| `.ps1` | Windows PowerShell |
+| `.py` / `.pyw` | `python.exe` / `pythonw.exe` available through `PATH` |
+| `.ahk` | Install AutoHotkey and check that double-clicking the script runs it |
+| Store apps (MSIX/UWP) | Use **Installed apps** to select an app installed for the current Windows user |
 
-Scripts always use **Run in background**. Install the script dependencies first. If WinTray runs as administrator, use **Add Program** to select files.
+In **Installed apps**, search by name or path and filter by **Desktop apps** or **Store apps**. Check the apps, then select **Add selected apps**. The list contains launchable entries from the Windows app list. For other programs, select a file with **Add Program**, or drag it into the list.
+
+Store apps must support the arguments you enter. Windows sets their working directory.
+
+Scripts support **Start normally** and **Run in background**. Install the script dependencies first. If WinTray runs as administrator, use **Add Program** to select files.
 
 ## Launch modes
 
@@ -65,14 +69,16 @@ Select a mode in **Startup & schedule**.
 
 | Mode | Behavior |
 | --- | --- |
+| Start normally (default) | Keeps the program's own sign-in startup settings |
 | Close to tray | Closes the window after launch. Graphical programs must support closing to the tray, or they can exit |
-| Run in background | Hides the console window. Use for scripts and command-line tools. Graphical windows created by the program can still appear |
-| Launch at boot | Uses a scheduled task at sign-in. For `.exe` files only. Prefers the original startup arguments, privileges, and delay |
-| Start normally | Uses the program's original startup when available. Otherwise, WinTray starts it. The window stays unchanged |
+| Run in background | Hides the console window; hides Store app windows after launch. Graphical windows created by other programs can still appear |
+| Launch at boot | Uses a scheduled task at sign-in. Supports EXE files and Store apps. Desktop programs keep the original startup arguments, privileges, and delay when available |
 
-WinTray uses the arguments and working directory in **Program details** when it starts the program directly or creates a new sign-in task. Enter a working directory or choose a folder. Leave it blank to use the program folder. Relative paths start from that folder. An original startup entry supplies its own arguments and working directory.
+For desktop programs, WinTray uses the arguments and working directory in **Program details** when it starts the program directly or creates a new sign-in task. Enter a working directory or choose a folder. Leave it blank to use the program folder. Relative paths start from that folder. An original startup entry supplies its own arguments and working directory.
 
-Turn off **Start this program at sign-in** to stop normal startup scheduling. Original startup is kept or restored. **Launch Now** then uses normal mode. An enabled **Custom timing** schedule still starts the program.
+**Launch Now** uses the selected launch mode.
+
+Existing settings remain usable. On upgrade, paused programs without **Custom timing** switch to **Start normally**.
 
 ### Close to tray
 
@@ -82,6 +88,7 @@ Turn off **Start this program at sign-in** to stop normal startup scheduling. Or
 - Other programs continue to use the wait time. For programs that require login, set the wait longer than the login process or select **Start normally**.
 - If the program disables **Close** and does not respond to `Esc`, the window stays open. A window can briefly appear or take focus during startup.
 - For console programs such as `syncthing.exe` and `frpc.exe`, WinTray provides a tray icon. Left-click it to show or hide the window. Use its right-click menu to quit the program.
+- For Store apps, WinTray hides the window and provides a tray icon. Use **Show Window** to restore the app.
 
 ### Background windows
 
@@ -91,13 +98,15 @@ For `.pyw`, only a graphical window created by the script can be shown. Exit and
 
 ### Launch at boot
 
-WinTray reuses an available scheduled task at sign-in. The task keeps its original privileges and delay.
+For desktop programs, WinTray reuses an available scheduled task at sign-in. The task keeps its original privileges and delay.
 
 For a supported current-user registry entry or Startup-folder shortcut, WinTray temporarily disables the original entry to prevent duplicate launches. If no original entry exists, WinTray creates a task from the current settings. Windows requests confirmation when administrator privileges are required.
 
 New tasks start when WinTray and the desktop are ready. If a launch delay is set, new tasks use that delay.
 
-WinTray restores original startup when you disable this mode without a launch limit, remove the program, or disable WinTray startup. It also restores original startup when you turn off **Start this program at sign-in** without **Custom timing**.
+Store apps use the arguments in **Program details**. Their own startup settings stay unchanged.
+
+WinTray restores original startup when you disable this mode without a launch limit, remove the program, or disable WinTray startup.
 
 ### WeChat auto login
 
@@ -117,17 +126,17 @@ In **Startup & schedule**, turn on **Custom timing**.
 | Automatic exit (min) | 0–1440 minutes from process creation | 30; set to 0 to disable automatic exit |
 | Limit automatic launches | 1–1000 launches in the last 1–365 calendar days | Off; 1 launch in 1 day when enabled |
 
-Automatic startup requires **Start at sign-in**. **Custom timing** starts the program even when **Start this program at sign-in** is off. Turn off **Custom timing** to disable all three settings in the table.
+Automatic startup requires WinTray's **Start at sign-in** setting. **Custom timing** starts the program even in **Start normally** mode. Turn off **Custom timing** to disable all three settings in the table.
 
 Automatic exit ends the program and its child processes. It also applies to manually started programs. Save your work before the time limit.
 
 The launch limit applies only to automatic startup. **Launch Now** and manual launches are not limited. Days use the computer's time zone and include today. One day starts at today's midnight. Restarting does not clear the history.
 
-When the limit is enabled, WinTray takes over the `.exe` program's original startup and checks the count before launch. When the limit is disabled, WinTray restores startup for the current launch mode. Scripts can use the limit, but WinTray cannot take over a script's external startup.
+When the limit is enabled, WinTray takes over the `.exe` program's original startup and checks the count before launch. When the limit is disabled, WinTray restores startup for the current launch mode. Scripts can use the limit, but WinTray cannot take over a script's external startup. A Store app's own sign-in startup is not limited by WinTray.
 
 ## Tray collection
 
-Turn on **Tray** in the program list to move the program's existing tray icons into the WinTray menu. This requires Windows 11 and an `.exe` file.
+Turn on **Tray** in the program list to move the program's existing tray icons into the WinTray menu. This requires Windows 11 and supports EXE files and Store apps.
 
 - In the WinTray tray menu, click a program icon to open its window. Right-click its row to open the program's own tray menu.
 - Turn off **Tray**, or exit WinTray normally, to restore the original icons.
@@ -177,7 +186,7 @@ If original startup cannot be restored, follow the error message and retry. Keep
 ## Troubleshooting
 
 - **Main window is missing**: Left-click the WinTray tray icon, or run `WinTray.exe` again.
-- **Program is not closed to the tray**: Enable WinTray startup, the program's startup, and **Close to tray**. If the window appears slowly, increase **Window wait limit (seconds)**.
+- **Program is not closed to the tray**: Enable WinTray startup and select **Close to tray** for the program. If the window appears slowly, increase **Window wait limit (seconds)**.
 - **QQ cannot sign in or exits**: Increase **Wait before closing (sec)**, or use **Start normally**.
 - **Problem continues**: In **Settings → Troubleshooting**, select **Open Logs**.
 

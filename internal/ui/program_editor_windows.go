@@ -10,6 +10,7 @@ import (
 	"strings"
 	"wintray/internal/config"
 	"wintray/internal/i18n"
+	"wintray/internal/shellapp"
 	"wintray/internal/ui/kit"
 	"wintray/internal/ui/kit/icons"
 )
@@ -37,10 +38,7 @@ func (w *MainWindow) nativeEditor(c *native.Context, m i18n.Messages) {
 			native.Column(c).FillWidth().Gap(16).Children(func() {
 				if w.desktop.detailTab == 0 {
 					kit.Group(c, icons.Rocket, m.LaunchBehavior, "", func() {
-						if kit.Toggle(c, &entry.RunOnStartup, m.ManagedEnabled, "").MinHeight(40).Padding(6, 16).Changed() {
-							w.save()
-						}
-						native.Column(c).FillWidth().Disabled(!entry.RunOnStartup).Children(func() { w.nativeStartMode(c, m, entry) })
+						w.nativeStartMode(c, m, entry)
 					})
 					w.nativeSchedule(c, m, entry)
 				} else {
@@ -59,7 +57,14 @@ func (w *MainWindow) nativeEditor(c *native.Context, m i18n.Messages) {
 							if startModeOf(*entry) == startTask {
 								kit.Help(c, m.ManagedTaskArgsHint)
 							}
+							if shellapp.IsPath(entry.ExePath) {
+								kit.Help(c, m.ManagedPackagedArgsHint)
+							}
 						})
+						if shellapp.IsPath(entry.ExePath) {
+							kit.Help(c, m.ManagedPackagedDirectory)
+							return
+						}
 						nativeInputField(c, m.ManagedWorkingDirectory, m.ManagedWorkingDirectoryHint, true, func(handle *native.Handle) {
 							native.Row(c).FillWidth().Gap(8).Children(func() {
 								input := native.TextInput(c, &entry.WorkingDirectory).Grow(1).Shrink(1).MinWidth(0).Label(m.ManagedWorkingDirectory).Bind(handle)
@@ -195,9 +200,9 @@ func (w *MainWindow) nativeProgramActions(c *native.Context, m i18n.Messages, en
 func (w *MainWindow) nativeStartMode(c *native.Context, m i18n.Messages, entry *config.ManagedAppEntry) {
 	mode := startModeOf(*entry)
 	current := strconv.Itoa(int(mode))
-	choices := []kit.SelectOption{{Value: "0", Label: m.ManagedAutoHide}, {Value: "1", Label: m.ManagedLaunchHidden}, {Value: "2", Label: m.ManagedTaskLaunch}, {Value: "3", Label: m.ManagedLaunchOnly}}
+	choices := []kit.SelectOption{{Value: "0", Label: m.ManagedLaunchOnly}, {Value: "1", Label: m.ManagedAutoHide}, {Value: "2", Label: m.ManagedLaunchHidden}, {Value: "3", Label: m.ManagedTaskLaunch}}
 	if shouldDefaultLaunchHidden(entry.ExePath) {
-		choices = choices[1:2]
+		choices = []kit.SelectOption{choices[0], choices[2]}
 	}
 	kit.Stack(c, m.ManagedModeLabel, "", func() {
 		native.Row(c).FillWidth().Children(func() {
@@ -210,6 +215,9 @@ func (w *MainWindow) nativeStartMode(c *native.Context, m i18n.Messages, entry *
 			})
 		})
 	}).Padding(6, 16)
+	if mode == startNormal {
+		kit.Indented(c, func() { kit.Help(c, m.ManagedLaunchOnlyHint) })
+	}
 	if mode == startToTray && !config.WaitForLoginBeforeTray(*entry) {
 		kit.Indented(c, func() {
 			w.nativeNumberRow(c, m.ManagedCloseDelay, m.ManagedCloseDelayHint, &entry.TrayBehavior.CloseDelaySeconds, 0, 600)

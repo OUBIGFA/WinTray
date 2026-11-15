@@ -34,7 +34,7 @@ func TestDesktopFullEditorAndSingleLineRowsFit(t *testing.T) {
 					}
 					footer, _ := tt.Find(m.ExitApp)
 					x, y := float32(size[0]-100), float32(size[1]-150)
-					for _, label := range []string{m.ManagedLaunchNow, m.HostedShowWindow, m.ManagedEnabled, m.ManagedWeChatAutoLogin, m.ManagedCloseDelay, m.ManagedScheduleStart, m.ManagedScheduleExit, m.FrequencyDaysLabel, m.FrequencyRunsLabel} {
+					for _, label := range []string{m.ManagedLaunchNow, m.HostedShowWindow, m.ManagedModeLabel, m.ManagedWeChatAutoLogin, m.ManagedCloseDelay, m.ManagedScheduleStart, m.ManagedScheduleExit, m.FrequencyDaysLabel, m.FrequencyRunsLabel} {
 						r, ok := tt.Find(label)
 						if !ok || r.W == 0 || r.H == 0 || r.X < 0 || r.X+r.W > float32(size[0])+1 || r.Y+r.H > footer.Y {
 							t.Fatalf("clipped %s: %+v", label, r)

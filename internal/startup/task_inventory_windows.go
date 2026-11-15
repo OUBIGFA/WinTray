@@ -17,6 +17,7 @@ import (
 
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
+	"wintray/internal/shellapp"
 )
 
 // Task discovery is based on the action's executable and the interactive user,
@@ -105,6 +106,9 @@ func readTaskInventory(run func(...string) ([]byte, error)) ([]taskDefinition, e
 }
 
 func sameExecutablePath(a, b string) bool {
+	if shellapp.IsPath(a) || shellapp.IsPath(b) {
+		return shellapp.IsPath(a) && shellapp.IsPath(b) && strings.EqualFold(a, b)
+	}
 	a = strings.Trim(strings.TrimSpace(a), `"`)
 	b = strings.Trim(strings.TrimSpace(b), `"`)
 	if !filepath.IsAbs(a) || !filepath.IsAbs(b) {

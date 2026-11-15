@@ -56,7 +56,6 @@ func TestFormatManagedRules(t *testing.T) {
 		autoHide        string
 		autoHideDelayed string
 		hidden          string
-		paused          string
 	}{
 		{
 			language:        "zh-CN",
@@ -65,7 +64,6 @@ func TestFormatManagedRules(t *testing.T) {
 			autoHide:        "收进托盘",
 			autoHideDelayed: "收进托盘（等 30 秒）",
 			hidden:          "后台启动",
-			paused:          "原生行为",
 		},
 		{
 			language:        "en-US",
@@ -74,7 +72,6 @@ func TestFormatManagedRules(t *testing.T) {
 			autoHide:        "Close to tray",
 			autoHideDelayed: "Close to tray (after 30 s)",
 			hidden:          "Run in background",
-			paused:          "Native behavior",
 		},
 		{
 			language:        "unknown",
@@ -83,7 +80,6 @@ func TestFormatManagedRules(t *testing.T) {
 			autoHide:        "收进托盘",
 			autoHideDelayed: "收进托盘（等 30 秒）",
 			hidden:          "后台启动",
-			paused:          "原生行为",
 		},
 	}
 
@@ -104,14 +100,14 @@ func TestFormatManagedRules(t *testing.T) {
 				{name: "close_window_delayed", runOnStartup: true, autoHide: true, closeDelay: 30, want: lang.autoHideDelayed},
 				{name: "delay_without_close_window", runOnStartup: true, closeDelay: 30, want: lang.launchOnly},
 				{name: "hidden_overrides_delayed_close", runOnStartup: true, launchHidden: true, autoHide: true, closeDelay: 30, want: lang.hidden},
-				{name: "paused_overrides_delayed_close", autoHide: true, closeDelay: 30, want: lang.paused},
+				{name: "delayed_close_without_legacy_switch", autoHide: true, closeDelay: 30, want: lang.autoHideDelayed},
 				{name: "hidden", runOnStartup: true, launchHidden: true, want: lang.hidden},
 				{name: "hidden_overrides_close", runOnStartup: true, launchHidden: true, autoHide: true, want: lang.hidden},
-				{name: "paused", want: lang.paused},
-				{name: "paused_overrides_close", autoHide: true, want: lang.paused},
-				{name: "paused_overrides_hidden", launchHidden: true, want: lang.paused},
-				{name: "paused_overrides_task", viaTask: true, want: lang.paused},
-				{name: "paused_overrides_both", launchHidden: true, autoHide: true, want: lang.paused},
+				{name: "normal_default", want: lang.launchOnly},
+				{name: "close_without_legacy_switch", autoHide: true, want: lang.autoHide},
+				{name: "hidden_without_legacy_switch", launchHidden: true, want: lang.hidden},
+				{name: "task_without_legacy_switch", viaTask: true, want: lang.taskLaunch},
+				{name: "hidden_overrides_close_without_legacy_switch", launchHidden: true, autoHide: true, want: lang.hidden},
 			}
 			for _, exePath := range []string{"test.exe", "test.bat"} {
 				for _, state := range states {

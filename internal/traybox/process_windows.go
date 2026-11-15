@@ -11,6 +11,7 @@ import (
 
 	"github.com/lxn/win"
 	"golang.org/x/sys/windows"
+	"wintray/internal/shellapp"
 )
 
 // hwndMessage is HWND_MESSAGE: many tray icons belong to message-only windows.
@@ -23,6 +24,10 @@ func processesByPath(wanted map[string]bool) map[uint32]string {
 		return nil
 	}
 	out := make(map[uint32]string)
+	includePackaged := false
+	for path := range wanted {
+		includePackaged = includePackaged || shellapp.IsPath(path)
+	}
 	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
 	if err != nil {
 		return out
@@ -46,6 +51,10 @@ func processesByPath(wanted map[string]bool) map[uint32]string {
 		}
 		if wanted[path] {
 			out[entry.ProcessID] = path
+		} else if includePackaged {
+			if applicationPath := strings.ToLower(shellapp.ProcessPath(entry.ProcessID)); wanted[applicationPath] {
+				out[entry.ProcessID] = applicationPath
+			}
 		}
 	}
 	return out
@@ -54,6 +63,13 @@ func processesByPath(wanted map[string]bool) map[uint32]string {
 func processPath(pid uint32) string {
 	buf := make([]uint16, windows.MAX_LONG_PATH)
 	return canonicalIconPath(processImagePath(pid, buf))
+}
+
+func processMatchesPath(pid uint32, path string) bool {
+	if shellapp.IsPath(path) {
+		return strings.EqualFold(shellapp.ProcessPath(pid), path)
+	}
+	return strings.EqualFold(processPath(pid), path)
 }
 
 // processImagePath leaves canonicalization to the caller so a snapshot can
@@ -74,6 +90,9 @@ func processImagePath(pid uint32, buf []uint16) string {
 func canonicalIconPath(path string) string {
 	if path == "" {
 		return ""
+	}
+	if shellapp.IsPath(path) {
+		return strings.ToLower(shellapp.PathPrefix + shellapp.ID(path))
 	}
 	// Resolve the opened file, including directory junctions. EvalSymlinks
 	// does not follow mount-point reparse tags on current Go versions, so a

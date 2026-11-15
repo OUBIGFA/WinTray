@@ -13,6 +13,7 @@ import (
 
 	"golang.org/x/sys/windows"
 	"wintray/internal/config"
+	"wintray/internal/shellapp"
 	"wintray/internal/stringutil"
 )
 
@@ -69,7 +70,7 @@ func managedStartOptions(entry config.ManagedAppEntry) startOptions {
 	if config.StartupFrequencyEnabled(entry) {
 		opts.limitFrequency = true
 		opts.externalOwned = false
-		opts.launchViaTask = strings.EqualFold(filepath.Ext(entry.ExePath), ".exe")
+		opts.launchViaTask = shellapp.IsPath(entry.ExePath) || strings.EqualFold(filepath.Ext(entry.ExePath), ".exe")
 		opts.respectExternalStartup = !opts.launchViaTask
 	}
 	return opts
@@ -84,11 +85,6 @@ func (s *Service) StartAndManage(ctx context.Context, entry config.ManagedAppEnt
 // handling is best effort here: the launch itself already succeeded, so it must
 // not be reported as a failure.
 func (s *Service) StartNow(ctx context.Context, entry config.ManagedAppEntry, retrySeconds int) Result {
-	// Disabled startup settings remain saved, but must not affect a manual
-	// launch while their master switch (and their editor) is off.
-	if !entry.RunOnStartup {
-		return s.start(ctx, entry, retrySeconds, startOptions{windowOptional: true})
-	}
 	if entry.LaunchViaLogonTask {
 		return s.start(ctx, entry, retrySeconds, startOptions{windowOptional: true, launchViaTask: true, autoLogin: config.WeChatAutoLoginEnabled(entry)})
 	}
@@ -134,13 +130,19 @@ func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retry
 	if entry.ExePath == "" {
 		return Result{AppName: entry.Name, Managed: false, Code: ResultEmptyExePath, Message: "empty exe path"}
 	}
-	if _, err := os.Stat(entry.ExePath); err != nil {
-		s.logger.Warn(fmt.Sprintf("skip invalid exe path: %s", entry.ExePath))
-		return Result{AppName: entry.Name, Managed: false, Code: ResultInvalidExePath, Message: "invalid exe path"}
+	if !shellapp.IsPath(entry.ExePath) {
+		if _, err := os.Stat(entry.ExePath); err != nil {
+			s.logger.Warn(fmt.Sprintf("skip invalid exe path: %s", entry.ExePath))
+			return Result{AppName: entry.Name, Managed: false, Code: ResultInvalidExePath, Message: "invalid exe path"}
+		}
 	}
 
 	expectedName := stringutil.TrimExt(filepath.Base(entry.ExePath))
 	expectedPath := normalizePath(entry.ExePath)
+	if shellapp.IsPath(entry.ExePath) && opts.hideProcessWindow {
+		opts.hideProcessWindow = false
+		opts.manageWindow = true
+	}
 	// Keep the native console for both background launch and tray hosting.
 	// A console close would terminate the program; a console-free launch
 	// would make both its output and the requested Show Window unavailable.
@@ -167,7 +169,7 @@ func (s *Service) start(ctx context.Context, entry config.ManagedAppEntry, retry
 		if externalWait <= 0 {
 			externalWait = s.externalStartupWait
 		}
-	} else if !running && opts.respectExternalStartup {
+	} else if !running && opts.respectExternalStartup && !shellapp.IsPath(entry.ExePath) {
 		source, err := s.externalStartupLookup(entry.ExePath)
 		if err != nil {
 			s.logger.Error(fmt.Sprintf("startup check failed: %s err=%v (not launching to avoid a duplicate)", entry.Name, err))
@@ -724,7 +726,7 @@ func (s *Service) tryManageAndVerify(ctx context.Context, window ManagedWindowIn
 	// Console host windows (conhost / Windows Terminal) are never closed:
 	// closing them terminates the hosted program, while the user asked for the
 	// program to keep running out of sight. Hide the host window instead.
-	if isConsoleHostWindow(window) {
+	if isConsoleHostWindow(window) || window.ApplicationID != "" || shellapp.IsPath(window.ProcessPath) {
 		return hidden, s.applyAndVerify(ctx, window, score, "hide", s.manager.HideWindow)
 	}
 
