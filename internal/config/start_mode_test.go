@@ -1,15 +1,50 @@
 package config
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestNormalStartupLeavesOriginalStartupAlone(t *testing.T) {
-	entry := ManagedAppEntry{RunOnStartup: true}
-	if ShouldLaunchViaWinTray(entry) {
-		t.Fatal("normal startup must not launch an app automatically")
+	for _, legacyStartup := range []bool{false, true} {
+		t.Run(fmt.Sprintf("legacy_%t", legacyStartup), func(t *testing.T) {
+			entry := ManagedAppEntry{
+				ID: "normal", ExePath: "Weixin.exe", RunOnStartup: legacyStartup, WeChatAutoLogin: true,
+				Schedule: Schedule{StartDelayMinutes: 5, AutoExitMinutes: 30, FrequencyEnabled: true, FrequencyDays: 7, FrequencyRuns: 2},
+			}
+			if ShouldLaunchViaWinTray(entry) || StartupFrequencyEnabled(entry) || ScheduledStartDelaySeconds(entry) != 0 || ScheduledRunLimit(entry) != 0 {
+				t.Errorf("normal startup without a schedule still enables automatic operations: %+v", entry)
+			}
+			settings := Settings{RunAtLogon: true, ManagedApps: []ManagedAppEntry{entry}}
+			if tasks := LogonTaskApps(settings); len(tasks) != 0 {
+				t.Errorf("normal startup without a schedule still requests takeover tasks: %+v", tasks)
+			}
+		})
 	}
-	entry.Schedule.Enabled = true
-	if !ShouldLaunchViaWinTray(entry) {
-		t.Fatal("an explicit custom schedule must remain independent")
+}
+
+func TestNormalStartupCustomScheduleRemainsActive(t *testing.T) {
+	for _, legacyStartup := range []bool{false, true} {
+		for _, limited := range []bool{false, true} {
+			t.Run(fmt.Sprintf("legacy_%t/limited_%t", legacyStartup, limited), func(t *testing.T) {
+				entry := ManagedAppEntry{
+					ID: "normal", ExePath: "scheduled.exe", RunOnStartup: legacyStartup,
+					Schedule: Schedule{Enabled: true, StartDelayMinutes: 5, AutoExitMinutes: 30, FrequencyEnabled: limited, FrequencyDays: 7, FrequencyRuns: 2},
+				}
+				if !ShouldLaunchViaWinTray(entry) || StartupFrequencyEnabled(entry) != limited || ScheduledStartDelaySeconds(entry) != 300 || ScheduledRunLimit(entry) != 30 {
+					t.Errorf("normal startup disabled the explicit schedule: %+v", entry)
+				}
+				settings := Settings{RunAtLogon: true, ManagedApps: []ManagedAppEntry{entry}}
+				tasks := LogonTaskApps(settings)
+				if limited {
+					if len(tasks) != 1 || tasks[0].Entry.ID != entry.ID || tasks[0].DelaySeconds != 300 {
+						t.Errorf("scheduled frequency control lost its task: %+v", tasks)
+					}
+				} else if len(tasks) != 0 {
+					t.Errorf("custom timing alone requested startup takeover: %+v", tasks)
+				}
+			})
+		}
 	}
 }
 

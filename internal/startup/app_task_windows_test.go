@@ -219,7 +219,7 @@ func TestAppTasksSyncReconcilesWantedSet(t *testing.T) {
 
 	fake := newFakeSchtasks()
 	tasks := testAppTasks(t, fake)
-	_, nativeRun, _ := withRunSource(t, tasks)
+	source, nativeRun, _ := withRunSource(t, tasks)
 	for name, command := range map[string]string{"First": `"C:\Apps\One.exe" --native`, "Second": `"C:\Apps\Two.exe" --native`} {
 		if err := nativeRun.SetStringValue(name, command); err != nil {
 			t.Fatal(err)
@@ -275,6 +275,20 @@ func TestAppTasksSyncReconcilesWantedSet(t *testing.T) {
 	}
 	if got := fake.callNames("/Create"); len(got) != 1 || got[0] != tasks.namePrefix+"2" {
 		t.Fatalf("scheduled start created %v, want only the second task's delay changed", got)
+	}
+
+	settings.ManagedApps[0].LaunchViaLogonTask = false
+	if err := tasks.Sync(settings, false); err != nil {
+		t.Fatalf("switch to normal startup: %v", err)
+	}
+	if _, exists := fake.tasks[tasks.namePrefix+"1"]; exists {
+		t.Fatal("normal startup without a schedule kept its takeover task")
+	}
+	if enabled, err := runEntryApproved(source.root, source.approvalPath, "First"); err != nil || !enabled {
+		t.Fatalf("normal startup did not restore the original startup: enabled=%t err=%v", enabled, err)
+	}
+	if command, _, err := nativeRun.GetStringValue("First"); err != nil || command != "\"C:\\Apps\\One.exe\" --native" {
+		t.Fatalf("normal startup changed the original startup command: %q err=%v", command, err)
 	}
 
 	if err := tasks.Sync(config.Settings{RunAtLogon: false, StartupIntervalSeconds: 3}, false); err != nil {

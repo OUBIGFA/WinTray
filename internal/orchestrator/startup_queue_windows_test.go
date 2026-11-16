@@ -101,6 +101,39 @@ func TestStartupQueueSkipsNormalInvalidAndExistingWithoutConsumingInterval(t *te
 	}
 }
 
+func TestStartupQueueNormalModeOnlyRunsWithCustomSchedule(t *testing.T) {
+	previousLogon := logonTimeLookup
+	logonTimeLookup = func() (time.Time, error) { return time.Now().Add(-2 * time.Minute), nil }
+	t.Cleanup(func() { logonTimeLookup = previousLogon })
+	for _, testCase := range []struct {
+		name      string
+		scheduled bool
+	}{
+		{name: "without schedule"},
+		{name: "with schedule", scheduled: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			entry := startupTestEntry(t)
+			entry.Schedule = config.Schedule{Enabled: testCase.scheduled, StartDelayMinutes: 1}
+			settings := config.DefaultSettings()
+			settings.ManagedApps = []config.ManagedAppEntry{entry}
+			ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+			defer cancel()
+			results := queueTestService().StartManagedApps(ctx, settings, nil)
+			if !testCase.scheduled {
+				if len(results) != 0 || len(startupTestPIDs(entry.ExePath)) != 0 {
+					t.Fatalf("normal mode without a schedule launched a program: %+v", results)
+				}
+				return
+			}
+			if len(results) != 1 || results[0].Code != ResultStartedOnly {
+				t.Fatalf("normal mode did not execute its custom schedule: %+v", results)
+			}
+			queueProcessStart(t, entry)
+		})
+	}
+}
+
 func TestStartupQueueWindowAndExternalWaitsDoNotBlockNextLaunchOrCallback(t *testing.T) {
 	external := queueTestEntry(t, "external")
 	existing := queueTestEntry(t, "waiting for login")
