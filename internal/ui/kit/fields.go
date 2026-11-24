@@ -40,7 +40,7 @@ func Select(c *ui.Context, selected *string, options []SelectOption) (changed bo
 			}
 			ui.Text(c, current.Label).SingleLine().MinWidth(0)
 		})
-		ui.Icon(c, icons.ChevronDown).FontSize(14).TextColor(t.TextMuted).Shrink(0)
+		ui.Icon(c, icons.AltArrowDown).FontSize(14).TextColor(t.TextMuted).Shrink(0)
 	})
 	sel.Popup(func(panel ui.Element) {
 		panel.Margin(4, 0, 0, 0).Padding(4).Radius(PanelRadius).Background(p.Panel).Border(1, t.Border).

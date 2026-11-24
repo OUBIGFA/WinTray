@@ -162,7 +162,7 @@ func (w *MainWindow) nativeProgramActions(c *native.Context, m i18n.Messages, en
 	}
 	actionLabel, actionIcon, actionHint := m.ManagedLaunchNow, icons.Play, m.ManagedLaunchNowHint
 	if running {
-		actionLabel, actionIcon, actionHint = m.ManagedStopProgram, icons.Square, m.ManagedStopProgramHint
+		actionLabel, actionIcon, actionHint = m.ManagedStopProgram, icons.Stop, m.ManagedStopProgramHint
 	}
 	if busy {
 		actionLabel = m.ManagedLaunchNowBusy
@@ -187,7 +187,7 @@ func (w *MainWindow) nativeProgramActions(c *native.Context, m i18n.Messages, en
 				w.callbacks.OnLaunchNow(*entry)
 			}
 		}
-		if nativeAction(c, windowLabel, icons.PanelTop).Disabled(busy || windowBusy).Tooltip(m.ManagedWindowHint).Clicked() && w.callbacks.OnSetProgramWindowVisible != nil {
+		if nativeAction(c, windowLabel, icons.Eye).Disabled(busy || windowBusy).Tooltip(m.ManagedWindowHint).Clicked() && w.callbacks.OnSetProgramWindowVisible != nil {
 			if w.programWindowBusy == nil {
 				w.programWindowBusy = make(map[string]bool)
 			}
@@ -196,7 +196,7 @@ func (w *MainWindow) nativeProgramActions(c *native.Context, m i18n.Messages, en
 		}
 		// Keep confirmation bound to the selected ID even if the list reorders.
 		id := entry.ID
-		kit.Button(c, m.ManagedColumnDelete, icons.Trash2, false).Label(m.ManagedColumnDelete + " " + entry.Name).Menu(func(menu *native.Menu) {
+		kit.Button(c, m.ManagedColumnDelete, icons.TrashBin, false).Label(m.ManagedColumnDelete + " " + entry.Name).Menu(func(menu *native.Menu) {
 			menu.Item(fmt.Sprintf(m.RemoveConfirmPrompt, strings.ReplaceAll(entry.Name, "&", "&&"))).Disabled(true)
 			menu.Separator()
 			if menu.Item(m.RemoveConfirmLabel).Chosen() {
@@ -246,7 +246,7 @@ func (w *MainWindow) nativeStartMode(c *native.Context, m i18n.Messages, entry *
 
 func (w *MainWindow) nativeSchedule(c *native.Context, m i18n.Messages, entry *config.ManagedAppEntry) {
 	plan := &entry.Schedule
-	kit.Group(c, icons.CalendarClock, m.ScheduleTitle, "", func() {
+	kit.Group(c, icons.Calendar, m.ScheduleTitle, "", func() {
 		if kit.Toggle(c, &plan.Enabled, m.ManagedSchedule, "").MinHeight(40).Padding(6, 16).Changed() {
 			w.save()
 		}

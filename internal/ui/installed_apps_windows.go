@@ -138,7 +138,7 @@ func (w *MainWindow) nativeInstalledApps(c *native.Context, m i18n.Messages) {
 								if icon := picker.icons[key]; icon != nil {
 									native.Image(c, icon).Size(32, 32).Shrink(0)
 								} else {
-									native.Icon(c, icons.AppWindow).Size(32, 32).Shrink(0).TextColor(c.Theme().TextMuted)
+									native.Icon(c, icons.WindowFrame).Size(32, 32).Shrink(0).TextColor(c.Theme().TextMuted)
 								}
 								native.Text(c, app.Name).SingleLine().Ellipsis("…").Grow(1).Shrink(1).MinWidth(0)
 							})
@@ -163,7 +163,7 @@ func (w *MainWindow) nativeInstalledApps(c *native.Context, m i18n.Messages) {
 				if kit.Button(c, m.InstalledAppsCancel, nil, false).Clicked() {
 					picker.open = false
 				}
-				if nativePrimaryAction(c, m.InstalledAppsAdd, icons.Plus).Disabled(picker.loading || picker.failed || len(picker.selected) == 0).Clicked() {
+				if nativePrimaryAction(c, m.InstalledAppsAdd, icons.Add).Disabled(picker.loading || picker.failed || len(picker.selected) == 0).Clicked() {
 					var applications []shellapp.Application
 					for _, app := range picker.apps {
 						if picker.selected[app.Key()] {

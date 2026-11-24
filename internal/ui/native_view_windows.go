@@ -101,7 +101,7 @@ func (w *MainWindow) nativeHeader(c *native.Context, m i18n.Messages) {
 		native.Spacer(c)
 		native.Toolbar(c, func() {
 			if native.Button(c, "").Padding(8).Label(m.LanguageLabel).Tooltip(m.SwitchLanguageHint).Children(func() {
-				native.Icon(c, icons.Languages).Size(20, 20)
+				native.Icon(c, icons.Translate).Size(20, 20)
 			}).Clicked() {
 				w.nativeSwitchLanguage()
 			}
@@ -138,16 +138,16 @@ func (w *MainWindow) resetNativeList(first int) {
 func (w *MainWindow) nativePrograms(c *native.Context, m i18n.Messages) ([]string, []string) {
 	var dropped, replacement []string
 	native.Column(c).Grow(1).MinHeight(0).Padding(0, 24, 16, 24).Gap(16).Children(func() {
-		kit.Tabs(c, &w.desktop.pageTab, []kit.Tab{{Label: m.ProgramsTab, Icon: icons.List}, {Label: m.SettingsTab, Icon: icons.Settings2}}, func(apply func()) { w.commitNativeEdits(); apply() })
+		kit.Tabs(c, &w.desktop.pageTab, []kit.Tab{{Label: m.ProgramsTab, Icon: icons.List}, {Label: m.SettingsTab, Icon: icons.Settings}}, func(apply func()) { w.commitNativeEdits(); apply() })
 		if w.desktop.pageTab == 1 {
 			w.nativeSettings(c, m)
 			return
 		}
 		native.Row(c).Gap(16).Children(func() {
-			if nativePrimaryAction(c, m.AddProgram, icons.Plus).Clicked() {
+			if nativePrimaryAction(c, m.AddProgram, icons.Add).Clicked() {
 				w.nativeChooseProgram(false)
 			}
-			if nativeAction(c, m.AddInstalledApps, icons.AppWindow).Clicked() {
+			if nativeAction(c, m.AddInstalledApps, icons.WindowFrame).Clicked() {
 				w.nativeOpenInstalledApps()
 			}
 			if !w.settings.RunAtLogon {
@@ -267,7 +267,7 @@ func (w *MainWindow) nativeFooter(c *native.Context, m i18n.Messages) {
 			}
 		}).Padding(0)
 		native.Spacer(c)
-		if nativeAction(c, m.RunSilently, icons.PanelTopClose).Clicked() && w.callbacks.OnRunSilently != nil {
+		if nativeAction(c, m.RunSilently, icons.Minimize).Clicked() && w.callbacks.OnRunSilently != nil {
 			w.commitNativeEdits()
 			w.callbacks.OnRunSilently()
 		}

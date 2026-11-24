@@ -1,5 +1,5 @@
-// Package icons embeds the Lucide assets used by the program manager.
-// The original SVG files are unchanged; see ../../icons/LICENSE.lucide.
+// Package icons embeds the Solar Linear assets used by the program manager.
+// Only the stroke color is set to currentColor; see ../../icons/LICENSE.solar.
 package icons
 
 import (
@@ -7,11 +7,11 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-//go:embed lucide/*.svg
+//go:embed solar/*.svg
 var files embed.FS
 
 func load(name string) *ui.SVG {
-	data, err := files.ReadFile("lucide/" + name + ".svg")
+	data, err := files.ReadFile("solar/" + name + ".svg")
 	if err != nil {
 		panic(err)
 	}
@@ -19,23 +19,21 @@ func load(name string) *ui.SVG {
 }
 
 var (
-	AppWindow     = load("app-window")
-	Plus          = load("plus")
-	FolderOpen    = load("folder-open")
-	Trash2        = load("trash-2")
-	Play          = load("play")
-	Square        = load("square")
-	PanelTop      = load("panel-top")
-	PanelTopClose = load("panel-top-close")
-	List          = load("list")
-	Power         = load("power")
-	Rocket        = load("rocket")
-	CalendarClock = load("calendar-clock")
-	Timer         = load("timer")
-	Languages     = load("languages")
-	Settings2     = load("settings-2")
-	ChevronDown   = load("chevron-down")
-	Check         = load("check")
-	LoaderCircle  = load("loader-circle")
-	GripVertical  = load("grip-vertical")
+	WindowFrame  = load("window-frame")
+	Add          = load("add")
+	FolderOpen   = load("folder-open")
+	TrashBin     = load("trash-bin-trash")
+	Play         = load("play")
+	Stop         = load("stop")
+	Eye          = load("eye")
+	Minimize     = load("minimize-square-minimalistic")
+	List         = load("list")
+	Rocket       = load("rocket")
+	Calendar     = load("calendar")
+	Stopwatch    = load("stopwatch")
+	Translate    = load("translate")
+	Settings     = load("settings")
+	AltArrowDown = load("alt-arrow-down")
+	Check        = load("check")
+	Loader       = load("loader")
 )

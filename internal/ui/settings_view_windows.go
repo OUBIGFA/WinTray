@@ -26,11 +26,11 @@ func (w *MainWindow) nativeSettings(c *native.Context, m i18n.Messages) {
 					w.save()
 				}
 			})
-			kit.Group(c, icons.Timer, m.SettingsTimingTitle, "", func() {
+			kit.Group(c, icons.Stopwatch, m.SettingsTimingTitle, "", func() {
 				w.nativeNumberRow(c, m.StartupInterval, m.StartupIntervalHint, &w.settings.StartupIntervalSeconds, 0, 120)
 				w.nativeNumberRow(c, m.RetrySeconds, m.RetrySecondsHint, &w.settings.CloseWindowRetrySeconds, 0, 120)
 			})
-			kit.Group(c, icons.Settings2, m.SettingsTroubleshootTitle, "", func() {
+			kit.Group(c, icons.Settings, m.SettingsTroubleshootTitle, "", func() {
 				for _, action := range []struct {
 					title, hint, label string
 					run                func()

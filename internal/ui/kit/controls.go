@@ -107,6 +107,6 @@ func decorate(c *ui.Context, b ui.Element, label string, icon *ui.SVG, busy bool
 
 // Loader is the small turning circle of work in progress.
 func Loader(c *ui.Context) ui.Element {
-	spin := ui.Icon(c, icons.LoaderCircle).FontSize(16)
+	spin := ui.Icon(c, icons.Loader).FontSize(16)
 	return spin.Rotate(spin.Loop("spin", time.Second, ui.Linear) * 360)
 }

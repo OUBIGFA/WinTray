@@ -52,7 +52,7 @@ func (w *MainWindow) nativeProgramTable(c *native.Context, m i18n.Messages) []st
 					if icon := w.desktop.icons[app.ExePath]; icon != nil {
 						native.Image(c, icon).Size(32, 32)
 					} else {
-						native.Icon(c, icons.AppWindow).Size(32, 32).TextColor(theme.TextMuted)
+						native.Icon(c, icons.WindowFrame).Size(32, 32).TextColor(theme.TextMuted)
 					}
 				})
 				native.Text(c, app.Name).SingleLine().Ellipsis("…").Grow(1).Shrink(1).MinWidth(48).Tooltip(app.Name)
@@ -106,7 +106,7 @@ func nativeOrderSelect(c *native.Context, value *string, options []string, label
 	trigger.Background(surface).Children(func() {
 		native.Box(c).Size(12, 12).Shrink(0)
 		native.Text(c, *value).SingleLine().Grow(1).TextAlign(native.Center)
-		native.Icon(c, icons.ChevronDown).Size(12, 12).Shrink(0).TextColor(theme.TextMuted)
+		native.Icon(c, icons.AltArrowDown).Size(12, 12).Shrink(0).TextColor(theme.TextMuted)
 	})
 	visibleOption := native.Local(trigger, "visible-order", func() string { return "" })
 	if !selectBox.Open() {
